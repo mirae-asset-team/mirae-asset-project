@@ -1,0 +1,47 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Generated model artifacts
+*.ckpt
+*.onnx
+*.safetensors
+*.pt
+*.pth
+
+# Local logs and temporary files
+logs/
+tmp/
+*.log
+*.verification-failure.png
+
+# Official contest dataset (large local artifacts)
+data/public/official_dataset/raw/
+data/public/official_dataset/source_archives/
+
+# Rebuildable local data products
+data/derived/*.sqlite
+data/derived/*.sqlite-*
+data/derived/*.sqlite.*
+
+# Downloaded source archives
+references/official/source_archives/

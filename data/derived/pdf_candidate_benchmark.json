@@ -1,0 +1,58 @@
+{
+  "summary": {
+    "pdf_count": 3,
+    "sampled_pages_per_pdf": 5,
+    "pymupdf_total_seconds": 0.12838580000970978,
+    "pdfplumber_total_seconds": 4.51826269999583,
+    "pdfplumber_over_pymupdf_ratio": 35.19285387990039,
+    "decision": "pymupdf_for_page_block_baseline_pdfplumber_for_table_audit",
+    "scope_warning": "속도 비교이며 표 정확도 비교가 아니다. PDF 표는 수작업 gold로 별도 평가해야 한다."
+  },
+  "samples": [
+    {
+      "path": "raw/periodic/KB금융/20260619000667_annual_2025_12/20260619000667.pdf",
+      "page_count": 1085,
+      "sample_pages_1_based": [
+        1,
+        272,
+        543,
+        814,
+        1085
+      ],
+      "pymupdf_seconds": 0.05846140000357991,
+      "pymupdf_block_count": 1445,
+      "pdfplumber_seconds": 2.2126514999981737,
+      "pdfplumber_text_chars": 14058
+    },
+    {
+      "path": "raw/periodic/한화에어로스페이스/20260513000860_quarter_2026_03/20260513000860.pdf",
+      "page_count": 447,
+      "sample_pages_1_based": [
+        1,
+        112,
+        224,
+        336,
+        447
+      ],
+      "pymupdf_seconds": 0.03920790000120178,
+      "pymupdf_block_count": 349,
+      "pdfplumber_seconds": 1.3474446999971406,
+      "pdfplumber_text_chars": 10883
+    },
+    {
+      "path": "raw/periodic/한화오션/20240514001522_quarter_2024_03/20240514001522.pdf",
+      "page_count": 252,
+      "sample_pages_1_based": [
+        1,
+        64,
+        127,
+        190,
+        252
+      ],
+      "pymupdf_seconds": 0.030716500004928093,
+      "pymupdf_block_count": 284,
+      "pdfplumber_seconds": 0.958166500000516,
+      "pdfplumber_text_chars": 10291
+    }
+  ]
+}

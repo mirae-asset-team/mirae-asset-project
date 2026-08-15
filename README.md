@@ -1,1 +1,72 @@
-# mirae-asset-project
+# 미래에셋 AI 공모전 — 공시 Agent
+
+주최 측이 제공한 공시 코퍼스를 검색·해석하고, 사용자의 주식 관련 질문에 근거 공시를 붙여 답하는 HyperCLOVA X 기반 질의응답 시스템 프로젝트입니다.
+
+팀 저장소: [ksm12030-sudo/mirae-asset-project](https://github.com/ksm12030-sudo/mirae-asset-project)
+
+## 공식 제약
+
+- 평가 답변의 LLM은 HyperCLOVA X만 사용합니다.
+- 답변 근거는 주최 측 제공 코퍼스로 한정합니다.
+- OpenDART 등 외부 API를 실시간 답변 근거로 호출하지 않습니다.
+- 근거가 없거나 범위를 벗어난 질문에는 한계를 명시합니다.
+
+## 디렉터리
+
+```text
+.
+├─ data/
+│  ├─ public/       # 주최 측 공식 코퍼스와 공공 원천 데이터
+│  ├─ external/     # 알고리즘 연구용 외부 자료; 답변 인덱스에서 제외
+│  └─ derived/      # 정제·통합·라벨링·생성한 프로젝트 제작 데이터
+├─ references/
+│  ├─ official/     # 공모전·네이버클라우드 공식 자료
+│  ├─ research/     # LLM·공시 데이터 연구 문서
+│  └─ links.md      # 데이터/API/참고 자료 링크 모음
+├─ notebooks/       # 데이터 탐색과 모델 실험
+└─ src/             # 수집, 전처리, 검색/RAG, LLM 애플리케이션 코드
+```
+
+## 현재 자료
+
+- [공식 데이터셋 안내](data/public/official_dataset/README.md)
+- [공식 문서 목록](references/official/README.md)
+- [LLM·RAG 설계 원리](references/research/llm_system_principles.md)
+- [공시 데이터 구조와 해석 원리](references/research/disclosure_data_principles.md)
+- [공부·개발 착수 로드맵](references/research/getting_started_roadmap.md)
+- [데이터·DB 1~3단계 구축 및 기술 선택 보고서](references/research/db_foundation_implementation_report.md)
+- [팀 공유용 데이터·DB 구축 현황과 다음 작업](references/research/team_handoff_data_db.md)
+
+## 데이터 관리 원칙
+
+- `public`과 `external`에는 내려받은 원본을 변경하지 않고 보관합니다.
+- 원본을 정제하거나 결합한 결과는 `derived`에 저장합니다.
+- 각 자료에는 출처 URL, 수집일, 대상 기간, 이용 조건을 함께 기록합니다.
+- API 키와 개인정보, 대용량 모델 파일은 Git에 커밋하지 않습니다.
+
+## EDA 이후 1~3단계 실행
+
+데이터 계약, 전수 구조화 적재, **구조 게이트**는 `src/disclosure_db` 파이프라인으로 재실행합니다.
+구조 게이트 통과는 검색 관련성이나 답변 정확도를 의미하지 않습니다.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path 'src').Path
+python -m unittest discover -s tests -v
+python -m disclosure_db.cli build `
+  --corpus 'data/public/official_dataset/raw/corpus' `
+  --output 'data/derived/disclosure_corpus.sqlite'
+python -m disclosure_db.cli query `
+  --database 'data/derived/disclosure_corpus.sqlite' `
+  --company '005930' `
+  --text '계약금액'
+```
+
+현재 38GB 로컬 SQLite는 전수 적재와 무결성 검증을 마친 **구조 SSOT**입니다. 용량과 원천자료
+재배포 제약 때문에 DB 파일과 공식 원문은 Git에 올리지 않고, 재현 코드·스키마·검증 결과·SHA-256
+인벤토리만 공유합니다. PostgreSQL은 아직 SQLite와 동등하지 않은 운영 후보 DDL 초안이며 이관
+코드도 없습니다. 사람 검수를 마친 Gold QA 23건은 모두 `human_verified/approved`이며 Gold 배포
+게이트를 통과했습니다. 다음 단계는 이 Gold를 기준으로 검색 관련성, 별도 `financial_fact` 의미 층,
+정정 계보와 FTS 계약을 평가한 뒤 PostgreSQL/pgvector와 OpenSearch 후보를 비교하는 것입니다.
+
+`query` 명령은 기본적으로 `unresolved`·`missing_original`·폐기 version을 제외합니다. 감사 목적으로
+원문 후보 전체가 필요할 때만 `--include-unsafe`를 명시합니다.

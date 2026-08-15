@@ -1,0 +1,124 @@
+{
+  "database": "C:\\Users\\ddolm\\orca\\projects\\미래에셋AI공모전\\data\\derived\\disclosure_corpus.sqlite",
+  "database_bytes": 38481072128,
+  "integrity_check": "ok",
+  "foreign_key_violations": 0,
+  "counts": {
+    "filing": 4204,
+    "source_document": 4622,
+    "parser_error": 281502,
+    "fragment": 8437771,
+    "table_record": 1556755,
+    "table_cell": 36697165,
+    "fact": 155552,
+    "fact_evidence": 517013,
+    "filing_event": 3748,
+    "filing_version": 4204,
+    "quality_issue": 4178,
+    "fragment_fts": 8437771
+  },
+  "filings_by_group": {
+    "exchange": 1469,
+    "holding": 1083,
+    "major": 598,
+    "periodic": 1054
+  },
+  "parse_status": {
+    "partial": 2,
+    "success": 4620
+  },
+  "detected_formats": {
+    "dart_xml": 3147,
+    "exchange_html": 1469,
+    "pdf": 3,
+    "viewer_html": 3
+  },
+  "lineage_status": {
+    "missing_original": 2,
+    "resolved": 456,
+    "root": 3200,
+    "unresolved": 546
+  },
+  "quality_issue_rules": [
+    {
+      "severity": "warning",
+      "dimension": "validity",
+      "rule_id": "recovery_parser_used",
+      "count": 1838
+    },
+    {
+      "severity": "warning",
+      "dimension": "coverage",
+      "rule_id": "missing_binary_asset",
+      "count": 1790
+    },
+    {
+      "severity": "warning",
+      "dimension": "consistency",
+      "rule_id": "lineage_unresolved",
+      "count": 546
+    },
+    {
+      "severity": "warning",
+      "dimension": "consistency",
+      "rule_id": "lineage_missing_original",
+      "count": 2
+    },
+    {
+      "severity": "warning",
+      "dimension": "validity",
+      "rule_id": "parse_partial",
+      "count": 2
+    }
+  ],
+  "invariants": {
+    "facts_without_evidence": 0,
+    "events_without_one_current": 0,
+    "fragment_cell_evidence_collisions": 0,
+    "filings_without_source": 0,
+    "successful_sources_without_fragment": 0
+  },
+  "query_sanity": [
+    {
+      "text": "계약금액",
+      "company": "삼성전자",
+      "latency_ms": 10000.947,
+      "result_count": 10,
+      "top_evidence_id": "ev1_dcf5fd2b01bb809797fd78d0f8053e75",
+      "top_filing_id": "20241115000375"
+    },
+    {
+      "text": "감사의견",
+      "company": "005930",
+      "latency_ms": 8954.743,
+      "result_count": 10,
+      "top_evidence_id": "ev1_081ddf46d4cb835317339b44a687c79b",
+      "top_filing_id": "20240312000736"
+    },
+    {
+      "text": "자기주식취득결정",
+      "company": null,
+      "latency_ms": 551.095,
+      "result_count": 10,
+      "top_evidence_id": "ev1_f226b70758f82c6a330d8336eea9f657",
+      "top_filing_id": "20241118000171"
+    },
+    {
+      "text": "보유주식등의 수",
+      "company": null,
+      "latency_ms": 333.854,
+      "result_count": 10,
+      "top_evidence_id": "ev1_704e2cd99b5e80c8211701cb41167b97",
+      "top_filing_id": "20250905000381"
+    },
+    {
+      "text": "매출액",
+      "company": "현대자동차",
+      "latency_ms": 9196.549,
+      "result_count": 10,
+      "top_evidence_id": "ev1_25a6dcd308839ef42d738de7408d2768",
+      "top_filing_id": "20240313001451"
+    }
+  ],
+  "hard_quality_gate_passed": true
+}
