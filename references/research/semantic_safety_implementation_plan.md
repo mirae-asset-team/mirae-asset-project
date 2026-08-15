@@ -168,4 +168,4 @@
 - [x] **Step 1: unittest·compileall·JSON·JavaScript 문법 검사를 자동화하거나 실행한다.**
 - [x] **Step 2: 복제 DB의 migration report와 semantic validator를 확인한다.**
 - [x] **Step 3: 원본 파일 크기·수정시각 불변과 Git 대용량 제외를 확인한다.**
-- [ ] **Step 4: 의도한 파일만 커밋·푸시하고 Draft PR CI를 확인한다.**
+- [x] **Step 4: 의도한 파일만 커밋·푸시하고 Draft PR CI를 확인한다.**
