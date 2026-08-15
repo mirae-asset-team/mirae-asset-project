@@ -1,6 +1,6 @@
 # 공시 LLM 데이터·DB 구축 현황과 다음 작업
 
-작성일: 2026-08-14  
+작성일: 2026-08-14 · 최종 갱신 2026-08-16
 공유 대상: 미래에셋 AI 공모전 프로젝트 팀원  
 문서 목적: 이 파일 하나로 현재 구현, 설계 이유, 검증 결과, 남은 위험, 다음 작업 순서를 공유함
 
@@ -11,18 +11,19 @@ EDA 이후 데이터·DB 1~3단계는 완료했음. 주최 측 공시 4,204건�
 무결성 검사도 통과했으므로 이제부터는 파일을 다시 훑는 대신 이 기준 구조에서 Gold QA와 검색
 성능을 개발하면 됨.
 
-다만 현재 DB를 곧바로 “정답 DB”라고 부르면 안 됨. 지금 보장하는 것은 원문 추적성과 구조적
-무결성임. 재무 계정 의미, 정정공시 546건의 원본 연결, PDF 표 의미, 검색 관련성, 최종 답변 정확도는
-추가 작업이 필요함.
+원본을 보존한 semantic v1 사본도 전수 검증했음. 구조·semantic schema·FTS projection Gate는
+통과했고, 23개 Gold는 모두 사람 승인됨. 다만 현재 DB를 곧바로 “정답 DB”라고 부르면 안 됨.
+재무 계정 의미, unresolved 539건과 missing-original 2건, PDF 표 의미, 전체 질의 검색과 최종 답변
+정확도는 추가 작업이 필요함. 최신 수치는 17장을 정본으로 사용함.
 
 지금 팀이 착수할 순서는 다음과 같음.
 
-1. 팀원이 DB·안전 조회·Gold 작성 계약을 먼저 검수하고 승인 여부를 기록함.
-2. 자동 대조를 통과한 QA 후보 23개를 다른 팀원이 원문과 대조해 첫 승인 Gold를 만듦.
-3. 재무제표의 계정·기간·연결/별도·단위를 정규화함.
-4. 미해결 정정공시 546건을 유형화하고 고빈도 유형부터 계보 알고리즘을 보강함.
-5. PDF 3개의 표를 사람이 확인함.
-6. Gold를 100~200문항으로 확장한 뒤 BM25·dense·hybrid·reranker를 비교함.
+1. 재무제표의 계정·기간·연결/별도·단위 Gold를 만들고 `financial_fact` 표본을 적재함.
+2. Evidence API가 unsafe lineage·candidate fact·PDF 표 수치를 기본 거절하도록 구현함.
+3. unresolved 539건과 missing-original 2건을 유형화해 false link 0 원칙으로 보강함.
+4. PDF 3개의 표를 사람이 확인함.
+5. Gold를 100~200문항으로 확장한 뒤 BM25·dense·hybrid·reranker를 비교함.
+6. PostgreSQL 후보는 사본 적재·행 수/hash reconciliation 뒤에만 승격함.
 7. 검색 조합이 확정된 다음 HyperCLOVA X를 연결함.
 
 LLM부터 연결하지 않는 이유는 간단함. 지금 LLM이 틀리면 원인이 검색 누락인지, 정정본 선택
@@ -34,12 +35,13 @@ LLM부터 연결하지 않는 이유는 간단함. 지금 LLM이 틀리면 원�
 | 원본 inventory·포맷 판별 | 4,622개 전수 완료 | 완료 |
 | 구조 파싱·표 셀·evidence | 4,204 filings 전수 DB 생성 | 완료 |
 | DB 구조 무결성 gate | 구조 invariant 오류 0 | 완료. 검색·의미 품질을 증명하지 않음 |
-| 정정 계보 | 정기+일부 사건 연결, 546건 미해결 | 보강 필요 |
-| 재무 canonical fact | 표 셀만 보존, 회계 의미 미정규화 | 지금 착수 |
-| Gold QA | QA 후보 23개가 19개 문서 전부 커버, 자동 계약·DB 대조 오류 0, 사람 승인 0 | 팀 설계 승인(A0) 직후 원문 검수 |
-| 검색 관련성 평가 | FTS 실행 baseline만 측정 | Gold 이후 |
+| Semantic DB v1 | 원본 보존 사본, schema·FTS·evidence invariant 통과 | 완료 |
+| 정정 계보 | unresolved 539, missing-original 2를 답변에서 차단 | 보강 필요 |
+| 재무 canonical fact | 별도 schema·trigger 완성, 실제 행 0 | 지금 착수 |
+| Gold QA | 23개 모두 `human_verified/approved`, 오류 0 | 완료·확장 필요 |
+| 검색 관련성 평가 | 조건부 8문항·9근거 Recall@20 1.0 | 작은 기준선 완료·확장 필요 |
 | HyperCLOVA X·RAG | 미연결 | 검색 확정 이후 |
-| 운영 서버·증분 index | PostgreSQL 후보 DDL 초안만 존재하며 SQLite와 아직 동등하지 않음 | RAG baseline 이후 보완 |
+| 운영 서버·증분 index | PostgreSQL 후보 DDL grain parity 보강, 실제 이관 미실행 | RAG baseline 이후 보완 |
 
 ## 목차
 
@@ -59,6 +61,7 @@ LLM부터 연결하지 않는 이유는 간단함. 지금 LLM이 틀리면 원�
 14. 기술 근거와 참고자료
 15. DB 독립 검수 상세서
 16. 검수 후 안전 계층 구현 결과
+17. Semantic DB v1 실행·최종 검수 결과
 
 ## 1. 프로젝트 목표와 데이터 사용 경계
 
@@ -1948,3 +1951,180 @@ python scripts/review_gold_with_models.py `
 3개 pilot 중 자동 Silver는 q001 한 건뿐이고 `gold_promoted=0`임. 이는 다중모델 합의가 단순 도장찍기가
 아니라 약한 모델의 의미 오독을 실제로 분리한다는 회귀 사례임. Qwen은 Windows CLI 대신 로컬 Ollama
 HTTP API를 사용해 ANSI·한글 인코딩 오염을 제거함.
+
+## 17. 2026-08-16 Semantic DB v1 실행·최종 검수 결과
+
+이 장은 16장의 “코드만 구현·실DB 미적용” 상태를 대체하는 최신 실행 기록임. 원본 구조 원장은
+수정하지 않았고, SQLite online backup으로 만든 별도 사본에만 migration을 적용함.
+
+### 17.1 최종 판정
+
+| 층 | 판정 | 증거 | 사용 경계 |
+|---|---|---|---|
+| 원본 구조 SSOT | 보존 확인 | 38,481,072,128 bytes, 본체 수정시각 2026-08-13 23:22:05 유지 | 재빌드·덮어쓰기 금지 |
+| Semantic schema | 통과 | `semantic_schema_gate_passed=true`, invariant 10종 모두 0 | 안전 조회·후속 의미 적재 가능 |
+| 구조 원장 | 통과 | `structure_gate_passed=true`, FK 0, 구조 invariant 6종 0 | 구조와 provenance만 보장 |
+| FTS projection | 통과 | fragment/FTS 모두 8,437,771행, rowid orphan 0 | 한국어 최종 검색기 우승을 뜻하지 않음 |
+| Gold 검색 subset | 조건부 통과 | 8문항·9근거 Recall@20 1.0, complete recall 1.0, MRR 0.381922 | 회사·후보 filing metadata가 Gold로 고정된 범위 |
+| 사건성 fact | 답변 차단 유지 | 155,552행 모두 `event_kv_candidate` | validated evidence 승격 전 사용 금지 |
+| 재무 의미 | 미착수 | `financial_fact=0` | account/scope/period/scale Gold 뒤 적재 |
+| 정정 의미 | 일부 개선·차단 유지 | 13 version 변화, unresolved 546→539, missing-original 2 | 남은 541 filing은 current/as-of 답변 거절 |
+| PDF 표 | 미검증 | `pdf_table_structure_unvalidated=3` | 표 좌표·수치 답변 금지 |
+| PostgreSQL | 후보 DDL parity | 구조·fact·financial_fact·quality·trigger DDL 보강 | 서버 적재와 reconciliation 전 운영 승격 금지 |
+
+따라서 “DB 구축 완료”의 정확한 뜻은 **구조·근거·안전 조회·검색 projection 기반이 검증됨**임.
+재무 수치와 남은 정정의 의미까지 모두 정답으로 확정됐다는 뜻은 아님.
+
+### 17.2 무엇을 실제로 적용했는가
+
+```text
+disclosure_corpus.sqlite  (읽기 전용 구조 SSOT)
+  └─ SQLite online backup
+      └─ disclosure_corpus_semantic_v1.sqlite  (38,773,280,768 bytes)
+          ├─ schema_migration
+          ├─ financial_fact / financial_fact_evidence
+          ├─ fact·financial_fact 동일-filing evidence trigger
+          ├─ validated 승격 전 evidence 필수 trigger
+          ├─ validated 상태의 마지막 evidence 삭제 방지 trigger
+          ├─ event_kv_candidate 명칭 통일 155,552행
+          ├─ 전체 correction lineage 재계산
+          ├─ external-content fragment_fts 재구축
+          ├─ fragment INSERT/DELETE/UPDATE FTS 동기화 trigger
+          └─ lineage·PDF quality issue 재생성
+```
+
+기존 DB에 직접 `ALTER`하지 않은 이유는 38GB 구조 원장을 감사 기준점으로 남기고 migration 실패 시
+사본만 폐기할 수 있게 하기 위함임. 복사는 파일 복제가 아니라 SQLite backup API를 사용해 WAL을 포함한
+일관된 snapshot을 만들었음. migration runner는 입력과 출력이 같거나 출력이 이미 있으면 중단함.
+
+### 17.3 전수 migration 결과
+
+`data/derived/database_migration_semantic_v1.json`의 핵심 값은 다음과 같음.
+
+| 항목 | migration 전 | migration 후 |
+|---|---:|---:|
+| filing | 4,204 | 4,204 |
+| source_document | 4,622 | 4,622 |
+| fragment / FTS | 8,437,771 / 8,437,771 | 8,437,771 / 8,437,771 |
+| table_record | 1,556,755 | 1,556,755 |
+| table_cell | 36,697,165 | 36,697,165 |
+| fact / fact_evidence | 155,552 / 517,013 | 155,552 / 517,013 |
+| filing_event | 3,748 | 3,741 |
+| filing_version | 4,204 | 4,204 |
+| quality_issue | 4,178 | 4,176, 이후 legacy alias 2행 정리로 최종 4,174 |
+
+- migration elapsed: 3,036.981초
+- 복제본 `PRAGMA quick_check`: `ok`
+- `PRAGMA foreign_key_check`: 0건
+- FTS integrity-check와 rebuild: 성공
+- 변경된 filing version: 13건
+- 최종 lineage: root 3,200 / resolved 463 / unresolved 539 / missing-original 2
+- PDF 표 미검증 warning: 3건
+- semantic migration 기록: 본 migration 1건 + legacy quality alias cleanup 1건
+
+초기 quality refresh가 과거 rule ID `lineage_missing_original` 2행을 남겨 같은 filing에 현재
+`missing_original`과 중복됨을 최종 validator에서 발견함. 답변 결과에는 영향이 없지만 감사 건수를
+부풀리므로 이 두 legacy 행만 원자적으로 삭제함. 삭제한 issue ID, SQL SHA-256과 결과는
+`data/derived/database_semantic_post_migration_adjustments.json`에 기록했고 최종 alias invariant는 0임.
+
+### 17.4 왜 기존 fact를 재무 fact로 확장하지 않았는가
+
+기존 155,552행은 비정기 표의 짧은 행을 `predicate → value`로 묶은 사건성 KV 후보임. 연결/별도,
+계정 ID, instant/duration, 회계기간, scale, currency 계약이 없어 재무제표 정답으로 사용할 수 없음.
+따라서 이름을 `event_kv_candidate`로 명확히 하고 다음 별도 grain을 만들었음.
+
+```text
+financial_fact
+  account_id / account_name_raw
+  statement_type
+  scope: consolidated | separate | unknown
+  period_type + start/end/instant
+  value_numeric / currency / scale / unit_raw
+  validation_status
+  └─ financial_fact_evidence → table_cell.evidence_id
+```
+
+현재 행 수 0은 실패가 아니라 안전장치임. 재무 Gold 없이 155,552개 후보를 자동 변환하면 스키마는
+채워져도 의미 오류를 확정 사실로 승격하기 때문임. 다음에는 대표 재무 표본을 사람이 검수한 뒤 candidate
+삽입 → cell evidence 연결 → validator → validated 승격 순서만 허용함.
+
+### 17.5 FTS 선택과 검색 평가 범위
+
+기존 contentless FTS가 fragment rowid와 우연히 1:1이라는 가정에 기대지 않도록
+`content='fragment', content_rowid='rowid'`로 재구축함. 세 trigger가 이후 fragment 증분 변경을 FTS에
+동기화함. 회사 검색은 전역 FTS 뒤 거대한 company join을 하지 않고 filing·lineage 후보를 먼저 정한 뒤
+해당 filing만 검색함. 최종 smoke는 5개 모두 10건을 반환했고 회사 질의는 149~333ms였음. 단일 실행
+관찰값이므로 p95 SLO로 사용하지 않음.
+
+Gold 평가기는 승인 23건 중 검색 가능한 원문 fragment 주소로 변환할 수 있는 8문항·9근거만 평가함.
+표 셀 evidence는 같은 filing/table/row의 `table_row` fragment로 매핑하고, 질문 token별 FTS 결과를
+RRF(k=60)로 합침. 원본과 semantic 사본 결과는 모두 다음과 같았음.
+
+```text
+target Recall@20            1.0
+question-complete Recall@20 1.0
+MRR@20                      0.38192239858906524
+```
+
+이 평가는 entity resolution, 전체 corpus filing 발견, unanswerable 판정, 답변 생성, 인용 정확도를
+측정하지 않음. 따라서 “RAG 정확도 100%”라고 표현하면 안 됨. 다음 BM25·형태소·dense·reranker 비교의
+작은 구조 회귀 기준선임.
+
+### 17.6 DART 표 파서 개선과 적용 경계
+
+- 주요사항·지분 공시에서 TH가 아닌 TD label도 행의 첫 비수치 라벨이면 header 후보로 보존함.
+- rowspan header를 다음 행의 `row_header_path`에 상속함.
+- `단위:` 명시 표현을 우선하고 허용 단위만 채택해 날짜·`현재`·`기준`이 unit이 되는 오류를 막음.
+- parser version을 0.2.0으로 올림.
+
+실제 한화오션 접수 `20250905000003` 표본은 848 cell 중 header 205개, row header가 있는 data cell
+487개, 단위 `백만원/원`을 추출했고 `보유주식등의 수 및 보유비율`을 header로 판정함. 삼성전자
+사업보고서 `20240312000736` 표본에서는 `%/건/명/백만원/억원/원/주`만 unit으로 남고 날짜형 unit은
+0건이었음.
+
+중요하게도 이 파서 변경은 기존 semantic 사본의 36.7M cell을 다시 쓰지 않았음. 기존 원장은 구조
+SSOT로 보존하고, parser 0.2.0 효력은 다음 명시적 parser rebuild에서 생김. 현재 DB의 header/unit
+의미가 전부 수정됐다고 표현하면 안 됨.
+
+### 17.7 재현·검수 명령
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path 'src').Path
+
+python scripts/migrate_database.py `
+  --source 'data/derived/disclosure_corpus.sqlite' `
+  --output 'data/derived/disclosure_corpus_semantic_v1.sqlite' `
+  --report 'data/derived/database_migration_semantic_v1.json'
+
+python scripts/evaluate_retrieval.py `
+  --database 'data/derived/disclosure_corpus_semantic_v1.sqlite' `
+  --gold 'data/derived/gold_qa.jsonl' `
+  --output 'data/derived/retrieval_gold_baseline_semantic_v1.json' `
+  --limit 20
+
+python scripts/validate_database.py `
+  --database 'data/derived/disclosure_corpus_semantic_v1.sqlite' `
+  --output 'data/derived/database_validation_semantic_v1.json' `
+  --expected-filings 4204 --expected-sources 4622 `
+  --require-semantic-v1 `
+  --integrity-mode attested `
+  --integrity-attestation 'data/derived/database_migration_semantic_v1.json'
+```
+
+`attested`는 검사를 생략하는 모드가 아님. migration에서 이미 오래 걸리는 전수 quick check와 FK 검사를
+수행했으므로 validator가 report의 대상 DB 절대경로, byte size, schema SHA-256, quick-check, FK 결과를
+대조해 같은 38GB를 중복 스캔하지 않는 모드임. validator는 별도로 구조 invariant, FTS rowid,
+evidence filing 귀속, semantic schema와 Gold를 계속 전수 검사함.
+
+### 17.8 다음 작업 순서
+
+1. 재무제표 질문용 account/scope/period/scale Gold를 작은 표본으로 작성·교차검수함.
+2. 그 표본만 `financial_fact(candidate)`로 적재하고 cell evidence·수치·단위·기간 validator를 통과시킴.
+3. Evidence API가 unsafe lineage, candidate fact, PDF table-unvalidated를 기본 거절하는지 E2E 검사함.
+4. unresolved 539건과 missing-original 2건은 거래소 공시부터 false link 0 원칙으로 줄임.
+5. 같은 Gold에서 SQLite FTS baseline과 형태소 BM25, dense, hybrid+reranker를 비교함.
+6. 그 뒤 PostgreSQL 사본 적재와 row count/hash/evidence reconciliation을 수행함.
+7. 마지막에만 HyperCLOVA X 생성기를 연결하고 claim·계산·인용 검증을 추가함.
+
+DB binary와 공식 원문은 용량·재배포 제약 때문에 GitHub에 올리지 않음. 대신 migration·validator·schema,
+Gold, 결과 JSON, 문서와 CI를 올려 팀원이 같은 로컬 원장에서 재현할 수 있게 함.

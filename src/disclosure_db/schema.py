@@ -211,6 +211,62 @@ CREATE TABLE quality_issue (
     message TEXT NOT NULL,
     details_json TEXT NOT NULL DEFAULT '{}'
 );
+
+CREATE TRIGGER fact_evidence_same_filing_insert
+BEFORE INSERT ON fact_evidence
+WHEN (SELECT filing_id FROM fact WHERE fact_id=NEW.fact_id)
+     <> (SELECT filing_id FROM table_cell WHERE evidence_id=NEW.evidence_id)
+BEGIN SELECT RAISE(ABORT, 'fact evidence filing mismatch'); END;
+
+CREATE TRIGGER fact_evidence_same_filing_update
+BEFORE UPDATE ON fact_evidence
+WHEN (SELECT filing_id FROM fact WHERE fact_id=NEW.fact_id)
+     <> (SELECT filing_id FROM table_cell WHERE evidence_id=NEW.evidence_id)
+BEGIN SELECT RAISE(ABORT, 'fact evidence filing mismatch'); END;
+
+CREATE TRIGGER financial_fact_evidence_same_filing_insert
+BEFORE INSERT ON financial_fact_evidence
+WHEN (SELECT filing_id FROM financial_fact WHERE financial_fact_id=NEW.financial_fact_id)
+     <> (SELECT filing_id FROM table_cell WHERE evidence_id=NEW.evidence_id)
+BEGIN SELECT RAISE(ABORT, 'financial fact evidence filing mismatch'); END;
+
+CREATE TRIGGER financial_fact_evidence_same_filing_update
+BEFORE UPDATE ON financial_fact_evidence
+WHEN (SELECT filing_id FROM financial_fact WHERE financial_fact_id=NEW.financial_fact_id)
+     <> (SELECT filing_id FROM table_cell WHERE evidence_id=NEW.evidence_id)
+BEGIN SELECT RAISE(ABORT, 'financial fact evidence filing mismatch'); END;
+
+CREATE TRIGGER fact_validation_requires_evidence_insert
+BEFORE INSERT ON fact WHEN NEW.validation_status='validated'
+BEGIN SELECT RAISE(ABORT, 'validated fact must be promoted after evidence is attached'); END;
+
+CREATE TRIGGER financial_fact_validation_requires_evidence_insert
+BEFORE INSERT ON financial_fact WHEN NEW.validation_status='validated'
+BEGIN SELECT RAISE(ABORT, 'validated financial fact must be promoted after evidence is attached'); END;
+
+CREATE TRIGGER fact_validation_requires_evidence_update
+BEFORE UPDATE OF validation_status ON fact
+WHEN NEW.validation_status='validated'
+ AND NOT EXISTS (SELECT 1 FROM fact_evidence WHERE fact_id=NEW.fact_id)
+BEGIN SELECT RAISE(ABORT, 'validated fact requires cell evidence'); END;
+
+CREATE TRIGGER financial_fact_validation_requires_evidence_update
+BEFORE UPDATE OF validation_status ON financial_fact
+WHEN NEW.validation_status='validated'
+ AND NOT EXISTS (SELECT 1 FROM financial_fact_evidence WHERE financial_fact_id=NEW.financial_fact_id)
+BEGIN SELECT RAISE(ABORT, 'validated financial fact requires cell evidence'); END;
+
+CREATE TRIGGER fact_evidence_preserve_validated_delete
+BEFORE DELETE ON fact_evidence
+WHEN (SELECT validation_status FROM fact WHERE fact_id=OLD.fact_id)='validated'
+ AND (SELECT count(*) FROM fact_evidence WHERE fact_id=OLD.fact_id)=1
+BEGIN SELECT RAISE(ABORT, 'cannot remove final evidence from validated fact'); END;
+
+CREATE TRIGGER financial_fact_evidence_preserve_validated_delete
+BEFORE DELETE ON financial_fact_evidence
+WHEN (SELECT validation_status FROM financial_fact WHERE financial_fact_id=OLD.financial_fact_id)='validated'
+ AND (SELECT count(*) FROM financial_fact_evidence WHERE financial_fact_id=OLD.financial_fact_id)=1
+BEGIN SELECT RAISE(ABORT, 'cannot remove final evidence from validated financial fact'); END;
 """
 
 
@@ -223,6 +279,7 @@ CREATE INDEX IF NOT EXISTS idx_source_filing ON source_document(filing_id);
 CREATE INDEX IF NOT EXISTS idx_parser_error_source ON parser_error(source_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_fragment_filing_type ON fragment(filing_id, fragment_type);
 CREATE INDEX IF NOT EXISTS idx_fragment_source ON fragment(source_id, sequence_no);
+CREATE INDEX IF NOT EXISTS idx_fragment_table_row ON fragment(table_id) WHERE table_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_cell_filing ON table_cell(filing_id);
 CREATE INDEX IF NOT EXISTS idx_cell_table ON table_cell(table_id, row_index, column_index);
 CREATE INDEX IF NOT EXISTS idx_fact_filing_predicate ON fact(filing_id, predicate);
@@ -233,6 +290,9 @@ CREATE INDEX IF NOT EXISTS idx_quality_rule ON quality_issue(rule_id, severity);
 
 
 FTS_SQL = r"""
+DROP TRIGGER IF EXISTS fragment_fts_ai;
+DROP TRIGGER IF EXISTS fragment_fts_ad;
+DROP TRIGGER IF EXISTS fragment_fts_au;
 DROP TABLE IF EXISTS fragment_fts;
 CREATE VIRTUAL TABLE fragment_fts USING fts5(
     text_normalized,
@@ -242,6 +302,19 @@ CREATE VIRTUAL TABLE fragment_fts USING fts5(
 );
 INSERT INTO fragment_fts(fragment_fts) VALUES('rebuild');
 INSERT INTO fragment_fts(fragment_fts) VALUES('optimize');
+
+CREATE TRIGGER fragment_fts_ai AFTER INSERT ON fragment BEGIN
+    INSERT INTO fragment_fts(rowid,text_normalized) VALUES (new.rowid,new.text_normalized);
+END;
+CREATE TRIGGER fragment_fts_ad AFTER DELETE ON fragment BEGIN
+    INSERT INTO fragment_fts(fragment_fts,rowid,text_normalized)
+    VALUES('delete',old.rowid,old.text_normalized);
+END;
+CREATE TRIGGER fragment_fts_au AFTER UPDATE OF text_normalized ON fragment BEGIN
+    INSERT INTO fragment_fts(fragment_fts,rowid,text_normalized)
+    VALUES('delete',old.rowid,old.text_normalized);
+    INSERT INTO fragment_fts(rowid,text_normalized) VALUES (new.rowid,new.text_normalized);
+END;
 """
 
 

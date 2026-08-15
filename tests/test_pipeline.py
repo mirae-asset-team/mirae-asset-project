@@ -20,6 +20,11 @@ XML = """<?xml version='1.0' encoding='UTF-8'?>
 EXCHANGE_HTML = """<html><body><table><tr><td><span>계약금액(원)</span></td>
 <td><span class='xforms_input'>1,000</span></td></tr></table></body></html>"""
 
+TD_HEADER_XML = """<?xml version='1.0' encoding='UTF-8'?>
+<DOCUMENT><SECTION-1><TITLE>주요사항</TITLE><P>2025년 12월 31일 현재 (단위 : 백만원)</P>
+<TABLE><TR><TD ROWSPAN='2'>매출액</TD><TD>100</TD></TR><TR><TD>90</TD></TR></TABLE>
+</SECTION-1></DOCUMENT>"""
+
 
 class PipelineTests(unittest.TestCase):
     def test_ids_are_deterministic_and_locator_sensitive(self) -> None:
@@ -97,6 +102,28 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(value.cell_kind, "data")
             self.assertEqual(value.row_header_path, ["계약금액(원)"])
             self.assertEqual([fact.fact_type for fact in result.facts], ["event_kv_candidate"])
+
+    def test_dart_td_label_rowspan_and_unit_are_preserved(self) -> None:
+        from disclosure_db.identifiers import source_id
+        from disclosure_db.parsers import parse_markup
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "major.xml"
+            path.write_text(TD_HEADER_XML, encoding="utf-8")
+            result = parse_markup(
+                path,
+                filing_id="20240101000001",
+                source_id=source_id("20240101000001", "c" * 64, "main"),
+                source_sha256="c" * 64,
+                detected_format="dart_xml",
+                issuer_name="테스트",
+                doc_group="major",
+            )
+            label = next(cell for cell in result.cells if cell.text_normalized == "매출액")
+            second_row_value = next(cell for cell in result.cells if cell.text_normalized == "90")
+            self.assertEqual(label.cell_kind, "header")
+            self.assertEqual(second_row_value.row_header_path, ["매출액"])
+            self.assertEqual(result.tables[0].unit_text, "백만원")
 
 
 if __name__ == "__main__":

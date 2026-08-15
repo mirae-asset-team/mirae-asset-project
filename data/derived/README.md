@@ -11,6 +11,12 @@
   현재 명칭으로 `structure_gate_passed`에 해당하며 검색 관련성·의미 품질 통과를 뜻하지 않음.
   회사 질의 지연 수치도 안전 필터 개선 전 측정값이므로 최신 성능 비교에 사용하지 않음
 - `query_benchmark_after_filter_fix.json`: 회사 metadata 선필터 적용 후 전체 DB 검색 재측정
+- `retrieval_gold_baseline_structural.json`: 승인 Gold 중 evidence-addressable 8문항·9근거의
+  회사/후보 filing 조건부 FTS+RRF Recall@20·MRR 기준선
+- `database_migration_semantic_v1.json`: 원본 보존형 semantic v1 migration 전후 행 수·schema·계보·FTS 감사 기록
+- `database_semantic_post_migration_adjustments.json`: legacy quality rule 별칭 2행 제거의 ID·SQL hash·결과
+- `database_validation_semantic_v1.json`: migration 사본의 구조·semantic schema·Gold·검색 게이트 결과
+- `retrieval_gold_baseline_semantic_v1.json`: semantic 사본에서 원본 기준선과 같은 조건으로 측정한 검색 결과
 
 SQLite와 로그는 크기가 커 Git에서 제외합니다. 현재 로컬 구조 원장
 `disclosure_corpus.sqlite`는 38,481,072,128바이트이며 GitHub에는 업로드하지 않습니다. 원본은
@@ -25,3 +31,12 @@ python scripts/validate_gold.py
 ```
 
 정상 기준은 `records=23`, `issue_count=0`, `gold_release_gate_passed=true`입니다.
+
+`disclosure_corpus_semantic_v1.sqlite`도 38GB급 로컬 산출물이므로 Git에서 제외합니다. 생성 명령과
+감사 JSON만 공유하며, `financial_fact`가 0행인 것은 누락이 아니라 재무제표 account/scope/period Gold가
+아직 없어서 임의 적재를 차단한 결과입니다.
+
+최종 semantic 사본 기준 핵심 상태는 `structure_gate_passed=true`,
+`semantic_schema_gate_passed=true`, FTS rowid orphan 0, evidence filing mismatch 0,
+unresolved 539, missing-original 2입니다. 검색 관련성 통과는 evidence-addressable 8문항·9근거의
+회사/후보 filing 조건부 범위에만 적용됩니다.

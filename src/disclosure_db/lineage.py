@@ -84,12 +84,20 @@ def build_lineage(connection: sqlite3.Connection) -> dict[str, int]:
                   f.report_name_raw,f.filed_at,f.base_year,f.base_month,f.is_correction
            FROM filing f ORDER BY f.issuer_corp_code,f.filed_at,f.filing_id"""
     ).fetchall()
+    # Only corrections can declare an original submission date.  The previous implementation
+    # materialized all 8.4M fragments in Python although nearly all were never inspected.  Keep
+    # the full-fragment semantics while pushing the label filter into SQLite so a lineage rebuild
+    # is bounded by the matching correction fragments instead of corpus size in memory.
     texts: dict[str, list[str]] = defaultdict(list)
     for filing_id, text in connection.execute(
-        """SELECT filing_id,text_normalized
-           FROM fragment
-           WHERE fragment_type IN ('table_row','paragraph','html_text')
-           ORDER BY filing_id,source_id,sequence_no,evidence_id"""
+        """SELECT fr.filing_id,fr.text_normalized
+           FROM fragment fr
+           JOIN filing f ON f.filing_id=fr.filing_id
+           WHERE f.is_correction=1
+             AND fr.fragment_type IN ('table_row','paragraph','html_text')
+             AND (instr(fr.text_normalized,'최초제출일') > 0
+                  OR instr(fr.text_normalized,'정정관련 공시서류제출일') > 0)
+           ORDER BY fr.filing_id,fr.source_id,fr.sequence_no,fr.evidence_id"""
     ):
         texts[filing_id].append(text)
     nodes = [

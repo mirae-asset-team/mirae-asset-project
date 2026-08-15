@@ -1,6 +1,6 @@
 {
-  "version": "0.2.0",
-  "status": "draft_requires_human_gold_annotation",
+  "version": "0.3.0",
+  "status": "human_gold_v1_approved",
   "gold_annotation_schema": "gold_annotation_schema.json",
   "goal": "공시 근거만으로 답하고, 근거가 부족하면 답변을 거절하는 시스템의 데이터·검색·답변 성능을 분리 평가한다.",
   "question_types": [
@@ -56,6 +56,12 @@
   "split_policy": {
     "required": ["company", "time", "document_family"],
     "rule": "동일 접수건·정정 계보·템플릿 파생 질문은 서로 다른 split으로 나누지 않는다."
+  },
+  "retrieval_acceptance": {
+    "scope": "company and candidate-filing metadata conditioned; evidence-addressable approved questions",
+    "k": 20,
+    "minimum_target_recall_at_20": 1.0,
+    "note": "This gate does not evaluate entity resolution, unanswerable detection, or answer generation."
   },
   "quality_gates": {
     "structure_fail": [

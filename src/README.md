@@ -1,13 +1,14 @@
 # 소스 코드
 
-공시 데이터 수집부터 답변 생성까지의 제품 코드를 저장합니다.
+공식 공시 코퍼스의 구조 원장·검색·정정 계보·Gold 검증 코드를 저장합니다.
 
-실제 구현을 시작할 때 다음 책임을 기준으로 하위 모듈을 나눕니다.
+현재 `disclosure_db` 패키지는 다음 책임을 구현합니다.
 
-1. DART·KIND 데이터 수집
-2. 공시 문서 파싱과 정규화
-3. 색인·검색·RAG
-4. LLM 답변 생성과 출처 제시
-5. 품질 평가
+1. 원천 manifest·XML/HTML/PDF 파싱과 결정론적 evidence ID
+2. SQLite 구조 SSOT, table grid, 품질 이슈와 정정 version graph
+3. 안전 lineage/PIT 필터가 적용된 FTS5 검색과 validated fact 조회
+4. 원본 보존형 semantic v1 migration과 DB 감사 기록
+5. 승인 Gold 계약 검증 및 evidence-addressable retrieval 평가
 
-현재는 사용 기술과 실행 경계가 정해지지 않았으므로 빈 세부 모듈을 미리 만들지 않습니다.
+HyperCLOVA X 생성기, dense retrieval, 운영 서버는 아직 연결하지 않았습니다. 이 패키지의 DB·근거
+계약과 Gold 기준선을 통과한 뒤 별도 계층으로 추가합니다.

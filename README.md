@@ -59,6 +59,21 @@ python -m disclosure_db.cli query `
   --database 'data/derived/disclosure_corpus.sqlite' `
   --company '005930' `
   --text '계약금액'
+
+# 원본 구조 SSOT를 보존한 semantic v1 사본 생성
+python scripts/migrate_database.py `
+  --source 'data/derived/disclosure_corpus.sqlite' `
+  --output 'data/derived/disclosure_corpus_semantic_v1.sqlite' `
+  --report 'data/derived/database_migration_semantic_v1.json'
+
+# 승인 Gold와 semantic schema까지 함께 검증
+python scripts/validate_database.py `
+  --database 'data/derived/disclosure_corpus_semantic_v1.sqlite' `
+  --output 'data/derived/database_validation_semantic_v1.json' `
+  --expected-filings 4204 --expected-sources 4622 `
+  --require-semantic-v1 `
+  --integrity-mode attested `
+  --integrity-attestation 'data/derived/database_migration_semantic_v1.json'
 ```
 
 현재 38GB 로컬 SQLite는 전수 적재와 무결성 검증을 마친 **구조 SSOT**입니다. 용량과 원천자료
@@ -67,6 +82,17 @@ python -m disclosure_db.cli query `
 코드도 없습니다. 사람 검수를 마친 Gold QA 23건은 모두 `human_verified/approved`이며 Gold 배포
 게이트를 통과했습니다. 다음 단계는 이 Gold를 기준으로 검색 관련성, 별도 `financial_fact` 의미 층,
 정정 계보와 FTS 계약을 평가한 뒤 PostgreSQL/pgvector와 OpenSearch 후보를 비교하는 것입니다.
+
+`semantic_v1` migration은 원본을 덮어쓰지 않습니다. 일관된 SQLite 온라인 백업 사본에만
+`financial_fact` grain, evidence 동일-filing 제약, validated fact evidence 제약, 정정 계보 재계산,
+external-content FTS와 증분 동기화 trigger를 적용합니다. 재무제표 정답 Gold는 아직 없으므로
+`financial_fact`에 임의 수치를 적재하지 않습니다.
+
+2026-08-16 전수 사본 검증에서는 구조 Gate와 semantic schema Gate가 통과했고 FK·FTS rowid
+불일치는 0건이었습니다. 정정 계보는 13개 version이 바뀌어 unresolved가 546건에서 539건으로
+줄었지만 539건과 missing-original 2건은 계속 답변에서 차단합니다. 승인 Gold의 근거 주소가 있는
+8문항·9근거 조건부 검색은 원본과 사본 모두 Recall@20 1.0, MRR@20 0.381922였습니다. 이는 회사와
+후보 filing을 Gold metadata로 고정한 검색 검증이며 전체 사용자 질의나 답변 정확도 수치가 아닙니다.
 
 `query` 명령은 기본적으로 `unresolved`·`missing_original`·폐기 version을 제외합니다. 감사 목적으로
 원문 후보 전체가 필요할 때만 `--include-unsafe`를 명시합니다.

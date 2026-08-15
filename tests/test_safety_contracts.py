@@ -15,6 +15,8 @@ from disclosure_db.schema import create_indexes, create_schema
 from disclosure_db.serving import fetch_validated_facts, fetch_validated_financial_facts
 from disclosure_db.evaluation import load_evaluation_contract
 from disclosure_db.gold_validation import validate_record_contract
+from disclosure_db.migration import apply_semantic_migration
+from disclosure_db.retrieval_evaluation import compile_retrieval_query
 from scripts.validate_database import validate
 
 
@@ -98,6 +100,104 @@ def insert_version(connection: sqlite3.Connection, filing_id: str, status: str) 
 
 
 class SafetyContractTests(unittest.TestCase):
+    def test_retrieval_query_is_fts_safe_and_keeps_domain_terms(self) -> None:
+        query = compile_retrieval_query(
+            "삼성바이오로직스가 2023-03-02에 최초 공시한 계약금액(원)은 얼마인가?",
+            company_names=["삼성바이오로직스"],
+        )
+        self.assertIn('"계약금액"', query)
+        self.assertNotIn("삼성바이오로직스", query)
+        self.assertNotIn("2023", query)
+        connection = sqlite3.connect(":memory:")
+        connection.execute("CREATE VIRTUAL TABLE docs USING fts5(text)")
+        connection.execute("INSERT INTO docs VALUES('계약금액 | 1000원')")
+        self.assertEqual(connection.execute("SELECT count(*) FROM docs WHERE docs MATCH ?", (query,)).fetchone()[0], 1)
+        connection.close()
+
+    def test_semantic_migration_is_audited_and_fts_stays_in_sync(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            database = Path(temp) / "semantic.sqlite"
+            connection = sqlite3.connect(database)
+            create_schema(connection)
+            connection.execute(
+                """INSERT INTO pipeline_run(
+                       run_id,started_at,finished_at,parser_name,parser_version,corpus_root,
+                       manifest_sha256,status,stats_json
+                   ) VALUES('run','2024-01-01','2024-01-01','test','1','fixture','x','success','{}')"""
+            )
+            insert_filing(connection, "20240101000001")
+            source_id = insert_source(connection, "20240101000001")
+            insert_fragment(connection, "20240101000001", source_id, 0, "계약금액 1000원")
+            insert_version(connection, "20240101000001", "root")
+            connection.execute(
+                """INSERT INTO quality_issue VALUES(
+                       'legacy','run','warning','consistency','filing','20240101000001',
+                       'lineage_missing_original','legacy alias','{}')"""
+            )
+            connection.commit()
+            connection.close()
+
+            result = apply_semantic_migration(
+                database,
+                source_database=database.with_name("structural.sqlite"),
+                migration_sql=Path("sql/sqlite_semantic_layer_v1.sql"),
+                rebuild_lineage=False,
+                rebuild_fts=True,
+            )
+            self.assertEqual(result["quick_check"], "ok")
+            self.assertEqual(result["foreign_key_violations"], 0)
+            self.assertEqual(result["semantic_counts"]["schema_migration"], 1)
+            self.assertIn("fragment_fts_ai", result["triggers"])
+            connection = sqlite3.connect(database)
+            self.assertEqual(
+                connection.execute(
+                    "SELECT count(*) FROM quality_issue WHERE rule_id='lineage_missing_original'"
+                ).fetchone()[0],
+                0,
+            )
+            connection.close()
+            validation = validate(database, require_semantic_v1=True)
+            self.assertTrue(validation["semantic_schema_gate_passed"], validation["semantic_schema_invariants"])
+            attestation = Path(temp) / "migration.json"
+            attestation.write_text(json.dumps(result), encoding="utf-8")
+            attested_validation = validate(
+                database,
+                require_semantic_v1=True,
+                integrity_mode="attested",
+                integrity_attestation=attestation,
+            )
+            self.assertEqual(attested_validation["integrity_check"], "ok")
+            self.assertTrue(attested_validation["integrity_attestation"]["schema_sha256_match"])
+
+            connection = sqlite3.connect(database)
+            insert_fragment(connection, "20240101000001", source_id, 1, "추가 검색 문장")
+            self.assertEqual(
+                connection.execute(
+                    "SELECT count(*) FROM fragment_fts WHERE fragment_fts MATCH '추가'"
+                ).fetchone()[0],
+                1,
+            )
+            connection.execute(
+                """INSERT INTO fact VALUES(
+                       'orphan','20240101000001','event_kv_candidate','테스트','금액','1000','원','test','candidate'
+                   )"""
+            )
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "requires cell evidence"):
+                connection.execute("UPDATE fact SET validation_status='validated' WHERE fact_id='orphan'")
+            connection.close()
+
+    def test_postgresql_candidate_covers_ledger_and_semantic_grains(self) -> None:
+        ddl = Path("sql/postgresql_schema.sql").read_text(encoding="utf-8").lower()
+        for table in (
+            "schema_migration", "pipeline_run", "filing", "source_document", "parser_error",
+            "fragment", "table_record", "table_cell", "fact", "fact_evidence",
+            "financial_fact", "financial_fact_evidence", "filing_event", "filing_version",
+            "quality_issue",
+        ):
+            self.assertIn(f"create table {table}", ddl)
+        self.assertIn("filing_version_one_current_idx", ddl)
+        self.assertIn("financial_fact_evidence_same_filing", ddl)
+
     def test_model_review_parser_accepts_fenced_json_and_control_newline(self) -> None:
         raw = '''```json
 {"question_id":"q1","answerability":"uncertain","answer":{"kind":"uncertain","values":[],"unit":null},"support_verdict":"insufficient","selected_evidence_ids":[],"confidence":"low","reason":"첫 줄
@@ -195,6 +295,13 @@ class SafetyContractTests(unittest.TestCase):
             self.assertEqual(len(audit_rows), 1)
             self.assertTrue(audit_rows[0]["requires_visual_verification"])
             self.assertEqual(audit_rows[0]["lineage_status"], "unresolved")
+            self.assertEqual(
+                query_database(
+                    database, "계약금액", include_unsafe=True,
+                    filing_ids=["does-not-exist"],
+                ),
+                [],
+            )
 
     def test_fetch_validated_facts_never_returns_candidates(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -221,9 +328,13 @@ class SafetyContractTests(unittest.TestCase):
                 fact_id = f"fact_{status}"
                 connection.execute(
                     "INSERT INTO fact VALUES(?,?,?,?,?,?,?,?,?)",
-                    (fact_id, "20240101000001", "event_kv_candidate", "테스트", "계약금액", "1000", "원", "test", status),
+                    (fact_id, "20240101000001", "event_kv_candidate", "테스트", "계약금액", "1000", "원", "test", "candidate"),
                 )
                 connection.execute("INSERT INTO fact_evidence VALUES(?, 'cell')", (fact_id,))
+                if status == "validated":
+                    connection.execute(
+                        "UPDATE fact SET validation_status='validated' WHERE fact_id=?", (fact_id,)
+                    )
             connection.commit()
             connection.close()
 
@@ -257,7 +368,7 @@ class SafetyContractTests(unittest.TestCase):
         )
         self.assertEqual(connection.execute("SELECT count(*) FROM financial_fact").fetchone()[0], 0)
 
-    def test_validated_financial_fact_requires_cell_evidence_to_be_served(self) -> None:
+    def test_financial_fact_cannot_be_validated_without_cell_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             database = Path(temp) / "financial.sqlite"
             connection = sqlite3.connect(database)
@@ -265,14 +376,15 @@ class SafetyContractTests(unittest.TestCase):
             insert_filing(connection, "20240101000001")
             insert_source(connection, "20240101000001")
             insert_version(connection, "20240101000001", "root")
-            connection.execute(
-                """INSERT INTO financial_fact(
-                       financial_fact_id,filing_id,account_id,account_name_raw,statement_type,scope,
-                       period_type,period_start,period_end,instant_date,value_numeric,currency,scale,
-                       unit_raw,extraction_method,validation_status)
-                   VALUES('ff_orphan','20240101000001','Revenue','매출액','IS','consolidated',
-                          'duration','2023-01-01','2023-12-31',NULL,'1000','KRW',1,'원','human','validated')"""
-            )
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "promoted after evidence"):
+                connection.execute(
+                    """INSERT INTO financial_fact(
+                           financial_fact_id,filing_id,account_id,account_name_raw,statement_type,scope,
+                           period_type,period_start,period_end,instant_date,value_numeric,currency,scale,
+                           unit_raw,extraction_method,validation_status)
+                       VALUES('ff_orphan','20240101000001','Revenue','매출액','IS','consolidated',
+                              'duration','2023-01-01','2023-12-31',NULL,'1000','KRW',1,'원','human','validated')"""
+                )
             connection.commit()
             connection.close()
             self.assertEqual(fetch_validated_financial_facts(database, filing_id="20240101000001"), [])
@@ -297,7 +409,7 @@ class SafetyContractTests(unittest.TestCase):
             self.assertFalse(result["retrieval_smoke_gate_passed"])
             self.assertEqual(result["retrieval_relevance_gate_status"], "not_evaluated_without_human_gold")
             self.assertTrue(str(result["semantic_answer_gate_status"]).startswith("not_evaluated"))
-            self.assertEqual(result["evaluation_contract"]["version"], "0.2.0")
+            self.assertEqual(result["evaluation_contract"]["version"], "0.3.0")
             self.assertEqual(result["evaluation_contract"]["question_type_count"], 8)
             strict_result = validate(database, expected_filings=4204, expected_sources=4622)
             self.assertFalse(strict_result["structure_gate_passed"])

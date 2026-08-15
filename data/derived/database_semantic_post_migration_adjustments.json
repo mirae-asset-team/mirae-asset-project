@@ -1,0 +1,26 @@
+{
+  "database": "data/derived/disclosure_corpus_semantic_v1.sqlite",
+  "operation": "semantic_quality_alias_cleanup_v1",
+  "sql_sha256": "0987429c2276867c0bbddd00f9677218bbb9f84b204270b353ea56882549b31d",
+  "deleted_rows": [
+    {
+      "issue_id": "qi_9005a3fe00c51adef2c20cbb5228",
+      "rule_id": "lineage_missing_original",
+      "entity_id": "20230522000371"
+    },
+    {
+      "issue_id": "qi_5fe80d2acff155821b4a977d4bdf",
+      "rule_id": "lineage_missing_original",
+      "entity_id": "20260325001401"
+    }
+  ],
+  "deleted_count": 2,
+  "legacy_alias_rows_after": 0,
+  "canonical_quality_counts": {
+    "correction_lineage_unresolved": 539,
+    "missing_original": 2
+  },
+  "schema_migration_rows": 2,
+  "foreign_key_violations": 0,
+  "database_bytes": 38773280768
+}

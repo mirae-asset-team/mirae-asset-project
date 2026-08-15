@@ -533,6 +533,7 @@ def query_database(
     limit: int = 10,
     as_of: str | None = None,
     include_unsafe: bool = False,
+    filing_ids: list[str] | tuple[str, ...] | None = None,
 ) -> list[dict[str, object]]:
     """Search evidence with safe current/PIT lineage filtering by default.
 
@@ -540,6 +541,8 @@ def query_database(
     the default so isolated unresolved corrections cannot masquerade as effective versions.
     """
     if limit <= 0:
+        return []
+    if filing_ids is not None and not filing_ids:
         return []
     with closing(sqlite3.connect(database)) as connection:
         connection.row_factory = sqlite3.Row
@@ -549,12 +552,19 @@ def query_database(
         version_params: list[object] = []
         if not include_unsafe:
             version_sql, version_params = version_filter_sql(as_of=as_of)
-        if company:
-            company_fields = ["f.issuer_name=?", "f.listed_name=?", "f.stock_code=?", "f.issuer_corp_code=?"]
-            if "reporter_name" in filing_columns:
-                company_fields.append("f.reporter_name=?")
-            eligible_where = [f"({' OR '.join(company_fields)})"]
-            eligible_params: list[object] = [company] * len(company_fields)
+        if company or filing_ids is not None:
+            eligible_where: list[str] = []
+            eligible_params: list[object] = []
+            if company:
+                company_fields = ["f.issuer_name=?", "f.listed_name=?", "f.stock_code=?", "f.issuer_corp_code=?"]
+                if "reporter_name" in filing_columns:
+                    company_fields.append("f.reporter_name=?")
+                eligible_where.append(f"({' OR '.join(company_fields)})")
+                eligible_params.extend([company] * len(company_fields))
+            if filing_ids is not None:
+                unique_filing_ids = list(dict.fromkeys(str(item) for item in filing_ids))
+                eligible_where.append(f"f.filing_id IN ({','.join('?' for _ in unique_filing_ids)})")
+                eligible_params.extend(unique_filing_ids)
             if version_sql:
                 eligible_where.append(version_sql)
                 eligible_params.extend(version_params)

@@ -11,8 +11,10 @@ from .identifiers import evidence_id, fact_id, normalize_text, table_id
 
 
 _SECTION_TAG = re.compile(r"SECTION-\d+$", re.IGNORECASE)
-_UNIT = re.compile(r"(?:단위\s*[:：]\s*|\()([^()]{1,40}?)(?:\)|$)")
+_UNIT_LABEL = re.compile(r"단위\s*[:：]\s*([^()\[\]]{1,40})")
+_UNIT_PAREN = re.compile(r"\(([^()]{1,20})\)")
 _DATE = re.compile(r"(20\d{2})[.년\-/ ]+\s*(\d{1,2})[.월\-/ ]+\s*(\d{1,2})")
+_UNIT_VALUE = re.compile(r"^(?:원|천원|백만원|억원|조원|주|천주|백만주|명|개|건|회|%|％|배|톤|kg|㎏|m2|㎡)$", re.IGNORECASE)
 
 
 def local_name(element: etree._Element) -> str:
@@ -115,16 +117,26 @@ def _parse_markup(path: Path, detected_format: str) -> tuple[etree._Element, boo
 
 
 def _table_unit(table: etree._Element) -> str | None:
+    def valid_unit(value: str) -> str | None:
+        candidate = normalize_text(value).strip("()[] ")[:100]
+        if not candidate or _DATE.search(candidate) or "현재" in candidate or "기준" in candidate:
+            return None
+        return candidate if _UNIT_VALUE.fullmatch(candidate) else None
+
     for key, value in table.attrib.items():
         if key.upper() in {"AUNIT", "AUNITVALUE"} and normalize_text(value):
-            return normalize_text(value)
+            unit = valid_unit(value)
+            if unit:
+                return unit
     sibling = table.getprevious()
     checked = 0
     while sibling is not None and checked < 4:
         text = element_text(sibling)
         if "단위" in text:
-            match = _UNIT.search(text)
-            return normalize_text(match.group(1) if match else text)[:100]
+            match = _UNIT_LABEL.search(text) or _UNIT_PAREN.search(text)
+            unit = valid_unit(match.group(1)) if match else None
+            if unit:
+                return unit
         sibling = sibling.getprevious()
         checked += 1
     return None
@@ -307,12 +319,25 @@ def parse_markup(
                 sequence_no += 1
 
         table_cells = result.cells[table_cell_start:]
+        if doc_group != "periodic":
+            cells_by_row: dict[int, list[CellRecord]] = {}
+            for cell in table_cells:
+                cells_by_row.setdefault(cell.row_index, []).append(cell)
+            for row_cells in cells_by_row.values():
+                row_cells.sort(key=lambda item: item.column_index)
+                nonempty = [item for item in row_cells if item.text_normalized]
+                if len(nonempty) < 2 or any(item.cell_kind == "header" for item in nonempty):
+                    continue
+                first = nonempty[0]
+                if first.column_index == 0 and not any(character.isdigit() for character in first.text_normalized):
+                    first.cell_kind = "header"
         row_headers_index: dict[int, list[tuple[int, str]]] = {}
         column_headers_index: dict[int, list[tuple[int, str]]] = {}
         for other in table_cells:
             if other.cell_kind != "header" or not other.text_normalized:
                 continue
-            row_headers_index.setdefault(other.row_index, []).append((other.column_index, other.text_normalized))
+            for row in range(other.row_index, other.row_index + other.rowspan):
+                row_headers_index.setdefault(row, []).append((other.column_index, other.text_normalized))
             for column in range(other.column_index, other.column_index + other.colspan):
                 column_headers_index.setdefault(column, []).append((other.row_index, other.text_normalized))
         for headers in row_headers_index.values():

@@ -4,11 +4,11 @@
 
 **Goal:** 현재 38GB SQLite 구조 SSOT를 재빌드하지 않고 보존하면서, 검증되지 않은 fact·정정본·검색 projection이 향후 답변 경로로 유입되지 않도록 코드 계약과 다음 적재 스키마를 강화한다.
 
-**Architecture:** 구조 무결성, 검색 smoke, 검색 관련성, 의미·답변 준비도를 별도 게이트로 분리한다. 현재 DB에는 read-only 안전 조회만 적용하고, FTS external-content 및 `financial_fact`는 다음 신규 DB나 명시적 migration에서만 생성한다.
+**Architecture:** 구조 무결성, 검색 smoke, 검색 관련성, 의미·답변 준비도를 별도 게이트로 분리한다. 원본 DB에는 read-only 안전 조회만 적용하고, FTS external-content 및 `financial_fact`는 원본의 SQLite online backup 사본에 명시적 migration으로 생성한다.
 
 **Tech Stack:** Python 3.11+, SQLite/FTS5, `unittest`, JSON, 기존 정적 HTML 로드맵
 
-**Implementation Status (2026-08-15):** Tasks 1–6의 코드·schema·문서 변경과 다중모델 blind 검수 계층, 19개 회귀 테스트를 완료함. 회사 검색은 filing grain에서 회사·lineage를 선확정한 뒤 FTS rowid 범위를 제한하도록 회귀를 복구했고, 현재 38GB DB에서 3개 질의 중앙값 63–116ms를 확인함. 19개 후보 문서를 모두 덮는 23개 QA 후보의 접수번호·SHA·evidence·version/source 계약을 실DB와 자동 대조해 오류 0, `candidate_review_ready=true`를 확인함. 다만 독립된 사람 승인 0건이므로 `gold_release_gate_passed=false`이며, additive migration, FTS rebuild, lineage rebuild는 실행하지 않음.
+**Implementation Status (2026-08-16):** Tasks 1–6에 이어 원본 보존형 migration runner, external-content FTS 동기화 trigger, 별도 `financial_fact` grain, 의미 schema validator, 승인 Gold 기반 retrieval 평가기, DART TD/rowspan/unit 파서 회귀, PostgreSQL 후보 DDL parity, CI를 구현함. 23개 QA는 모두 대표님 원문 검수와 DB 계약 검증을 거쳐 `human_verified/approved`이며 release gate를 통과함. 원본 구조 원장의 evidence-addressable 8문항·9근거 조건부 평가에서 target Recall@20과 question-complete Recall@20은 모두 1.0, MRR@20은 0.381922임. 전체 회귀 테스트는 23개임. 복제 DB 전수 migration·검증의 정확한 결과는 `data/derived/database_migration_semantic_v1.json`과 `database_validation_semantic_v1.json`을 정본으로 삼음.
 
 ## Global Constraints
 
@@ -17,7 +17,7 @@
 - 기존 `fact`는 `event_kv_candidate` 의미로만 취급하고 답변에는 `validated`만 허용한다.
 - `unresolved`와 `missing_original` filing은 current/as-of 답변 대상에서 제외한다.
 - 이미지 참조 source 전체를 일괄 제외하지 않고 결과에 시각 검증 경고를 전파한다.
-- 모든 변경은 synthetic fixture와 기존 4개 회귀 테스트로 검증한다.
+- 모든 변경은 synthetic fixture, 실제 원문 표본, 전체 회귀 테스트와 전수 DB 감사 보고서로 검증한다.
 
 ---
 
@@ -117,3 +117,55 @@
 - [x] **Step 2: 현재 위치를 `안전 차단→QA 후보 23건 승인→financial_fact→정정→FTS→RAG`로 표시한다.**
 - [x] **Step 3: 적용 완료와 다음 전수 적재 때 효력이 생기는 변경을 분리해 쓴다.**
 - [x] **Step 4: HTML·JavaScript·Python 테스트와 문서 링크를 최종 검증한다.**
+
+### Task 7: 원본 보존형 semantic v1 migration
+
+**Files:**
+- Create: `src/disclosure_db/migration.py`
+- Create: `scripts/migrate_database.py`
+- Modify: `sql/sqlite_semantic_layer_v1.sql`
+
+- [x] **Step 1: 원본과 출력 경로가 같거나 출력이 이미 존재하면 중단한다.**
+- [x] **Step 2: SQLite online backup으로 일관된 사본을 만들고 원본 fingerprint를 기록한다.**
+- [x] **Step 3: 별도 의미 grain·강제 trigger·lineage·FTS를 사본에만 적용한다.**
+- [x] **Step 4: migration 전후 schema·핵심 행 수·변경 lineage·quick check·FK를 JSON으로 남긴다.**
+
+### Task 8: 승인 Gold 검색 기준선
+
+**Files:**
+- Create: `src/disclosure_db/retrieval_evaluation.py`
+- Create: `scripts/evaluate_retrieval.py`
+- Modify: `scripts/validate_database.py`
+- Modify: `config/evaluation_contract.json`
+
+- [x] **Step 1: 사람 승인과 DB evidence 계약을 모두 통과한 Gold만 읽는다.**
+- [x] **Step 2: 표 셀 evidence를 같은 filing·table·row의 검색 fragment로 결정론적으로 연결한다.**
+- [x] **Step 3: 회사와 후보 filing을 고정한 범위에서 per-term FTS와 RRF를 평가한다.**
+- [x] **Step 4: 전체 entity resolution/RAG 성능으로 과장하지 않도록 평가 범위를 결과에 기록한다.**
+
+### Task 9: 파서·운영 후보 보강
+
+**Files:**
+- Modify: `src/disclosure_db/parsers.py`
+- Modify: `src/disclosure_db/contracts.py`
+- Modify: `sql/postgresql_schema.sql`
+
+- [x] **Step 1: 주요사항·지분 공시의 TD label과 rowspan row header를 보존한다.**
+- [x] **Step 2: 명시적 `단위:`와 허용 단위만 채택해 날짜가 unit이 되는 오류를 막는다.**
+- [x] **Step 3: 실제 DART 표본 두 건에서 header·unit 결과를 probe한다.**
+- [x] **Step 4: PostgreSQL 후보 DDL에 구조 원장·의미 grain·감사·증거 trigger를 맞춘다.**
+
+### Task 10: 배포 전 검증과 CI
+
+**Files:**
+- Create: `.github/workflows/ci.yml`
+- Modify: `README.md`
+- Modify: `data/derived/README.md`
+- Modify: `references/research/team_handoff_data_db.md`
+- Modify: `references/research/system_build_roadmap.html`
+- Modify: `references/research/roadmap/roadmap-data.js`
+
+- [x] **Step 1: unittest·compileall·JSON·JavaScript 문법 검사를 자동화하거나 실행한다.**
+- [x] **Step 2: 복제 DB의 migration report와 semantic validator를 확인한다.**
+- [x] **Step 3: 원본 파일 크기·수정시각 불변과 Git 대용량 제외를 확인한다.**
+- [ ] **Step 4: 의도한 파일만 커밋·푸시하고 Draft PR CI를 확인한다.**

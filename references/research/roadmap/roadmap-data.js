@@ -5,13 +5,13 @@ window.ROADMAP_STAGES = [
     tagline: "무엇을 맞혔다고 볼지 먼저 정의하되, 실제 데이터 인벤토리를 본 뒤 평가셋을 고정합니다. 검색·생성·거절을 같은 점수로 뭉개지 않습니다.",
     why: "평가셋은 마지막 채점표가 아니라 모든 기술 선택의 기준입니다. 다만 데이터 구조를 보기 전에 완전히 동결하면 일반 텍스트 질문에 편향될 수 있으므로, 질문 유형 초안을 만든 뒤 인벤토리 결과로 Gold v1을 고정합니다.",
     progress: {
-      tone: "hold", label: "검수 준비 완료", headline: "23개 QA 후보의 구조·근거 대조는 끝났고, 사람 승인은 아직 0건입니다.",
-      summary: "19개 층화 문서를 모두 덮는 23개 QA 후보를 만들고 접수번호·SHA·evidence ID·정정 version·source coverage를 실DB와 자동 대조했습니다. 구조 오류는 0이며 candidate review는 가능하지만, 다른 사람이 원문을 확인하기 전에는 Gold로 공개하지 않습니다.",
-      score: "23 / 23", scoreLabel: "자동 계약 검증 통과 후보",
-      metrics: [["23건", "QA 검수 후보", "19개 문서 100% 커버"], ["0건", "계약·DB 대조 오류", "candidate_review_ready=true"], ["0건", "사람 승인 Gold", "release gate=false"], ["분리", "평가 구조", "parser·retrieval·answer·citation"]],
-      done: ["공식 코퍼스 EDA와 source inventory를 전수 생성함", "질문·answerability·required evidence·계산식을 담는 평가 계약을 정의함", "23개 model-generated 후보의 content/version/source evidence를 실DB와 자동 대조함"],
-      next: ["작성자와 다른 팀원이 23개 후보의 원문 지지 여부만 확인하고 승인함", "표 질문은 header·unit·grid를 사람 검수하고 parsed_unreviewed를 human_validated로 바꿈", "정정·표·계산·근거 없음 질문을 포함해 100~200문항으로 확장함"],
-      example: `question_id: q021\nanswer_origin: model_generated\nreview.status: candidate\ncandidate_filing_ids: [20231214000216, 20231214000434]\nversion_evidence: original + current\nsource_evidence: SHA + fragment/table/cell counts\n\nautomation: contract/db mismatch 0\nhuman: 원문 지지 여부 확인 후 승인`,
+      tone: "pass", label: "Gold v1 승인 완료", headline: "23개 QA가 모두 사람 승인과 DB 계약 검증을 통과했습니다.",
+      summary: "19개 층화 문서를 덮는 23개 QA의 접수번호·SHA·evidence ID·정정 version·source coverage를 실DB와 대조했고, 대표님 원문 검수 뒤 전부 human_verified/approved로 확정했습니다.",
+      score: "23 / 23", scoreLabel: "Gold release gate 통과",
+      metrics: [["23건", "사람 승인 Gold", "human_verified/approved"], ["0건", "계약·DB 대조 오류", "release gate=true"], ["8문항·9근거", "검색 가능 Gold subset", "표 셀→동일 행 fragment"], ["100%", "조건부 Recall@20", "회사·후보 filing metadata 고정"]],
+      done: ["공식 코퍼스 EDA와 source inventory를 전수 생성함", "23개 QA의 content/version/source evidence를 실DB와 자동 대조함", "모든 후보를 원문 검수하고 Gold v1으로 승인함", "근거 주소가 있는 8문항·9근거에 FTS+RRF 기준선을 측정함"],
+      next: ["재무제표 account/scope/period Gold를 별도로 추가함", "정정·표·계산·근거 없음 질문을 100~200문항으로 확장함", "동일 Gold에서 BM25·형태소·dense·reranker challenger를 비교함"],
+      example: `records: 23\nanswer_origin: human_verified\nreview.status: approved\nissue_count: 0\ngold_release_gate_passed: true\n\nretrieval scope:\n- evidence-addressable 8 questions / 9 targets\n- company + candidate filing conditioned\n- target Recall@20 = 1.0`,
       artifact: ["팀 공유용 DB·Gold 검수 상세서", "../team_handoff_data_db.md"]
     },
     contract: {
@@ -80,9 +80,9 @@ window.ROADMAP_STAGES = [
       tone: "hold", label: "구조 완료 · 의미 미평가", headline: "4,204건을 전수 적재했고 구조 invariant 검사는 통과했습니다.",
       summary: "원본 파일과 SHA를 보존하며 XML·HTML·PDF를 fragment·table·cell·lineage로 변환했습니다. 구조적 무결성은 통과했지만 header/unit 의미, exact span, PDF 표와 정정 계보는 사람 검수 전입니다.",
       score: "4,622 / 4,622", scoreLabel: "source 전수 처리",
-      metrics: [["4,204", "filing", "manifest 접수건"], ["4,622", "source", "XML·HTML·PDF"], ["36.70M", "table cell", "물리 anchor 셀"], ["546", "unresolved", "정정 계보 보강 대상"]],
+      metrics: [["4,204", "filing", "manifest 접수건"], ["4,622", "source", "XML·HTML·PDF"], ["36.70M", "table cell", "물리 anchor 셀"], ["539+2", "답변 차단 lineage", "unresolved + missing-original"]],
       done: ["DART XML 3,147·거래소 HTML 1,469·PDF 3·viewer HTML 3개를 판별함", "fragment 8,437,771건과 table 1,556,755건을 evidence ID로 연결함", "parse failed 0, FK 위반 0, evidence 충돌 0을 전수 validator에서 확인함"],
-      next: ["text_raw와 exact source span 계약을 확정하고 필요하면 parser version을 올림", "복잡한 병합표의 header path와 unit을 층화 Gold로 검수함", "unresolved 546건과 PDF 3건을 답변 허용 전에 닫거나 명시적으로 차단함"],
+      next: ["text_raw와 exact source span 계약을 확정하고 필요하면 다음 rebuild에 반영함", "parser 0.2.0의 header path와 unit을 층화 Gold로 검수함", "unresolved 539건·missing-original 2건과 PDF 3건을 답변 허용 전에 닫거나 계속 차단함"],
       example: `source_id: src_9e1563962123a652a26a7f5c\nfiling_id: 20230102000160\nrole: main\ndetected_format: dart_xml\nsha256: 28db7e5e...fbdfe07\nparse_status: success\nstrict_xml_ok: true\ncoverage:\n  fragments: 159\n  tables: 20\n  cells: 772\n  fact_candidates: 53\n\n주의: fact_candidates는 검증된 재무 정답이 아님`,
       artifact: ["파싱·lineage 독립 검수 상세서", "../team_handoff_data_db.md#15-db-독립-검수-상세서"]
     },
@@ -157,16 +157,16 @@ value_raw: "1,234"
   {
     id: "database", number: "03", short: "DB·인덱스", color: "#2ead8e",
     kicker: "One truth, multiple read models", title: "DB와 검색 인덱스 구축",
-    tagline: "현재 38GB SQLite 기준 원장과 FTS baseline까지 만들었습니다. 다음은 의미 검수 결과를 반영하고, 동등성 검사를 갖춘 뒤 운영 PostgreSQL과 Evidence API로 이관하는 일입니다.",
-    why: "DB의 목적은 LLM이 직접 읽게 하는 것이 아니라 올바른 버전과 근거를 빠르고 재현 가능하게 꺼내는 것입니다. 현재 SQLite는 전수 재현·감사에 적합한 기준 산출물이고, PostgreSQL은 아직 SQLite와 동등하지 않은 운영 후보 DDL 초안입니다.",
+    tagline: "원본 38GB 구조 SSOT를 보존한 semantic v1 사본과 FTS·Gold 기준선까지 검증했습니다. 다음은 재무 의미 Gold와 Evidence API입니다.",
+    why: "DB의 목적은 LLM이 직접 읽게 하는 것이 아니라 올바른 버전과 근거를 빠르고 재현 가능하게 꺼내는 것입니다. SQLite 원본은 구조 정본으로 동결했고 semantic 사본은 안전 제약과 검색 read model 검증용입니다. PostgreSQL DDL은 grain parity를 보강했지만 아직 서버 이관·reconciliation을 실행하지 않은 운영 후보입니다.",
     progress: {
-      tone: "current", label: "지금 작업할 단계", headline: "기준 DB는 완성됐고, 사용자 질의용 DB는 아직 아닙니다.",
-      summary: "SQLite에 전수 구조와 FTS5를 적재했습니다. 구조 Gate, 검색 smoke, 검색 관련성, 의미·답변 Gate를 코드에서 분리했고 candidate fact와 unresolved 정정본은 기본 답변 조회에서 제외합니다.",
-      score: "38.48 GB", scoreLabel: "SQLite 기준 DB",
-      metrics: [["8.44M", "FTS 행", "현 구조 SSOT 기준"], ["19", "회귀 테스트", "안전·Gold·blind review·FTS 포함"], ["63–116ms", "안전 회사 검색", "3질의·3회 중앙값·limit 10"], ["미평가", "검색·의미 Gate", "사람 Gold 전"]],
-      done: ["candidate fact를 반환하지 않는 validated fact 조회를 구현함", "unresolved·missing_original·폐기 version을 기본 검색에서 차단하고 as-of 필터를 추가함", "다음 적재용 financial_fact grain·FTS external-content·전 fragment lineage 계약과 제출인 검색을 구현함"],
-      next: ["현재 원장에서 Gold 후보 19건을 사람이 승인함", "거래소 정정 494건부터 false link 0을 목표로 계보 규칙을 검수함", "다음 index rebuild에서 FTS rowid reconciliation 후 Gold 기반 retrieval ablation을 시작함"],
-      example: `안전 조회 실제 예시\nquery: "계약금액"\ncompany: "삼성전자"\ninclude_unsafe: false\nlimit: 10\nlatency median: 63.370 ms  # warm-up 1회 뒤 3회 중앙값, p95 아님\ntop_filing_id: 20241118000328\nlineage_status: resolved\nis_current: true\n\n실행 계약\n✓ filing 층에서 회사·안전 lineage 먼저 확정\n✓ 해당 filing의 FTS rowid 범위만 검색\n✓ 결과 source parse_status 재검사\n\n기본 차단\n✓ candidate fact 반환 금지\n✓ unresolved / missing_original 제외\n✓ 폐기 version 제외 또는 as_of 유효본만\n\n아직 미평가\n✗ Gold 검색 관련성\n✗ financial_fact 내용 정확도\n✗ header·unit·PDF 표 의미\n✗ Evidence API / PostgreSQL / dense RAG`,
+      tone: "current", label: "DB 기반 완료 · 의미 적재 대기", headline: "구조·안전·인덱스 계약은 통과했고 재무 정답 원장은 아직 비어 있습니다.",
+      summary: "원본을 online backup한 semantic v1 사본에 별도 financial_fact grain, 동일-filing evidence 제약, external-content FTS와 동기화 trigger를 적용했습니다. 전수 validator는 구조·semantic schema·검색 smoke를 통과했고 candidate fact와 안전하지 않은 정정본은 계속 답변에서 차단합니다.",
+      score: "38.77 GB", scoreLabel: "semantic v1 로컬 사본",
+      metrics: [["8.44M", "FTS 행", "rowid orphan 0"], ["23", "회귀 테스트", "migration·parser·Gold 포함"], ["100%", "조건부 Recall@20", "8문항·9근거"], ["539+2", "답변 차단 lineage", "unresolved + missing-original"]],
+      done: ["원본 38,481,072,128 bytes와 수정시각을 보존한 사본 migration을 완료함", "fact 155,552건을 event_kv_candidate로 명확히 하고 validated evidence·동일 filing trigger를 적용함", "FTS 8,437,771행과 fragment rowid를 일치시키고 Gold 원본/사본 검색 결과를 동일하게 유지함", "정정 version 13건을 갱신해 unresolved를 546건에서 539건으로 줄이고 PDF 경고 3건을 승격함"],
+      next: ["재무 account/scope/period/scale Gold를 만들고 financial_fact를 검증 표본부터 채움", "남은 unresolved 539건과 missing-original 2건은 false link 0 원칙으로 검수함", "Evidence API를 만든 뒤 같은 Gold에서 BM25·형태소·dense·reranker를 ablation함"],
+      example: `semantic v1 전수 결과\nstructure_gate_passed: true\nsemantic_schema_gate_passed: true\nforeign_key_violations: 0\nfts_rows: 8,437,771\nfts_rowid_orphans: 0\nfact_evidence_filing_mismatch: 0\nlegacy_fact_type_rows: 0\n\nGold 조건부 검색\neligible_questions: 8\ntarget_evidence: 9\ntarget_recall@20: 1.0\ncomplete_recall@20: 1.0\nMRR@20: 0.381922\n\n계속 차단\ncandidate event facts: 155,552\nunresolved: 539\nmissing_original: 2\nfinancial_fact: 0\nPDF table unvalidated: 3\n\n미완료\n✗ 재무 의미 정확도·답변 생성 평가\n✗ Evidence API / PostgreSQL 이관 / dense RAG`,
       artifact: ["DB 구축·대안·검수 SQL 전체 보기", "../team_handoff_data_db.md#15-db-독립-검수-상세서"]
     },
     contract: {
@@ -199,7 +199,7 @@ quality_issue / pipeline_run / fragment_fts
   "text": "...", "table_headers": [...], "unit": "KRW"
 }`,
     candidates: [
-      { type: "base", badge: "운영 후보", name: "PostgreSQL", role: "메타·계보·fact·인용 registry", strength: "트랜잭션·제약·조인·JSONB를 함께 제공해 version/evidence 무결성을 강제할 수 있습니다.", risk: "현재 DDL은 pipeline_run·fact·quality_issue와 일부 감사 열이 빠진 초안입니다.", rule: "SQLite parity와 migration 대조가 통과한 뒤 정본으로 승격" },
+      { type: "base", badge: "운영 후보", name: "PostgreSQL", role: "메타·계보·fact·인용 registry", strength: "트랜잭션·제약·조인·JSONB를 함께 제공해 version/evidence 무결성을 강제할 수 있습니다.", risk: "후보 DDL의 grain parity는 보강했지만 실제 서버 적재·행 수/hash reconciliation은 실행하지 않았습니다.", rule: "SQLite parity migration 대조가 통과한 뒤 정본으로 승격" },
       { type: "base", badge: "현재 정본", name: "SQLite + FTS5", role: "전수 감사·재현·검색 sanity baseline", strength: "단일 파일로 4,204건의 관계·FK·FTS를 동일 산출물에서 검증했습니다.", risk: "다중 사용자 serving과 한국어 형태소 검색의 최종안이 아닙니다.", rule: "운영 migration 완료 전 기준 산출물" },
       { type: "base", badge: "검색", name: "OpenSearch + Nori", role: "한국어 BM25·필드검색", strength: "역색인, 필드 boost, highlight, 한국어 분석기 플러그인을 제공합니다.", risk: "운영 서비스가 하나 늘고 인덱스 동기화가 필요합니다.", rule: "lexical baseline이 메모리 엔진 한계를 보이면 기본" },
       { type: "base", badge: "분석", name: "Parquet + DuckDB", role: "EDA·품질검사·실험 집계", strength: "열 기반 파일을 직접 질의해 대량 집계와 실험 재현이 간단합니다.", risk: "동시 쓰기·온라인 트랜잭션 정본에는 맞지 않습니다.", rule: "오프라인 분석 경로로만 사용" },
@@ -217,7 +217,7 @@ quality_issue / pipeline_run / fragment_fts
     ],
     measurementNote: "DB 후보는 기능 체크리스트로 우승하지 않습니다. 동일한 chunk·embedding·필터·top-k를 사용해 품질과 운영비를 함께 비교해야 합니다.",
     recommendation: {
-      base: "현재 SQLite 구조 SSOT 동결 → 안전 조회 → QA 후보 23건 원문 승인 → financial_fact → 정정·FTS 검수 → lexical baseline",
+      base: "SQLite 구조 SSOT 동결 → semantic v1 안전 사본 → Gold 승인·조건부 lexical baseline → financial_fact Gold → Evidence API",
       challenger: "Gold에서 dense가 Recall@k를 실제 개선할 때 pgvector를 먼저 붙이고, 규모·multivector·필터 성능이 부족할 때만 OpenSearch/Qdrant와 비교",
       reason: "이미 검증된 38GB 기준 산출물을 버리지 않고, 의미 오류를 먼저 측정한 뒤 운영성과 검색 성능을 한 계층씩 추가합니다.",
       promote: "후보가 같은 Gold에서 품질을 개선하고 p95·메모리·재구축 복잡성의 허용 범위를 만족할 때만 기본 스택에 추가"
