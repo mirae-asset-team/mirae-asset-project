@@ -1,0 +1,25 @@
+{
+  "artifact": "disclosure_corpus_semantic_v1.sqlite",
+  "database_version": "semantic-v1",
+  "semantic_definition": "governance and meaning-contract schema; dense embeddings and vector indexes are not included",
+  "contains_embeddings": false,
+  "git_commit": "129f5b0e6096d35b285322d1bf046fff54ff9cc3",
+  "created_at": "2026-08-16T20:56:40.8947290+09:00",
+  "distribution": {
+    "channel": "OneDrive private team folder",
+    "archive": "disclosure_corpus_semantic_v1.sqlite.zst",
+    "compression": "zstd level 6 with frame checksum",
+    "compressed_bytes": 6171052124,
+    "compressed_sha256": "7a46819dde876dd9dedb6a9b8330ef4af4b9a34759e659013fd3a8bac4d2dd0e"
+  },
+  "database": {
+    "uncompressed_bytes": 38773280768,
+    "uncompressed_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563"
+  },
+  "validation": {
+    "zstd_integrity_test": "passed",
+    "report": "database_validation_semantic_v1.json",
+    "structure_gate": true,
+    "semantic_schema_gate": true
+  }
+}
