@@ -6,7 +6,12 @@
   "git_commit": "129f5b0e6096d35b285322d1bf046fff54ff9cc3",
   "created_at": "2026-08-16T20:56:40.8947290+09:00",
   "distribution": {
-    "channel": "OneDrive private team folder",
+    "intended_channel": "OneDrive private team folder",
+    "upload_status": "blocked_insufficient_cloud_quota",
+    "onedrive_total_bytes": 5368709120,
+    "onedrive_used_bytes_at_check": 1073741824,
+    "onedrive_remaining_bytes_at_check": 4294967296,
+    "required_user_action": "increase OneDrive capacity or publish the archive to NCP Object Storage",
     "archive": "disclosure_corpus_semantic_v1.sqlite.zst",
     "compression": "zstd level 6 with frame checksum",
     "compressed_bytes": 6171052124,
