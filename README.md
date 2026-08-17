@@ -96,3 +96,37 @@ external-content FTS와 증분 동기화 trigger를 적용합니다. 재무제�
 
 `query` 명령은 기본적으로 `unresolved`·`missing_original`·폐기 version을 제외합니다. 감사 목적으로
 원문 후보 전체가 필요할 때만 `--include-unsafe`를 명시합니다.
+
+## Agent runtime (7시간 수직 슬라이스)
+
+원본 SQLite는 읽기 전용으로 유지하고, 사람이 승인한 재무제표 fact만 별도 overlay에 적재합니다.
+overlay가 비어 있으면 에이전트는 일반 공시 fragment 검색만 수행하며, 근거가 없으면 자동으로
+답변 불가를 반환합니다. 숫자 계산은 `Decimal` allowlist만 허용하고, 최종 답변은 evidence ID가
+실제로 검색 결과에 포함되는지 검증한 뒤 반환합니다.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path 'src').Path
+$py = 'C:\Users\lark0\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
+
+# 원본 DB를 절대 덮어쓰지 않는 overlay 구축
+& $py -m disclosure_db.cli build-financial-overlay `
+  --database 'D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite' `
+  --overlay 'D:\mirae-asset-project\db\agent\financial_overlay.sqlite' `
+  --seed 'data/derived/financial_fact_gold_seed.jsonl'
+
+# HCX 키가 없으면 deterministic fallback으로 동작
+& $py -m disclosure_db.cli agent-query `
+  --database 'D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite' `
+  --overlay 'D:\mirae-asset-project\db\agent\financial_overlay.sqlite' `
+  --question '삼성전자 매출액은 얼마인가?'
+
+# Gold 회귀 평가(결과는 derived JSON으로 남김)
+& $py scripts/evaluate_agent.py `
+  --database 'D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite' `
+  --overlay 'D:\mirae-asset-project\db\agent\financial_overlay.sqlite' `
+  --gold 'data/derived/gold_qa.jsonl' `
+  --output 'data/derived/agent_evaluation.json'
+```
+
+HTTP API가 필요하면 `pip install -e .[agent]` 후 `disclosure-agent serve`를 사용합니다. FastAPI와
+uvicorn은 선택 의존성으로 지연 로딩되며, 핵심 CLI·테스트에는 필요하지 않습니다.

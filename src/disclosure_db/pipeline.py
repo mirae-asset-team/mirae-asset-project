@@ -574,7 +574,7 @@ def query_database(
             # filing ranges, causing a measured 4-16x regression on the 38 GB corpus.
             eligible_filings = connection.execute(
                 f"""SELECT f.filing_id,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,
-                           v.lineage_status,v.is_current
+                           v.lineage_status,v.is_current,v.effective_from,v.effective_to
                     FROM filing f
                     JOIN filing_version v ON v.filing_id=f.filing_id
                     WHERE {' AND '.join(eligible_where)}""",
@@ -603,8 +603,8 @@ def query_database(
                 item_params: list[object] = [query, first_rowid, last_rowid, filing_id]
                 item_params.append(limit)
                 matches = connection.execute(
-                        f"""SELECT fr.evidence_id,fr.filing_id,fr.fragment_type,fr.section_path_json,
-                                   fr.text_normalized,
+                        f"""SELECT fr.evidence_id,fr.filing_id,fr.source_id,fr.fragment_type,fr.section_path_json,
+                                   fr.locator_json,fr.text_normalized,
                                    CAST(json_extract(s.coverage_json,'$.image_reference_count') AS INTEGER)
                                        AS image_reference_count,
                                    bm25(fragment_fts) AS score
@@ -629,9 +629,9 @@ def query_database(
                 params.extend(version_params)
             params.append(limit)
             rows = connection.execute(
-                f"""SELECT fr.evidence_id,fr.filing_id,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,
-                           fr.fragment_type,fr.section_path_json,fr.text_normalized,
-                           v.lineage_status,v.is_current,
+                f"""SELECT fr.evidence_id,fr.filing_id,fr.source_id,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,
+                           fr.fragment_type,fr.section_path_json,fr.locator_json,fr.text_normalized,
+                           v.lineage_status,v.is_current,v.effective_from,v.effective_to,
                            CAST(json_extract(s.coverage_json,'$.image_reference_count') AS INTEGER)
                                AS image_reference_count,
                            bm25(fragment_fts) AS score

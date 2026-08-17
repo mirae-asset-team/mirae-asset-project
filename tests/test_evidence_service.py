@@ -1,0 +1,59 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+import tempfile
+import unittest
+from pathlib import Path
+
+from disclosure_db.schema import create_schema, create_indexes
+from disclosure_db.evidence_service import EvidenceService
+from disclosure_db.query_planner import plan_query
+
+
+def seed_search_db(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    create_schema(connection)
+    connection.execute(
+        """INSERT INTO filing VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ("f1", "doc_f1", "00000001", "000001", "삼성전자", "삼성전자", "삼성전자", "IT", "IT",
+         "periodic", "사업보고서", "사업보고서", "사업보고서", "사업보고서", "2024-03-01", 2023, 12, 0, "xml", 1),
+    )
+    connection.execute(
+        """INSERT INTO source_document VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ("s1", "f1", "main", "f1.xml", ".xml", "dart_xml", "utf-8", "utf-8", "b" * 64, 10,
+         "2024-03-01T00:00:00Z", "test", "1", "success", 1, 0, "[]", "{}"),
+    )
+    connection.execute("INSERT INTO filing_event VALUES(?,?,?,?,?)", ("e1", "00000001", "periodic", "f1", "test"))
+    connection.execute("INSERT INTO filing_version VALUES(?,?,?,?,?,?,?,?,?,?)", ("f1", "e1", 1, None, "root", "high", "2024-03-01", None, 1, "test"))
+    connection.execute(
+        """INSERT INTO fragment VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+        ("ev1", "f1", "s1", "paragraph", 0, "[]", None, None, "{}", "매출액은 1000원입니다", "매출액은 1000원입니다", "1"),
+    )
+    create_indexes(connection)
+    connection.commit()
+    connection.close()
+
+
+class EvidenceServiceTests(unittest.TestCase):
+    def test_search_returns_safe_evidence_refs_and_plan(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp) / "base.sqlite"
+            seed_search_db(base)
+            service = EvidenceService(base)
+            plan = plan_query("삼성전자 매출액은 얼마인가?", company_candidates=["삼성전자"])
+            bundle = service.search(plan)
+            self.assertTrue(bundle.evidence)
+            self.assertEqual(bundle.evidence[0].evidence_id, "ev1")
+            self.assertEqual(bundle.evidence[0].lineage_status, "root")
+            self.assertTrue(bundle.answerable)
+
+    def test_query_plan_resolves_company_and_operation_without_model(self) -> None:
+        plan = plan_query("삼성전자 2023년 매출액 증가율은?", company_candidates=["삼성전자"])
+        self.assertEqual(plan.company, "삼성전자")
+        self.assertEqual(plan.operation, "growth_rate")
+        self.assertEqual(plan.as_of, "2023-12-31")
+
+
+if __name__ == "__main__":
+    unittest.main()

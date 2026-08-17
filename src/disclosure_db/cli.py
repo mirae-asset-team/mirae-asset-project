@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .pipeline import build_database, export_gold_candidates, export_inventory, query_database
+from .agent_contracts import to_jsonable
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -61,6 +62,48 @@ def main() -> None:
             include_unsafe=args.include_unsafe,
         )
     print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def _agent_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="disclosure-agent")
+    sub = parser.add_subparsers(dest="command", required=True)
+    query = sub.add_parser("agent-query", help="Answer a question with safe evidence and verification")
+    query.add_argument("--database", type=Path, required=True)
+    query.add_argument("--overlay", type=Path)
+    query.add_argument("--question", required=True)
+    query.add_argument("--company")
+    query.add_argument("--as-of")
+    query.add_argument("--limit", type=int, default=20)
+    overlay = sub.add_parser("build-financial-overlay")
+    overlay.add_argument("--database", type=Path, required=True)
+    overlay.add_argument("--overlay", type=Path, required=True)
+    overlay.add_argument("--seed", type=Path, required=True)
+    serve = sub.add_parser("serve")
+    serve.add_argument("--database", type=Path, required=True)
+    serve.add_argument("--overlay", type=Path)
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    return parser
+
+
+def agent_main() -> None:
+    args = _agent_parser().parse_args()
+    if args.command == "build-financial-overlay":
+        from .financial_overlay import import_seed
+        result = import_seed(args.database, args.overlay, args.seed)
+    elif args.command == "agent-query":
+        from .agent import AgentSettings, DisclosureAgent
+        result = to_jsonable(DisclosureAgent(AgentSettings(args.database, args.overlay)).answer(args.question, company=args.company, as_of=args.as_of, limit=args.limit))
+    else:
+        try:
+            import uvicorn
+        except ImportError as exc:
+            raise SystemExit("serve requires: pip install 'miraeasset-disclosure-db[agent]'") from exc
+        from .agent import AgentSettings, DisclosureAgent
+        from .api import create_app
+        uvicorn.run(create_app(DisclosureAgent(AgentSettings(args.database, args.overlay))), host=args.host, port=args.port)
+        return
+    print(json.dumps(to_jsonable(result) if args.command == "build-financial-overlay" else result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
