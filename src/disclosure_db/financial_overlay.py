@@ -91,6 +91,8 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
 def _overlay_matches_base_cached(base_name: str, overlay_name: str, base_size: int, base_mtime: int, overlay_size: int, overlay_mtime: int) -> bool:
     try:
         with closing(sqlite3.connect(overlay_name)) as connection:
+            connection.execute("PRAGMA busy_timeout=5000")
+            connection.execute("PRAGMA query_only=ON")
             row = connection.execute(
                 "SELECT source_database_sha256 FROM overlay_revision WHERE overlay_revision=?",
                 ("semantic-v1-agent-overlay",),
@@ -311,7 +313,10 @@ def fetch_overlay_facts(
         where.append("f.is_correction=1")
     params.append(limit)
     with closing(_read_base(Path(base_database))) as connection:
-        connection.execute("ATTACH DATABASE ? AS overlay", (f"file:{Path(overlay_database).resolve().as_posix()}?mode=ro",))
+        # Plain resolved Windows paths are more portable for ATTACH than URI filenames. The
+        # connection is query-only, so the attached overlay cannot be mutated by this read.
+        connection.execute("PRAGMA query_only=ON")
+        connection.execute("ATTACH DATABASE ? AS overlay", (str(Path(overlay_database).resolve()),))
         rows = connection.execute(
             f"""SELECT ff.*,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,
                        v.lineage_status,v.is_current,group_concat(DISTINCT ffe.evidence_id) evidence_ids,
