@@ -53,8 +53,17 @@ class DisclosureAgent:
     def _attach_calculation(bundle, operation: str) -> None:
         if operation == "lookup" or len(bundle.financial_facts) < 2:
             return
-        facts = sorted(bundle.financial_facts, key=lambda fact: str(fact.get("period_end") or fact.get("instant_date") or ""))
+        first = bundle.financial_facts[0]
+        grain = tuple(first.get(key) for key in ("account_name_raw", "statement_type", "scope", "period_type"))
+        facts = [
+            fact for fact in bundle.financial_facts
+            if tuple(fact.get(key) for key in ("account_name_raw", "statement_type", "scope", "period_type")) == grain
+        ]
+        facts = sorted(facts, key=lambda fact: str(fact.get("period_end") or fact.get("instant_date") or ""))
         if operation in {"growth_rate", "difference", "ratio"}:
+            if len(facts) < 2:
+                bundle.reason_codes.append("calculation_period_alignment_failed")
+                return
             selected = facts[-2:]
         else:
             selected = facts

@@ -7,6 +7,12 @@ from decimal import Decimal, InvalidOperation
 from .agent_contracts import AnswerDraft, EvidenceBundle, VerifiedAnswer
 
 
+PROMPT_INJECTION_MARKERS = (
+    "ignore previous", "ignore all previous", "system prompt", "developer message",
+    "이전 지시를 무시", "지시를 무시", "시스템 프롬프트",
+)
+
+
 def verify_answer(bundle: EvidenceBundle, draft: AnswerDraft) -> VerifiedAnswer:
     allowed = {ref.evidence_id for ref in bundle.evidence}
     reasons = list(draft.reason_codes)
@@ -17,6 +23,9 @@ def verify_answer(bundle: EvidenceBundle, draft: AnswerDraft) -> VerifiedAnswer:
     if draft.answerable and not bundle.answerable:
         valid = False
         reasons.append("answer_asserted_without_safe_evidence")
+    if any(marker in draft.answer.casefold() for marker in PROMPT_INJECTION_MARKERS):
+        valid = False
+        reasons.append("prompt_injection_detected")
     if not draft.answerable and draft.citation_ids:
         valid = False
         reasons.append("unanswerable_answer_has_citation")
@@ -28,6 +37,22 @@ def verify_answer(bundle: EvidenceBundle, draft: AnswerDraft) -> VerifiedAnswer:
         except InvalidOperation:
             valid = False
             reasons.append("numeric_claim_not_decimal")
+    numeric_request = any(term in bundle.question for term in ("얼마", "금액", "몇", "수량", "가격", "증가율", "성장률", "증감률", "비율"))
+    if numeric_request and bundle.answerable:
+        trusted_values = {str(fact.get("value_numeric")) for fact in bundle.financial_facts if fact.get("value_numeric") is not None}
+        if bundle.calculation and bundle.calculation.value is not None:
+            trusted_values.add(str(bundle.calculation.value))
+        if not draft.numeric_values:
+            valid = False
+            reasons.append("numeric_claim_missing")
+        elif trusted_values:
+            try:
+                if any(not any(Decimal(value) == Decimal(trusted) for trusted in trusted_values) for value in draft.numeric_values):
+                    valid = False
+                    reasons.append("numeric_claim_not_grounded")
+            except InvalidOperation:
+                valid = False
+                reasons.append("numeric_claim_not_decimal")
     return VerifiedAnswer(
         answer=draft.answer if valid else "검증에 실패하여 답변을 보류합니다.",
         citation_ids=[item for item in draft.citation_ids if item in allowed],

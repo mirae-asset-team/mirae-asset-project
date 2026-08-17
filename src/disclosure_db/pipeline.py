@@ -45,6 +45,13 @@ MANIFEST_FIELDS = {
 }
 
 
+def _readonly_connection(database: Path) -> sqlite3.Connection:
+    """Open an answer-producing corpus read in SQLite URI mode=ro."""
+    connection = sqlite3.connect(f"file:{Path(database).resolve().as_posix()}?mode=ro", uri=True)
+    connection.execute("PRAGMA busy_timeout=5000")
+    return connection
+
+
 def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -480,7 +487,7 @@ def export_inventory(database: Path, output_jsonl: Path) -> int:
 
 def export_gold_candidates(database: Path, output_jsonl: Path, per_stratum: int = 2) -> int:
     output_jsonl.parent.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(database)) as connection:
+    with closing(_readonly_connection(database)) as connection:
         connection.row_factory = sqlite3.Row
         candidates = list(
             connection.execute(
@@ -544,7 +551,7 @@ def query_database(
         return []
     if filing_ids is not None and not filing_ids:
         return []
-    with closing(sqlite3.connect(database)) as connection:
+    with closing(_readonly_connection(database)) as connection:
         connection.row_factory = sqlite3.Row
         filing_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(filing)")}
         reporter_select = "f.reporter_name" if "reporter_name" in filing_columns else "NULL AS reporter_name"

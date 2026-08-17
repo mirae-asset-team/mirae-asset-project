@@ -86,6 +86,21 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
+def overlay_matches_base(base_database: Path, overlay_database: Path) -> bool:
+    """Fail closed if an overlay was built from a different immutable base file."""
+    if not Path(overlay_database).exists():
+        return False
+    try:
+        with closing(sqlite3.connect(overlay_database)) as connection:
+            row = connection.execute(
+                "SELECT source_database_sha256 FROM overlay_revision WHERE overlay_revision=?",
+                ("semantic-v1-agent-overlay",),
+            ).fetchone()
+        return row is not None and str(row[0]) == sha256_file(Path(base_database))
+    except sqlite3.Error:
+        return False
+
+
 def _read_base(path: Path) -> sqlite3.Connection:
     # URI mode=ro is intentional: an importer must never mutate the immutable corpus.
     connection = sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro", uri=True)
@@ -115,8 +130,9 @@ def _period_ok(row: dict[str, Any]) -> bool:
 def _base_evidence(connection: sqlite3.Connection, filing_id: str, evidence_id: str) -> sqlite3.Row | None:
     return connection.execute(
         """SELECT c.evidence_id,c.filing_id,c.source_id,c.text_raw,c.locator_json,
-                  s.parse_status,v.lineage_status
+                  s.parse_status,s.detected_format,tr.parse_status AS table_parse_status,v.lineage_status
            FROM table_cell c
+           JOIN table_record tr ON tr.table_id=c.table_id
            JOIN source_document s ON s.source_id=c.source_id
            JOIN filing_version v ON v.filing_id=c.filing_id
           WHERE c.evidence_id=? AND c.filing_id=?""",
@@ -124,26 +140,13 @@ def _base_evidence(connection: sqlite3.Connection, filing_id: str, evidence_id: 
     ).fetchone()
 
 
-def _ensure_overlay(path: Path, source_sha: str, seed_sha: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(path)) as connection:
-        connection.executescript(OVERLAY_SCHEMA)
-        connection.execute(
-            """INSERT OR REPLACE INTO overlay_revision
-               VALUES(?,?,datetime('now'),?)""",
-            ("semantic-v1-agent-overlay", source_sha, seed_sha),
-        )
-        connection.commit()
-
-
 def import_seed(base_database: Path, overlay_database: Path, seed_path: Path) -> OverlayImportResult:
     base_database, overlay_database, seed_path = map(Path, (base_database, overlay_database, seed_path))
     source_sha = sha256_file(base_database)
     seed_sha = sha256_file(seed_path)
-    _ensure_overlay(overlay_database, source_sha, seed_sha)
     result = OverlayImportResult(source_database_sha256=source_sha, seed_sha256=seed_sha)
-    with closing(_read_base(base_database)) as base, closing(sqlite3.connect(overlay_database)) as overlay:
-        overlay.execute("PRAGMA foreign_keys=ON")
+    validated_rows: list[dict[str, Any]] = []
+    with closing(_read_base(base_database)) as base:
         for line_no, line in enumerate(seed_path.read_text(encoding="utf-8").splitlines(), 1):
             if not line.strip():
                 continue
@@ -152,11 +155,31 @@ def import_seed(base_database: Path, overlay_database: Path, seed_path: Path) ->
                 if not isinstance(row, dict):
                     raise ValueError("row is not an object")
                 _validate_seed_row(base, row)
-                columns = (
-                    "financial_fact_id", "filing_id", "account_id", "account_name_raw", "statement_type",
-                    "scope", "period_type", "period_start", "period_end", "instant_date", "value_numeric",
-                    "currency", "scale", "unit_raw", "extraction_method", "validation_status",
-                )
+                validated_rows.append(row)
+            except (ValueError, KeyError, TypeError, InvalidOperation, sqlite3.Error) as exc:
+                result.rejected += 1
+                result.reasons.append(f"line {line_no}: {exc}")
+    overlay_database.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(overlay_database)) as overlay:
+        overlay.execute("PRAGMA foreign_keys=ON")
+        overlay.executescript(OVERLAY_SCHEMA)
+        try:
+            overlay.execute("BEGIN IMMEDIATE")
+            existing = overlay.execute(
+                "SELECT source_database_sha256,seed_sha256 FROM overlay_revision WHERE overlay_revision=?",
+                ("semantic-v1-agent-overlay",),
+            ).fetchone()
+            if existing is not None and str(existing[0]) != source_sha:
+                raise ValueError("overlay source_database_sha256 does not match immutable base")
+            if existing is not None and str(existing[1]) != seed_sha:
+                overlay.execute("DELETE FROM financial_fact_evidence")
+                overlay.execute("DELETE FROM financial_fact")
+            columns = (
+                "financial_fact_id", "filing_id", "account_id", "account_name_raw", "statement_type",
+                "scope", "period_type", "period_start", "period_end", "instant_date", "value_numeric",
+                "currency", "scale", "unit_raw", "extraction_method", "validation_status",
+            )
+            for row in validated_rows:
                 overlay.execute(
                     f"INSERT OR REPLACE INTO financial_fact({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
                     tuple(row.get(column) for column in columns),
@@ -166,11 +189,15 @@ def import_seed(base_database: Path, overlay_database: Path, seed_path: Path) ->
                     "INSERT INTO financial_fact_evidence(financial_fact_id,evidence_id) VALUES(?,?)",
                     [(row["financial_fact_id"], evidence_id) for evidence_id in row["evidence_ids"]],
                 )
-                result.imported += 1
-            except (ValueError, KeyError, TypeError, InvalidOperation, sqlite3.Error) as exc:
-                result.rejected += 1
-                result.reasons.append(f"line {line_no}: {exc}")
-        overlay.commit()
+            overlay.execute(
+                "INSERT OR REPLACE INTO overlay_revision VALUES(?,?,datetime('now'),?)",
+                ("semantic-v1-agent-overlay", source_sha, seed_sha),
+            )
+            overlay.commit()
+            result.imported = len(validated_rows)
+        except Exception:
+            overlay.rollback()
+            raise
     return result
 
 
@@ -195,6 +222,10 @@ def _validate_seed_row(base: sqlite3.Connection, row: dict[str, Any]) -> None:
             raise ValueError(f"evidence not found or cross-filing: {evidence_id}")
         if evidence["parse_status"] != "success":
             raise ValueError(f"evidence source is not parse-success: {evidence_id}")
+        if evidence["table_parse_status"] != "success":
+            raise ValueError(f"evidence table is not parse-success: {evidence_id}")
+        if evidence["detected_format"] == "pdf" and str(row.get("extraction_method")) != "human_validated":
+            raise ValueError(f"PDF evidence requires human_validated extraction: {evidence_id}")
     try:
         value = Decimal(str(row["value_numeric"]))
     except InvalidOperation as exc:
@@ -218,12 +249,19 @@ def fetch_overlay_facts(
     filing_id: str | None = None,
     company: str | None = None,
     account_id: str | None = None,
+    account_terms: Iterable[str] = (),
+    statement_type: str | None = None,
+    scope: str | None = None,
+    correction_policy: str = "current",
     as_of: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, object]]:
     if limit <= 0 or not Path(overlay_database).exists():
         return []
     version_sql, version_params = version_filter_sql(alias="v", as_of=as_of)
+    if correction_policy == "original":
+        version_sql = "v.lineage_status='root'"
+        version_params = []
     where = ["ff.validation_status='validated'", "s.parse_status='success'", version_sql]
     params: list[object] = list(version_params)
     with closing(_read_base(Path(base_database))) as schema_connection:
@@ -241,6 +279,16 @@ def fetch_overlay_facts(
     if account_id is not None:
         where.append("ff.account_id=?")
         params.append(account_id)
+    terms = [str(term) for term in account_terms if str(term)]
+    if terms:
+        where.append("(" + " OR ".join("ff.account_name_raw LIKE ?" for _ in terms) + ")")
+        params.extend([f"%{term}%" for term in terms])
+    if statement_type is not None:
+        where.append("ff.statement_type=?")
+        params.append(statement_type)
+    if scope is not None:
+        where.append("ff.scope=?")
+        params.append(scope)
     params.append(limit)
     with closing(_read_base(Path(base_database))) as connection:
         connection.execute("ATTACH DATABASE ? AS overlay", (str(Path(overlay_database).resolve()),))

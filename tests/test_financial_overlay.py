@@ -9,6 +9,7 @@ from pathlib import Path
 
 from disclosure_db.schema import create_schema
 from disclosure_db.financial_overlay import FinancialOverlay, import_seed, fetch_overlay_facts
+from disclosure_db.agent import AgentSettings, DisclosureAgent
 
 
 def seed_base(path: Path) -> None:
@@ -66,6 +67,9 @@ class FinancialOverlayTests(unittest.TestCase):
             rows = fetch_overlay_facts(base, overlay, filing_id="f1")
             self.assertEqual(rows[0]["value_numeric"], "1000")
             self.assertEqual(rows[0]["evidence_ids"], ["c1"])
+            answer = DisclosureAgent(AgentSettings(base, overlay)).answer("테스트 매출액은 얼마인가?", company="테스트")
+            self.assertTrue(answer.verified)
+            self.assertEqual(answer.numeric_values, ["1000"])
 
     def test_cross_filing_or_candidate_rows_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -83,6 +87,19 @@ class FinancialOverlayTests(unittest.TestCase):
             self.assertEqual(result.imported, 0)
             self.assertEqual(result.rejected, 1)
             self.assertEqual(fetch_overlay_facts(base, overlay), [])
+
+    def test_overlay_rejects_a_different_immutable_base(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, other, overlay, seed = root / "base.sqlite", root / "other.sqlite", root / "overlay.sqlite", root / "seed.jsonl"
+            seed_base(base)
+            seed_base(other)
+            with other.open("ab") as stream:
+                stream.write(b"different-base")
+            seed.write_text("", encoding="utf-8")
+            import_seed(base, overlay, seed)
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                import_seed(other, overlay, seed)
 
 
 if __name__ == "__main__":

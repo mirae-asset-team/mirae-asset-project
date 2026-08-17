@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .pipeline import build_database, export_gold_candidates, export_inventory, query_database
@@ -107,4 +108,7 @@ def agent_main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    if len(sys.argv) > 1 and sys.argv[1] in {"agent-query", "build-financial-overlay", "serve"}:
+        agent_main()
+    else:
+        main()

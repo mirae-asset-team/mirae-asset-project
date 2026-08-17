@@ -9,9 +9,15 @@ from pathlib import Path
 from typing import Iterable
 
 from .agent_contracts import EvidenceBundle, EvidenceRef, QueryPlan
-from .financial_overlay import fetch_overlay_facts
+from .financial_overlay import fetch_overlay_facts, overlay_matches_base
 from .pipeline import query_database
 from .retrieval_evaluation import compile_retrieval_query
+
+
+_PROMPT_INJECTION_MARKERS = (
+    "ignore previous", "ignore all previous", "system prompt", "developer message",
+    "이전 지시를 무시", "지시를 무시", "시스템 프롬프트",
+)
 
 
 class EvidenceService:
@@ -34,15 +40,24 @@ class EvidenceService:
     def search(self, plan: QueryPlan, *, limit: int = 20) -> EvidenceBundle:
         refs: list[EvidenceRef] = []
         financial_facts: list[dict[str, object]] = []
-        if self.overlay_database and self.overlay_database.exists() and plan.account_terms:
+        overlay_attested = True
+        if self.overlay_database and self.overlay_database.exists() and plan.question_type == "numeric":
+            overlay_attested = overlay_matches_base(self.base_database, self.overlay_database)
+            if not overlay_attested:
+                plan.reason_codes.append("overlay_base_attestation_failed")
+        if self.overlay_database and self.overlay_database.exists() and plan.question_type == "numeric" and overlay_attested:
             financial_facts = fetch_overlay_facts(
                 self.base_database,
                 self.overlay_database,
                 company=plan.company,
                 as_of=plan.as_of,
+                account_terms=plan.account_terms,
+                statement_type=plan.statement_type,
+                scope=plan.scope,
+                correction_policy=plan.correction_policy,
                 limit=limit,
             )
-            refs.extend(self._financial_refs(financial_facts))
+            refs.extend(self._financial_refs(financial_facts, as_of=plan.as_of, correction_policy=plan.correction_policy))
         if len(refs) < limit:
             try:
                 query = compile_retrieval_query(plan.question, company_names=[plan.company] if plan.company else self.company_candidates())
@@ -59,23 +74,32 @@ class EvidenceService:
         unique: list[EvidenceRef] = []
         seen: set[str] = set()
         for ref in refs:
-            if ref.evidence_id not in seen and ref.lineage_status in {"root", "resolved"}:
+            if ref.evidence_id not in seen and ref.lineage_status in {"root", "resolved"} and not any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS):
                 seen.add(ref.evidence_id)
                 unique.append(ref)
         reasons = list(plan.reason_codes)
+        if plan.question_type in {"adversarial", "out_of_scope"}:
+            reasons.append("answering_disabled_for_question_type")
+        elif plan.question_type == "numeric" and not financial_facts:
+            reasons.append("validated_financial_fact_required")
         if not unique:
             reasons.append("no_safe_evidence")
+        answerable = (
+            bool(unique) and plan.question_type not in {"numeric", "adversarial", "out_of_scope"}
+        ) or (
+            bool(financial_facts) and plan.question_type == "numeric" and bool(unique)
+        )
         return EvidenceBundle(
             question=plan.question,
             evidence=unique[:limit],
-            answerable=bool(unique),
+            answerable=answerable,
             reason_codes=reasons,
             financial_facts=financial_facts,
         )
 
-    def _financial_refs(self, facts: Iterable[dict[str, object]]) -> list[EvidenceRef]:
+    def _financial_refs(self, facts: Iterable[dict[str, object]], *, as_of: str | None = None, correction_policy: str = "current") -> list[EvidenceRef]:
         ids = [str(evidence_id) for fact in facts for evidence_id in fact.get("evidence_ids", [])]  # type: ignore[union-attr]
-        return self._hydrate_ids(ids)
+        return self._hydrate_ids(ids, as_of=as_of, correction_policy=correction_policy)
 
     def _fragment_refs(self, rows: Iterable[dict[str, object]]) -> list[EvidenceRef]:
         refs: list[EvidenceRef] = []
@@ -94,11 +118,17 @@ class EvidenceService:
             ))
         return refs
 
-    def _hydrate_ids(self, evidence_ids: Iterable[str]) -> list[EvidenceRef]:
+    def _hydrate_ids(self, evidence_ids: Iterable[str], *, as_of: str | None = None, correction_policy: str = "current") -> list[EvidenceRef]:
         ids = list(dict.fromkeys(str(item) for item in evidence_ids))
         if not ids:
             return []
         placeholders = ",".join("?" for _ in ids)
+        if correction_policy == "original":
+            version_sql, version_params = "v.lineage_status='root'", []
+        elif as_of is None:
+            version_sql, version_params = "v.lineage_status IN ('root','resolved') AND v.is_current=1", []
+        else:
+            version_sql, version_params = "v.lineage_status IN ('root','resolved') AND v.effective_from<=? AND (v.effective_to IS NULL OR ? < v.effective_to)", [as_of, as_of]
         with closing(sqlite3.connect(f"file:{self.base_database.resolve().as_posix()}?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
@@ -112,8 +142,8 @@ class EvidenceService:
                          FROM table_cell WHERE evidence_id IN ({placeholders})
                      ) x JOIN source_document s ON s.source_id=x.source_id
                      JOIN filing f ON f.filing_id=x.filing_id JOIN filing_version v ON v.filing_id=x.filing_id
-                    WHERE s.parse_status='success' AND v.lineage_status IN ('root','resolved') AND v.is_current=1""",
-                [*ids, *ids],
+                    WHERE s.parse_status='success' AND {version_sql}""",
+                [*ids, *ids, *version_params],
             ).fetchall()
         result: list[EvidenceRef] = []
         for row in rows:

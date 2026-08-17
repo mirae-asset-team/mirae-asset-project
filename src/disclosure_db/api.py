@@ -13,7 +13,7 @@ from .query_planner import plan_query
 
 def create_app(agent: DisclosureAgent):
     try:
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI, HTTPException, Query
         from pydantic import BaseModel, Field
     except ImportError as exc:  # pragma: no cover - depends on optional deployment extra
         raise RuntimeError("FastAPI is optional; install miraeasset-disclosure-db[agent]") from exc
@@ -49,7 +49,7 @@ def create_app(agent: DisclosureAgent):
         return to_jsonable(agent.evidence_service.search(plan, limit=request.limit))
 
     @app.get("/v1/financial-facts")
-    def financial_facts(filing_id: str | None = None, company: str | None = None, account_id: str | None = None, as_of: str | None = None, limit: int = 100) -> dict[str, Any]:
+    def financial_facts(filing_id: str | None = None, company: str | None = None, account_id: str | None = None, as_of: str | None = None, limit: int = Query(default=100, ge=1, le=100)) -> dict[str, Any]:
         service = agent.evidence_service
         if not getattr(service, "overlay_database", None):
             return {"facts": [], "reason": "overlay_not_configured"}

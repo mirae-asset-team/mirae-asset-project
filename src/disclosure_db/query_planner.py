@@ -22,7 +22,7 @@ def plan_query(
 ) -> QueryPlan:
     text = question.strip()
     company = company_hint or _resolve_company(text, company_candidates)
-    date_match = re.search(r"(20\d{2})[-./년\s](\d{1,2})(?:[-./월\s](\d{1,2}))?", text)
+    date_match = re.search(r"(20\d{2})\s*[-./년]\s*(\d{1,2})(?:\s*[-./월]\s*(\d{1,2}))?", text)
     resolved_as_of = as_of
     reason_codes: list[str] = []
     if resolved_as_of is None and date_match:
@@ -59,6 +59,14 @@ def plan_query(
             account_terms.append(term)
     statement_type = "IS" if any(term in text for term in ("매출", "영업이익", "순이익")) else None
     question_type = "numeric" if operation != "lookup" or account_terms else "text"
+    if any(marker in text.casefold() for marker in ("ignore previous", "system prompt", "이전 지시를 무시", "지시를 무시", "시스템 프롬프트")):
+        question_type = "adversarial"
+        reason_codes.append("prompt_injection_question")
+    elif any(term in text for term in ("주가", "목표주가", "내년", "예상", "전망")):
+        question_type = "out_of_scope"
+        reason_codes.append("out_of_scope_question")
+    elif question_type == "text" and any(term in text for term in ("얼마", "금액", "몇", "수량", "가격", "증가", "감소")):
+        question_type = "numeric"
     if company is None:
         reason_codes.append("company_unresolved")
     return QueryPlan(
