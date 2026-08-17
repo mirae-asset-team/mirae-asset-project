@@ -51,23 +51,38 @@ class EvidenceService:
             account_terms.extend(self.account_aliases.get(term, []))
         account_terms = list(dict.fromkeys(account_terms))
         overlay_attested = True
+        version_as_of = plan.as_of if plan.as_of_source == "api" else (
+            None if plan.period_start or plan.period_end or plan.instant_date else plan.as_of
+        )
         if self.overlay_database and self.overlay_database.exists() and plan.question_type == "numeric":
             overlay_attested = overlay_matches_base(self.base_database, self.overlay_database)
             if not overlay_attested:
                 plan.reason_codes.append("overlay_base_attestation_failed")
         if self.overlay_database and self.overlay_database.exists() and plan.question_type == "numeric" and overlay_attested:
+            # A year/month in the question is a financial period, not a point-in-time
+            # knowledge cutoff. An API-provided as_of remains authoritative; only an
+            # inferred cutoff is suppressed when a financial period is present.
+            period_end_lte = plan.period_end if plan.operation in {"growth_rate", "difference", "ratio", "sum"} else None
+            instant_date = plan.instant_date or (
+                plan.period_end if plan.statement_type == "BS" and period_end_lte is None else None
+            )
+            exact_duration = not period_end_lte and instant_date is None
             financial_facts = fetch_overlay_facts(
                 self.base_database,
                 self.overlay_database,
                 company=plan.company,
-                as_of=plan.as_of,
+                as_of=version_as_of,
+                period_start=plan.period_start if exact_duration else None,
+                period_end=plan.period_end if exact_duration else None,
+                period_end_lte=period_end_lte,
+                instant_date=instant_date,
                 account_terms=account_terms,
                 statement_type=plan.statement_type,
                 scope=plan.scope,
                 correction_policy=plan.correction_policy,
                 limit=limit,
             )
-            refs.extend(self._financial_refs(financial_facts, as_of=plan.as_of, correction_policy=plan.correction_policy))
+            refs.extend(self._financial_refs(financial_facts, as_of=version_as_of, correction_policy=plan.correction_policy))
         if len(refs) < limit:
             try:
                 query = compile_retrieval_query(plan.question, company_names=[plan.company] if plan.company else self.company_candidates())
@@ -78,7 +93,7 @@ class EvidenceService:
                 query,
                 company=plan.company,
                 limit=max(1, limit - len(refs)),
-                as_of=plan.as_of,
+                as_of=version_as_of,
             )
             refs.extend(self._fragment_refs(rows))
         unique: list[EvidenceRef] = []
@@ -150,7 +165,7 @@ class EvidenceService:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 f"""SELECT x.evidence_id,x.filing_id,x.source_id,x.text_value,x.locator_json,
-                          s.source_path,f.filed_at,f.report_name_raw,v.lineage_status,v.is_current
+                          s.source_path,s.detected_format,s.coverage_json,f.filed_at,f.report_name_raw,v.lineage_status,v.is_current
                      FROM (
                        SELECT evidence_id,filing_id,source_id,text_normalized AS text_value,locator_json
                          FROM fragment WHERE evidence_id IN ({placeholders})
@@ -164,6 +179,10 @@ class EvidenceService:
             ).fetchall()
         result: list[EvidenceRef] = []
         for row in rows:
+            # Overlay facts are admitted only from textual table cells; PDF evidence
+            # is blocked consistently with the generic fragment serving path.
+            if str(row["detected_format"] or "") == "pdf":
+                continue
             try:
                 locator = json.loads(str(row["locator_json"] or "{}"))
             except json.JSONDecodeError:

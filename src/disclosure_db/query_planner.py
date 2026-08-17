@@ -24,20 +24,33 @@ def plan_query(
     company = company_hint or _resolve_company(text, company_candidates)
     date_match = re.search(r"(20\d{2})\s*[-./년]\s*(\d{1,2})(?:\s*[-./월]\s*(\d{1,2}))?", text)
     resolved_as_of = as_of
+    as_of_source = "api" if as_of is not None else None
+    period_start: str | None = None
+    period_end: str | None = None
+    instant_date: str | None = None
     reason_codes: list[str] = []
-    if resolved_as_of is None and date_match:
+    # Parse the accounting period independently of the point-in-time filing cutoff.
+    # An API-provided as_of remains authoritative for version selection.
+    if date_match:
         year, month, day = int(date_match.group(1)), int(date_match.group(2)), date_match.group(3)
         if day:
-            resolved_as_of = f"{year:04d}-{month:02d}-{int(day):02d}"
+            instant_date = f"{year:04d}-{month:02d}-{int(day):02d}"
         else:
-            # A year/month question is interpreted at month end for PIT filtering.
             import calendar
-            resolved_as_of = f"{year:04d}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
+            period_end = f"{year:04d}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
+            period_start = f"{year:04d}-{month:02d}-01"
+        if resolved_as_of is None:
+            resolved_as_of = instant_date or period_end
+            as_of_source = "inferred"
         reason_codes.append("explicit_date")
-    elif resolved_as_of is None:
+    elif not date_match:
         year_match = re.search(r"(20\d{2})년", text)
         if year_match:
-            resolved_as_of = f"{year_match.group(1)}-12-31"
+            period_start = f"{year_match.group(1)}-01-01"
+            period_end = f"{year_match.group(1)}-12-31"
+            if resolved_as_of is None:
+                resolved_as_of = period_end
+                as_of_source = "inferred"
             reason_codes.append("explicit_year")
     if "증가율" in text or "성장률" in text or "증감률" in text:
         operation = "growth_rate"
@@ -57,7 +70,9 @@ def plan_query(
     for term in ("매출액", "영업이익", "당기순이익", "자산총계", "부채총계", "자본총계", "현금및현금성자산"):
         if term in text:
             account_terms.append(term)
-    statement_type = "IS" if any(term in text for term in ("매출", "영업이익", "순이익")) else None
+    statement_type = "IS" if any(term in text for term in ("매출", "영업이익", "순이익")) else (
+        "BS" if any(term in text for term in ("자산", "부채", "자본", "현금및현금성자산")) else None
+    )
     question_type = "numeric" if operation != "lookup" or account_terms else "text"
     if any(marker in text.casefold() for marker in ("ignore previous", "system prompt", "이전 지시를 무시", "지시를 무시", "시스템 프롬프트")):
         question_type = "adversarial"
@@ -73,7 +88,9 @@ def plan_query(
     if company is None:
         reason_codes.append("company_unresolved")
     return QueryPlan(
-        question=text, company=company, as_of=resolved_as_of, operation=operation,
+        question=text, company=company, as_of=resolved_as_of, as_of_source=as_of_source,
+        period_start=period_start,
+        period_end=period_end, instant_date=instant_date, operation=operation,
         account_terms=account_terms, scope=scope, statement_type=statement_type,
         correction_policy=correction_policy, question_type=question_type,
         reason_codes=reason_codes,

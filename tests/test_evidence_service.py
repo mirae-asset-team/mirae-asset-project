@@ -53,7 +53,18 @@ class EvidenceServiceTests(unittest.TestCase):
         self.assertEqual(plan.company, "삼성전자")
         self.assertEqual(plan.operation, "growth_rate")
         self.assertEqual(plan.as_of, "2023-12-31")
+        self.assertEqual(plan.period_start, "2023-01-01")
+        self.assertEqual(plan.period_end, "2023-12-31")
         self.assertEqual(plan_query("삼성전자 2023년 3월 공시는?", company_candidates=["삼성전자"]).as_of, "2023-03-31")
+
+        with_api_cutoff = plan_query("삼성전자 2023년 매출액은?", company_candidates=["삼성전자"], as_of="2026-01-01")
+        self.assertEqual(with_api_cutoff.as_of, "2026-01-01")
+        self.assertEqual(with_api_cutoff.as_of_source, "api")
+        self.assertEqual(with_api_cutoff.period_start, "2023-01-01")
+        self.assertEqual(with_api_cutoff.period_end, "2023-12-31")
+        instant_bs = plan_query("삼성전자 2023년 자산총계는?", company_candidates=["삼성전자"])
+        self.assertEqual(instant_bs.statement_type, "BS")
+        self.assertEqual(instant_bs.period_end, "2023-12-31")
 
     def test_numeric_questions_fail_closed_without_validated_financial_fact(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

@@ -101,8 +101,9 @@ external-content FTS와 증분 동기화 trigger를 적용합니다. 재무제�
 
 원본 SQLite는 읽기 전용으로 유지하고, 사람이 승인한 재무제표 fact만 별도 overlay에 적재합니다.
 overlay가 비어 있으면 에이전트는 일반 공시 fragment 검색만 수행하며, 근거가 없으면 자동으로
-숫자·계산 질문을 답변 불가로 반환합니다. 현재 저장소의 `financial_fact_gold_seed.jsonl`은 의도적으로
-비어 있으며, 사람 검수 전에는 숫자 답변을 활성화하지 않습니다. 숫자 계산은 `Decimal` allowlist만
+숫자·계산 질문을 답변 불가로 반환합니다. 현재 저장소의 `financial_fact_gold_seed.jsonl`에는
+고려아연 최신 resolved 정정 사업보고서에서 셀·단위·기간을 대조한 8개 소형 검증 표본이 들어 있습니다.
+실제 운영 확장은 같은 형식으로 사람이 원문과 대조한 행만 추가합니다. 숫자 계산은 `Decimal` allowlist만
 허용하고, 최종 답변은 evidence ID가
 실제로 검색 결과에 포함되는지 검증한 뒤 반환합니다.
 
@@ -127,8 +128,10 @@ $py = 'C:\Users\lark0\.cache\codex-runtimes\codex-primary-runtime\dependencies\p
   --database 'D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite' `
   --overlay 'D:\mirae-asset-project\db\agent\financial_overlay.sqlite' `
   --gold 'data/derived/gold_qa.jsonl' `
-  --output 'data/derived/agent_evaluation.json'
+  --output 'data/derived/agent_eval_full_db.json'
 ```
 
 HTTP API가 필요하면 `pip install -e .[agent]` 후 `disclosure-agent serve`를 사용합니다. FastAPI와
-uvicorn은 선택 의존성으로 지연 로딩되며, 핵심 CLI·테스트에는 필요하지 않습니다.
+uvicorn은 선택 의존성으로 지연 로딩되며, 핵심 CLI·테스트에는 필요하지 않습니다. API 응답에는
+`request_id`, `corpus_revision`, `latency_ms`가 공통으로 붙고, overlay가 설정됐지만 base attestation에
+실패하면 `/health`가 `ready=false`를 반환합니다.

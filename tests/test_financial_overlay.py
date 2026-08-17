@@ -67,6 +67,7 @@ class FinancialOverlayTests(unittest.TestCase):
             rows = fetch_overlay_facts(base, overlay, filing_id="f1")
             self.assertEqual(rows[0]["value_numeric"], "1000")
             self.assertEqual(rows[0]["evidence_ids"], ["c1"])
+            self.assertEqual(rows[0]["evidence_texts"], ["매출액 1,000"])
             answer = DisclosureAgent(AgentSettings(base, overlay)).answer("테스트 매출액은 얼마인가?", company="테스트")
             self.assertTrue(answer.verified)
             self.assertEqual(answer.numeric_values, ["1000"])
@@ -100,6 +101,26 @@ class FinancialOverlayTests(unittest.TestCase):
             import_seed(base, overlay, seed)
             with self.assertRaisesRegex(ValueError, "does not match"):
                 import_seed(other, overlay, seed)
+
+    def test_overlay_blocks_pdf_visual_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay, seed = root / "base.sqlite", root / "overlay.sqlite", root / "seed.jsonl"
+            seed_base(base)
+            connection = sqlite3.connect(base)
+            connection.execute("UPDATE source_document SET detected_format='pdf' WHERE source_id='s1'")
+            connection.commit()
+            connection.close()
+            seed.write_text(json.dumps({
+                "financial_fact_id": "pdf-fact", "filing_id": "f1", "account_name_raw": "매출액",
+                "statement_type": "IS", "scope": "consolidated", "period_type": "duration",
+                "period_start": "2023-01-01", "period_end": "2023-12-31", "value_numeric": "1000",
+                "scale": 1, "extraction_method": "human_validated", "validation_status": "validated",
+                "evidence_ids": ["c1"],
+            }, ensure_ascii=False) + "\n", encoding="utf-8")
+            result = import_seed(base, overlay, seed)
+            self.assertEqual(result.imported, 0)
+            self.assertIn("visual evidence is blocked", result.reasons[0])
 
 
 if __name__ == "__main__":

@@ -146,7 +146,7 @@ def _period_ok(row: dict[str, Any]) -> bool:
 def _base_evidence(connection: sqlite3.Connection, filing_id: str, evidence_id: str) -> sqlite3.Row | None:
     return connection.execute(
         """SELECT c.evidence_id,c.filing_id,c.source_id,c.text_raw,c.locator_json,
-                  s.parse_status,s.detected_format,tr.parse_status AS table_parse_status,v.lineage_status
+                  s.parse_status,s.detected_format,s.coverage_json,tr.parse_status AS table_parse_status,v.lineage_status
            FROM table_cell c
            JOIN table_record tr ON tr.table_id=c.table_id
            JOIN source_document s ON s.source_id=c.source_id
@@ -240,8 +240,11 @@ def _validate_seed_row(base: sqlite3.Connection, row: dict[str, Any]) -> None:
             raise ValueError(f"evidence source is not parse-success: {evidence_id}")
         if evidence["table_parse_status"] != "success":
             raise ValueError(f"evidence table is not parse-success: {evidence_id}")
-        if evidence["detected_format"] == "pdf" and str(row.get("extraction_method")) != "human_validated":
-            raise ValueError(f"PDF evidence requires human_validated extraction: {evidence_id}")
+        # The overlay is restricted to textual table cells. A PDF table is blocked;
+        # an XML source may contain unrelated image references, which do not make this
+        # specific textual cell visual evidence.
+        if evidence["detected_format"] == "pdf":
+            raise ValueError(f"visual evidence is blocked for overlay facts: {evidence_id}")
     try:
         value = Decimal(str(row["value_numeric"]))
     except InvalidOperation as exc:
@@ -270,6 +273,10 @@ def fetch_overlay_facts(
     scope: str | None = None,
     correction_policy: str = "current",
     as_of: str | None = None,
+    period_start: str | None = None,
+    period_end: str | None = None,
+    period_end_lte: str | None = None,
+    instant_date: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, object]]:
     if limit <= 0 or not Path(overlay_database).exists():
@@ -310,6 +317,18 @@ def fetch_overlay_facts(
     if scope is not None:
         where.append("ff.scope=?")
         params.append(scope)
+    if period_start is not None:
+        where.append("ff.period_start=?")
+        params.append(period_start)
+    if period_end is not None:
+        where.append("ff.period_end=?")
+        params.append(period_end)
+    if period_end_lte is not None:
+        where.append("ff.period_end<=?")
+        params.append(period_end_lte)
+    if instant_date is not None:
+        where.append("ff.instant_date=?")
+        params.append(instant_date)
     if correction_policy == "corrected":
         where.append("f.is_correction=1")
     params.append(limit)
@@ -320,8 +339,9 @@ def fetch_overlay_facts(
         connection.execute("ATTACH DATABASE ? AS overlay", (str(Path(overlay_database).resolve()),))
         rows = connection.execute(
             f"""SELECT ff.*,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,
-                       v.lineage_status,v.is_current,group_concat(DISTINCT ffe.evidence_id) evidence_ids,
-                       group_concat(DISTINCT c.text_raw) evidence_texts
+                       v.lineage_status,v.is_current,s.detected_format,s.coverage_json,
+                       group_concat(DISTINCT ffe.evidence_id) evidence_ids,
+                       json_group_array(DISTINCT c.text_raw) evidence_texts
                   FROM overlay.financial_fact ff
                   JOIN main.filing f ON f.filing_id=ff.filing_id
                   JOIN main.filing_version v ON v.filing_id=ff.filing_id
@@ -335,7 +355,12 @@ def fetch_overlay_facts(
     result: list[dict[str, object]] = []
     for row in rows:
         item = dict(row)
+        if str(item.get("detected_format") or "") == "pdf":
+            continue
         item["evidence_ids"] = str(item.get("evidence_ids") or "").split(",") if item.get("evidence_ids") else []
-        item["evidence_texts"] = str(item.get("evidence_texts") or "").split(",") if item.get("evidence_texts") else []
+        try:
+            item["evidence_texts"] = json.loads(str(item.get("evidence_texts") or "[]"))
+        except json.JSONDecodeError:
+            item["evidence_texts"] = []
         result.append(item)
     return result

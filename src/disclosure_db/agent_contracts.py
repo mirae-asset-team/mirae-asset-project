@@ -12,6 +12,10 @@ class QueryPlan:
     question: str
     company: str | None = None
     as_of: str | None = None
+    as_of_source: str | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    instant_date: str | None = None
     operation: str = "lookup"
     account_terms: list[str] = field(default_factory=list)
     scope: str | None = None

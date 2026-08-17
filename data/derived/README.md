@@ -33,8 +33,10 @@ python scripts/validate_gold.py
 정상 기준은 `records=23`, `issue_count=0`, `gold_release_gate_passed=true`입니다.
 
 `disclosure_corpus_semantic_v1.sqlite`도 38GB급 로컬 산출물이므로 Git에서 제외합니다. 생성 명령과
-감사 JSON만 공유하며, `financial_fact`가 0행인 것은 누락이 아니라 재무제표 account/scope/period Gold가
-아직 없어서 임의 적재를 차단한 결과입니다.
+감사 JSON만 공유하며, 원본 semantic DB의 `financial_fact`가 0행인 것은 누락이 아니라 재무제표
+account/scope/period를 원본에 임의 적재하지 않도록 한 결과입니다. 사람이 원문 셀과 대조한 재무
+표본은 별도 `financial_overlay.sqlite`에 8행으로 적재하며, seed 원본은
+`financial_fact_gold_seed.jsonl`입니다.
 
 최종 semantic 사본 기준 핵심 상태는 `structure_gate_passed=true`,
 `semantic_schema_gate_passed=true`, FTS rowid orphan 0, evidence filing mismatch 0,
