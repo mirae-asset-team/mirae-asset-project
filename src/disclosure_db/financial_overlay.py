@@ -119,6 +119,7 @@ def overlay_matches_base(base_database: Path, overlay_database: Path) -> bool:
 def _read_base(path: Path) -> sqlite3.Connection:
     # URI mode=ro is intentional: an importer must never mutate the immutable corpus.
     connection = sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro", uri=True)
+    connection.execute("PRAGMA busy_timeout=5000")
     connection.row_factory = sqlite3.Row
     return connection
 

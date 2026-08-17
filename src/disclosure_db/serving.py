@@ -8,6 +8,12 @@ from pathlib import Path
 SAFE_LINEAGE_STATUSES = ("root", "resolved")
 
 
+def _readonly_connection(database: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(f"file:{Path(database).resolve().as_posix()}?mode=ro", uri=True)
+    connection.execute("PRAGMA busy_timeout=5000")
+    return connection
+
+
 def version_filter_sql(*, alias: str = "v", as_of: str | None = None) -> tuple[str, list[object]]:
     """Return the mandatory lineage/PIT predicate for answer-producing reads."""
     status = f"{alias}.lineage_status IN ('root','resolved')"
@@ -37,7 +43,7 @@ def fetch_validated_facts(
     if predicate is not None:
         params.append(predicate)
     params.append(limit)
-    with closing(sqlite3.connect(database)) as connection:
+    with closing(_readonly_connection(database)) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
             f"""SELECT f.fact_id,f.filing_id,f.fact_type,f.subject,f.predicate,f.value_raw,f.unit,
@@ -85,7 +91,7 @@ def fetch_validated_financial_facts(
     if account_id is not None:
         params.append(account_id)
     params.append(limit)
-    with closing(sqlite3.connect(database)) as connection:
+    with closing(_readonly_connection(database)) as connection:
         connection.row_factory = sqlite3.Row
         rows = connection.execute(
             f"""SELECT ff.*,v.lineage_status,
