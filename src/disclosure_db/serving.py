@@ -57,7 +57,9 @@ def fetch_validated_facts(
                 JOIN table_cell c ON c.evidence_id=fe.evidence_id
                 JOIN source_document s ON s.source_id=c.source_id
                 WHERE f.filing_id=? AND f.validation_status='validated'
-                  AND s.parse_status='success' AND {version_sql}{predicate_sql}
+                  AND s.parse_status='success' AND s.detected_format<>'pdf'
+                  AND COALESCE(CAST(json_extract(s.coverage_json,'$.image_reference_count') AS INTEGER),0)=0
+                  AND {version_sql}{predicate_sql}
                 GROUP BY f.fact_id
                 ORDER BY f.fact_id
                 LIMIT ?""",
@@ -102,7 +104,9 @@ def fetch_validated_financial_facts(
                 JOIN table_cell c ON c.evidence_id=ffe.evidence_id
                 JOIN source_document s ON s.source_id=c.source_id
                 WHERE ff.filing_id=? AND ff.validation_status='validated'
-                  AND s.parse_status='success' AND {version_sql}{account_sql}
+                  AND s.parse_status='success' AND s.detected_format<>'pdf'
+                  AND COALESCE(CAST(json_extract(s.coverage_json,'$.image_reference_count') AS INTEGER),0)=0
+                  AND {version_sql}{account_sql}
                 GROUP BY ff.financial_fact_id
                 ORDER BY ff.financial_fact_id
                 LIMIT ?""",
