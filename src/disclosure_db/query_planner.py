@@ -67,6 +67,9 @@ def plan_query(
         reason_codes.append("out_of_scope_question")
     elif question_type == "text" and any(term in text for term in ("얼마", "금액", "몇", "수량", "가격", "증가", "감소")):
         question_type = "numeric"
+    if question_type == "numeric" and any(term in text for term in ("계약금액", "공급계약", "보유주식", "발행주식", "자기주식", "신주", "권리")):
+        question_type = "event_numeric"
+        reason_codes.append("event_fact_required")
     if company is None:
         reason_codes.append("company_unresolved")
     return QueryPlan(

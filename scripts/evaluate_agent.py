@@ -35,20 +35,23 @@ def main() -> None:
             selected_evidence = set(answer.citation_ids)
             citation_recall = (len(expected_evidence & selected_evidence) / len(expected_evidence)) if expected_evidence else None
             expected_value = record.get("answer", {}).get("value") if isinstance(record.get("answer"), dict) else None
+            expected_text = record.get("answer", {}).get("text") if isinstance(record.get("answer"), dict) else None
             numeric_match = None
             if expected_value is not None:
                 try:
                     numeric_match = any(Decimal(str(expected_value)) == Decimal(str(value)) for value in answer.numeric_values)
                 except (InvalidOperation, TypeError):
                     numeric_match = False
+            text_match = (str(expected_text).casefold() in answer.answer.casefold()) if expected_text else None
             evaluations.append({
                 "question_id": record.get("question_id", f"line-{line_no}"),
                 "expected_answerable": expected,
                 "answerable": answer.answerable,
                 "verified": answer.verified,
-                "status": "pass" if answer.verified and answer.answerable == expected and (not expected or bool(citation_recall) and (numeric_match is not False)) else "review",
+                "status": "pass" if answer.verified and answer.answerable == expected and (not expected or citation_recall == 1.0 and (numeric_match is not False) and (text_match is not False)) else "review",
                 "citation_recall": citation_recall,
                 "numeric_match": numeric_match,
+                "text_match": text_match,
                 "latency_ms": elapsed_ms,
                 "reason_codes": answer.reason_codes,
                 "citation_ids": answer.citation_ids,

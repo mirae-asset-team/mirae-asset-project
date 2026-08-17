@@ -101,7 +101,9 @@ external-content FTS와 증분 동기화 trigger를 적용합니다. 재무제�
 
 원본 SQLite는 읽기 전용으로 유지하고, 사람이 승인한 재무제표 fact만 별도 overlay에 적재합니다.
 overlay가 비어 있으면 에이전트는 일반 공시 fragment 검색만 수행하며, 근거가 없으면 자동으로
-답변 불가를 반환합니다. 숫자 계산은 `Decimal` allowlist만 허용하고, 최종 답변은 evidence ID가
+숫자·계산 질문을 답변 불가로 반환합니다. 현재 저장소의 `financial_fact_gold_seed.jsonl`은 의도적으로
+비어 있으며, 사람 검수 전에는 숫자 답변을 활성화하지 않습니다. 숫자 계산은 `Decimal` allowlist만
+허용하고, 최종 답변은 evidence ID가
 실제로 검색 결과에 포함되는지 검증한 뒤 반환합니다.
 
 ```powershell

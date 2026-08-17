@@ -611,7 +611,7 @@ def query_database(
                 item_params.append(limit)
                 matches = connection.execute(
                         f"""SELECT fr.evidence_id,fr.filing_id,fr.source_id,fr.fragment_type,fr.section_path_json,
-                                   fr.locator_json,fr.text_normalized,
+                                   fr.locator_json,fr.text_normalized,s.detected_format,
                                    CAST(json_extract(s.coverage_json,'$.image_reference_count') AS INTEGER)
                                        AS image_reference_count,
                                    bm25(fragment_fts) AS score
@@ -637,7 +637,7 @@ def query_database(
             params.append(limit)
             rows = connection.execute(
                 f"""SELECT fr.evidence_id,fr.filing_id,fr.source_id,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,
-                           fr.fragment_type,fr.section_path_json,fr.locator_json,fr.text_normalized,
+                           fr.fragment_type,fr.section_path_json,fr.locator_json,fr.text_normalized,s.detected_format,
                            v.lineage_status,v.is_current,v.effective_from,v.effective_to,
                            CAST(json_extract(s.coverage_json,'$.image_reference_count') AS INTEGER)
                                AS image_reference_count,

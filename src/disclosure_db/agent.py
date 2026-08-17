@@ -46,6 +46,9 @@ class DisclosureAgent:
         query_plan = plan_query(question, company_candidates=candidates, company_hint=company, as_of=as_of)
         bundle = self.evidence_service.search(query_plan, limit=limit)
         self._attach_calculation(bundle, query_plan.operation)
+        if query_plan.operation in {"growth_rate", "difference", "ratio", "sum"} and bundle.calculation is None:
+            bundle.answerable = False
+            bundle.reason_codes.append("calculation_required")
         draft = self.generator.generate(bundle)  # type: ignore[union-attr]
         return verify_answer(bundle, draft)
 

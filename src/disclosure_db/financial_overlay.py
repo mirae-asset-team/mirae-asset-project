@@ -14,6 +14,7 @@ from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -86,18 +87,30 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
+@lru_cache(maxsize=8)
+def _overlay_matches_base_cached(base_name: str, overlay_name: str, base_size: int, base_mtime: int, overlay_size: int, overlay_mtime: int) -> bool:
+    try:
+        with closing(sqlite3.connect(overlay_name)) as connection:
+            row = connection.execute(
+                "SELECT source_database_sha256 FROM overlay_revision WHERE overlay_revision=?",
+                ("semantic-v1-agent-overlay",),
+            ).fetchone()
+        return row is not None and str(row[0]) == sha256_file(Path(base_name))
+    except (OSError, sqlite3.Error):
+        return False
+
+
 def overlay_matches_base(base_database: Path, overlay_database: Path) -> bool:
     """Fail closed if an overlay was built from a different immutable base file."""
     if not Path(overlay_database).exists():
         return False
     try:
-        with closing(sqlite3.connect(overlay_database)) as connection:
-            row = connection.execute(
-                "SELECT source_database_sha256 FROM overlay_revision WHERE overlay_revision=?",
-                ("semantic-v1-agent-overlay",),
-            ).fetchone()
-        return row is not None and str(row[0]) == sha256_file(Path(base_database))
-    except sqlite3.Error:
+        base_stat, overlay_stat = Path(base_database).stat(), Path(overlay_database).stat()
+        return _overlay_matches_base_cached(
+            str(Path(base_database).resolve()), str(Path(overlay_database).resolve()),
+            int(base_stat.st_size), int(base_stat.st_mtime_ns), int(overlay_stat.st_size), int(overlay_stat.st_mtime_ns),
+        )
+    except OSError:
         return False
 
 
@@ -258,10 +271,15 @@ def fetch_overlay_facts(
 ) -> list[dict[str, object]]:
     if limit <= 0 or not Path(overlay_database).exists():
         return []
+    if not overlay_matches_base(Path(base_database), Path(overlay_database)):
+        return []
     version_sql, version_params = version_filter_sql(alias="v", as_of=as_of)
     if correction_policy == "original":
         version_sql = "v.lineage_status='root'"
         version_params = []
+        if as_of is not None:
+            version_sql += " AND v.effective_from<=? AND (v.effective_to IS NULL OR ? < v.effective_to)"
+            version_params = [as_of, as_of]
     where = ["ff.validation_status='validated'", "s.parse_status='success'", version_sql]
     params: list[object] = list(version_params)
     with closing(_read_base(Path(base_database))) as schema_connection:
@@ -289,9 +307,11 @@ def fetch_overlay_facts(
     if scope is not None:
         where.append("ff.scope=?")
         params.append(scope)
+    if correction_policy == "corrected":
+        where.append("f.is_correction=1")
     params.append(limit)
     with closing(_read_base(Path(base_database))) as connection:
-        connection.execute("ATTACH DATABASE ? AS overlay", (str(Path(overlay_database).resolve()),))
+        connection.execute("ATTACH DATABASE ? AS overlay", (f"file:{Path(overlay_database).resolve().as_posix()}?mode=ro",))
         rows = connection.execute(
             f"""SELECT ff.*,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,
                        v.lineage_status,v.is_current,group_concat(DISTINCT ffe.evidence_id) evidence_ids,

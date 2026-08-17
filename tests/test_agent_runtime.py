@@ -41,6 +41,23 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertTrue(answer.verified)
         self.assertIn("매출액", answer.answer)
 
+    def test_multi_period_operation_fails_closed_with_one_fact(self) -> None:
+        class FakeService:
+            def company_candidates(self):
+                return ["테스트회사"]
+
+            def search(self, plan, **kwargs):
+                return EvidenceBundle(
+                    question=plan.question,
+                    evidence=[EvidenceRef("ev1", "f1", "s1", "매출액 1000원", {}, "root", 0.1)],
+                    answerable=True,
+                    financial_facts=[{"account_name_raw": "매출액", "statement_type": "IS", "scope": "consolidated", "period_type": "duration", "period_end": "2023-12-31", "value_numeric": "1000", "evidence_ids": ["ev1"]}],
+                )
+
+        answer = DisclosureAgent(evidence_service=FakeService()).answer("테스트회사 매출액 증가율은?")
+        self.assertFalse(answer.answerable)
+        self.assertIn("calculation_required", answer.reason_codes)
+
     def test_decimal_calculator_has_no_float_rounding_or_eval(self) -> None:
         result = calculate("growth_rate", ["100", "110"])
         self.assertEqual(result.value, Decimal("10"))

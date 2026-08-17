@@ -26,6 +26,12 @@ class EvidenceService:
         self.overlay_database = Path(overlay_database) if overlay_database else None
         self.corpus_revision = corpus_revision
         self._companies: list[str] | None = None
+        aliases_path = Path(__file__).resolve().parents[2] / "config" / "financial_account_aliases.json"
+        try:
+            raw_aliases = json.loads(aliases_path.read_text(encoding="utf-8"))
+            self.account_aliases = {str(key): [str(item) for item in values] for key, values in raw_aliases.items()}
+        except (OSError, json.JSONDecodeError):
+            self.account_aliases = {}
 
     def company_candidates(self) -> list[str]:
         if self._companies is None:
@@ -40,6 +46,10 @@ class EvidenceService:
     def search(self, plan: QueryPlan, *, limit: int = 20) -> EvidenceBundle:
         refs: list[EvidenceRef] = []
         financial_facts: list[dict[str, object]] = []
+        account_terms = list(plan.account_terms)
+        for term in plan.account_terms:
+            account_terms.extend(self.account_aliases.get(term, []))
+        account_terms = list(dict.fromkeys(account_terms))
         overlay_attested = True
         if self.overlay_database and self.overlay_database.exists() and plan.question_type == "numeric":
             overlay_attested = overlay_matches_base(self.base_database, self.overlay_database)
@@ -51,7 +61,7 @@ class EvidenceService:
                 self.overlay_database,
                 company=plan.company,
                 as_of=plan.as_of,
-                account_terms=plan.account_terms,
+                account_terms=account_terms,
                 statement_type=plan.statement_type,
                 scope=plan.scope,
                 correction_policy=plan.correction_policy,
@@ -78,14 +88,14 @@ class EvidenceService:
                 seen.add(ref.evidence_id)
                 unique.append(ref)
         reasons = list(plan.reason_codes)
-        if plan.question_type in {"adversarial", "out_of_scope"}:
+        if plan.question_type in {"adversarial", "out_of_scope", "event_numeric"}:
             reasons.append("answering_disabled_for_question_type")
         elif plan.question_type == "numeric" and not financial_facts:
             reasons.append("validated_financial_fact_required")
         if not unique:
             reasons.append("no_safe_evidence")
         answerable = (
-            bool(unique) and plan.question_type not in {"numeric", "adversarial", "out_of_scope"}
+            bool(unique) and plan.question_type not in {"numeric", "adversarial", "out_of_scope", "event_numeric"}
         ) or (
             bool(financial_facts) and plan.question_type == "numeric" and bool(unique)
         )
@@ -104,6 +114,8 @@ class EvidenceService:
     def _fragment_refs(self, rows: Iterable[dict[str, object]]) -> list[EvidenceRef]:
         refs: list[EvidenceRef] = []
         for row in rows:
+            if str(row.get("detected_format") or "") == "pdf" or int(row.get("image_reference_count") or 0) > 0:
+                continue
             try:
                 locator = json.loads(str(row.get("locator_json") or "{}"))
             except json.JSONDecodeError:
@@ -125,10 +137,15 @@ class EvidenceService:
         placeholders = ",".join("?" for _ in ids)
         if correction_policy == "original":
             version_sql, version_params = "v.lineage_status='root'", []
+            if as_of is not None:
+                version_sql += " AND v.effective_from<=? AND (v.effective_to IS NULL OR ? < v.effective_to)"
+                version_params = [as_of, as_of]
         elif as_of is None:
             version_sql, version_params = "v.lineage_status IN ('root','resolved') AND v.is_current=1", []
         else:
             version_sql, version_params = "v.lineage_status IN ('root','resolved') AND v.effective_from<=? AND (v.effective_to IS NULL OR ? < v.effective_to)", [as_of, as_of]
+        if correction_policy == "corrected":
+            version_sql += " AND f.is_correction=1"
         with closing(sqlite3.connect(f"file:{self.base_database.resolve().as_posix()}?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
