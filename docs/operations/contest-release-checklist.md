@@ -19,9 +19,11 @@ This checklist records binary evidence without credentials or raw provider respo
 | Docker image build/start | BLOCKED_EXTERNAL | Docker CLI/runtime unavailable |
 | NCP server/public IP/ACG | BLOCKED_EXTERNAL | No NCP account/resource/credential is available |
 | Data volume and remote artifact transfer | BLOCKED_EXTERNAL | No approved NCP host or external storage path is available |
-| `/health` external request ID | NOT_RUN | Public endpoint was not started without external prerequisites |
-| Answerable/abstention external request IDs | NOT_RUN | Public endpoint was not started without external prerequisites |
-| Restart/rollback test | NOT_RUN | Requires a deployed service; local overlay rollback backup is preserved |
+| Local `/health` request ID | PASS | TestClient request `97de5985c7894355b2618abc38b5b01d`; HTTP 200; ready/attested/search-ready true |
+| Local answerable request ID | PASS | `/query` request `a76c16260e274c61ab9a66cbf7e91341`; HTTP 200; q005 verified with 2 values and 2 citations |
+| Local abstention request ID | PASS | `/query` request `722d23591a0742b0ba95128830511c47`; HTTP 200; answerable=false, verified=false, citations=[] |
+| External public request IDs | BLOCKED_EXTERNAL | Requires NCP/public endpoint and second network |
+| Local rollback artifact | PASS | Previous live overlay preserved as timestamped backup; base/search untouched |
 | External second-network test | BLOCKED_EXTERNAL | No public endpoint or second network is available |
 
 ## Rollback path

@@ -307,3 +307,10 @@
 - Verification: q005 direct probe returned `240993039040` and `495278073440` with both Gold citations; q004 returned only `495278073440`. Full suite after the fix → `214 passed, 1 skipped, 17 subtests passed`; compileall passed.
 - Plan 2 reruns after the fix: audited 31 pass `16`, numeric exactness `1.0`, citation recall `1.0`, `false_numeric_claim_count=0`, `unsafe_answer_count=0`, `error_count=0`; holdout 83 pass `16`, numeric exactness `1.0`, citation recall `1.0`, and the same zero hard-safety counts. Provider configured remains `false`.
 - Final post-fix stress run `20260818T214805Z-1b014f0bfca7`: `300/300` pass, all four quality metrics `1.0`, all hard counters `0`, hard gate passed. Manifest and immutable base SHA remain unchanged.
+
+## 2026-08-19T07:05:00+09:00 / 2026-08-18T22:05:00Z — Local API smoke completion
+
+- `/health` via FastAPI TestClient returned HTTP 200 with `ready=true`, base/overlay attestation true, and search index ready; request ID `97de5985c7894355b2618abc38b5b01d`.
+- Answerable `/query` q005 returned HTTP 200, `verified=true`, both numeric values and both citations; request ID `a76c16260e274c61ab9a66cbf7e91341`.
+- Adversarial `/query` returned HTTP 200 with `answerable=false`, `verified=false`, and no citations; request ID `722d23591a0742b0ba95128830511c47`.
+- These are local API evidence only. Public/NCP request IDs and second-network verification remain `BLOCKED_EXTERNAL`.
