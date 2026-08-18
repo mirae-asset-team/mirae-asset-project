@@ -22,6 +22,8 @@ def fetch_event_facts(
     attestation: CorpusAttestation | None = None,
 ) -> list[dict[str, object]]:
     """Read audited event facts while keeping the overlay implementation private."""
+    if attestation is None:
+        return []
     from .financial_overlay import fetch_event_facts as _fetch_event_facts
 
     return _fetch_event_facts(

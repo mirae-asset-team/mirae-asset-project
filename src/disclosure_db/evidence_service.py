@@ -39,6 +39,8 @@ class EvidenceService:
         self.attestation = attestation
         self.search_database = Path(search_database) if search_database else None
         self.reranker = reranker
+        if (self.overlay_database is not None or self.search_database is not None) and attestation is None:
+            raise ValueError("attestation is required when runtime overlay/search is configured")
         self._companies: list[str] | None = None
         aliases_path = Path(__file__).resolve().parents[2] / "config" / "financial_account_aliases.json"
         try:
@@ -48,6 +50,8 @@ class EvidenceService:
             self.account_aliases = {}
 
     def _base_identity_valid(self) -> bool:
+        if self.overlay_database is not None or self.search_database is not None:
+            return self.attestation is not None and verify_fast_identity(self.base_database, self.attestation)
         return self.attestation is None or verify_fast_identity(self.base_database, self.attestation)
 
     def company_candidates(self) -> list[str]:

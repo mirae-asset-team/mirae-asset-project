@@ -69,6 +69,10 @@ class DisclosureAgent:
                 reranker=configured_reranker if configured_reranker is not None else ClovaReranker(),
             )
         self.evidence_service = evidence_service
+        configured_overlay = getattr(self.evidence_service, "overlay_database", None)
+        configured_search = getattr(self.evidence_service, "search_database", None)
+        if (configured_overlay is not None or configured_search is not None) and getattr(self.evidence_service, "attestation", None) is None:
+            raise ValueError("attestation is required when runtime overlay/search is configured")
         self.generator = generator or (HyperClovaGenerator() if settings is None or settings.use_hcx else DeterministicGenerator())
 
     def answer(self, question: str, *, company: str | None = None, as_of: str | None = None, limit: int = 20) -> VerifiedAnswer:

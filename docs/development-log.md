@@ -130,3 +130,27 @@
   - Gate reasons: numeric exactness `0.153846 < 1.0` (fail); citation precision `0.045 < 1.0` (fail); citation recall `0.1875 < 0.9` (fail); holdout answerability agreement `0.855422 < 0.9` (fail); integrated retrieval Recall@20 missing (fail); integrated post-rerank Recall@8 missing (fail); provider reranked latency missing (fail). Error count, false numeric claims, unsafe answers, planner/fact/local/end-to-end latency pass their configured gates; regression answerability count `71 >= 31` passes.
 - Standalone retrieval remains separate from agent-gate integration: `python scripts/evaluate_retrieval.py ... --limit 20` reports Recall@20 `0.7647058824` (below configured `1.0`), question-complete recall `0.75`, MRR `0.3449449856`, and post-rerank `null` with `reranker_not_configured`. The agent evaluator’s missing retrieval fields are not reported as zero and are independent of this standalone result.
 - Documentation/report: README and this log now distinguish every failed gate, measured pass, missing integrated retrieval metric, standalone retrieval residual, and provider-disabled fallback. The ignored `.superpowers/sdd/2026-08-18-agent-serving-vertical-slice/task-10-report.md` contains the exact command/result ledger.
+
+## Task 10 final review fix round 1
+
+- Trusted identity: `data/derived/database_distribution_manifest_semantic_v1.json` now records the
+  offline-verified D-drive `mtime_ns=1786982413000000000` alongside the unchanged SHA-256 and byte
+  size. `load_distribution_attestation` reads only this trusted manifest value; it never captures the
+  request file's current mtime. Missing mtime fails `verify_fast_identity`, and bool, fractional,
+  negative, or non-integer values are rejected. Same-size replacement before a fresh load is covered
+  by a regression test. Copied/re-extracted databases require offline re-attestation and dependent
+  artifact regeneration.
+- Runtime fail-closed boundary: `DisclosureAgent`/`EvidenceService` reject overlay or search-index
+  configuration without an attestation; CLI `agent-query` and `serve` require `--attestation` for
+  those options. API and serving event/fact wrappers return empty/unanswerable without attestation
+  and never invoke the offline-only full-hash fallback. `overlay_matches_base(..., attestation=None)`
+  remains available only to explicit offline/unit fixture callers.
+- Citation serialization: populated `CitationRef` metadata, locator, and calculation fields are now
+  asserted through `to_jsonable` and strict JSON round-trip serialization used by CLI/API envelopes.
+- Focused verification: `python -m unittest tests.test_attestation tests.test_financial_overlay tests.test_agent_runtime tests.test_safety_contracts tests.test_search_index -q` → 90 passed, 2 optional skips.
+- Full verification: `python -m unittest discover -s tests` → 175 passed, 2 optional skips; `python -m compileall -q src scripts` and `git diff --check` passed.
+- Real D-drive smoke (no rebuild): with the D base, existing `agent_overlay.sqlite` and
+  `agent_search.sqlite`, and the updated manifest, `_health_status` reported
+  `base_attested=true`, `overlay_attested=true`, `search_index_ready=true`, `ready=true`. A live
+  deterministic answer probe ran with `disclosure_db.financial_overlay.sha256_file` patched to
+  raise; no hash was called. The probe safely returned `answerable=false` for its question.

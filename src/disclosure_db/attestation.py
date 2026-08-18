@@ -29,14 +29,16 @@ def load_distribution_attestation(path: Path, *, database: Path) -> CorpusAttest
     size_bytes = int(section["uncompressed_bytes"])
     if size_bytes < 0:
         raise ValueError("distribution attestation requires a non-negative database size")
-    try:
-        mtime_ns: int | None = int(Path(database).stat().st_mtime_ns)
-        database_present = True
-    except OSError:
-        # Keep the manifest validated and let the readiness check fail closed until
-        # the distributed database is present.
-        mtime_ns = None
-        database_present = False
+    raw_mtime_ns = section.get("mtime_ns")
+    if raw_mtime_ns is None:
+        mtime_ns: int | None = None
+    elif isinstance(raw_mtime_ns, bool) or not isinstance(raw_mtime_ns, int) or raw_mtime_ns < 0:
+        raise ValueError("distribution attestation requires a non-negative integer mtime_ns")
+    else:
+        mtime_ns = raw_mtime_ns
+    # The manifest is the trusted source of identity. Never substitute the
+    # request file's current mtime here; a same-size replacement must fail.
+    database_present = Path(database).exists()
     return CorpusAttestation(
         sha256=sha256,
         size_bytes=size_bytes,
@@ -47,12 +49,10 @@ def load_distribution_attestation(path: Path, *, database: Path) -> CorpusAttest
 
 
 def verify_fast_identity(database: Path, attestation: CorpusAttestation) -> bool:
-    if not attestation.database_present:
+    if not attestation.database_present or attestation.mtime_ns is None:
         return False
     try:
         stat = Path(database).stat()
     except OSError:
         return False
-    return int(stat.st_size) == attestation.size_bytes and (
-        attestation.mtime_ns is None or int(stat.st_mtime_ns) == attestation.mtime_ns
-    )
+    return int(stat.st_size) == attestation.size_bytes and int(stat.st_mtime_ns) == attestation.mtime_ns

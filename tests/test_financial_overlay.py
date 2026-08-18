@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import sys
 import tempfile
 import unittest
 from contextlib import closing
@@ -21,6 +22,7 @@ from disclosure_db.financial_overlay import (
 )
 from disclosure_db.agent import AgentSettings, DisclosureAgent
 from disclosure_db.api import _fetch_financial_facts
+from disclosure_db.cli import agent_main
 
 
 def seed_base(path: Path) -> None:
@@ -310,7 +312,16 @@ class FinancialOverlayTests(unittest.TestCase):
             self.assertEqual(rows[0]["value_numeric"], "1000")
             self.assertEqual(rows[0]["evidence_ids"], ["c1"])
             self.assertEqual(rows[0]["evidence_texts"], ["매출액 1,000"])
-            answer = DisclosureAgent(AgentSettings(base, overlay)).answer("테스트 매출액은 얼마인가?", company="테스트")
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({
+                "database_version": "semantic-v1",
+                "database": {
+                    "uncompressed_bytes": base.stat().st_size,
+                    "uncompressed_sha256": hashlib.sha256(base.read_bytes()).hexdigest(),
+                    "mtime_ns": base.stat().st_mtime_ns,
+                },
+            }), encoding="utf-8")
+            answer = DisclosureAgent(AgentSettings(base, overlay, attestation_path=manifest)).answer("테스트 매출액은 얼마인가?", company="테스트")
             self.assertTrue(answer.verified)
             self.assertEqual(answer.numeric_values, ["1000"])
 
@@ -376,6 +387,7 @@ class FinancialOverlayTests(unittest.TestCase):
                 "database": {
                     "uncompressed_bytes": base.stat().st_size,
                     "uncompressed_sha256": hashlib.sha256(base.read_bytes()).hexdigest(),
+                    "mtime_ns": base.stat().st_mtime_ns,
                 },
             }), encoding="utf-8")
             attestation = load_distribution_attestation(manifest, database=base)
@@ -394,6 +406,7 @@ class FinancialOverlayTests(unittest.TestCase):
                 "database": {
                     "uncompressed_bytes": base.stat().st_size,
                     "uncompressed_sha256": hashlib.sha256(base.read_bytes()).hexdigest(),
+                    "mtime_ns": base.stat().st_mtime_ns,
                 },
             }), encoding="utf-8")
             agent = DisclosureAgent(AgentSettings(
@@ -405,6 +418,46 @@ class FinancialOverlayTests(unittest.TestCase):
             with patch("disclosure_db.financial_overlay.sha256_file", side_effect=AssertionError("request hash")):
                 facts = _fetch_financial_facts(agent.evidence_service, limit=1)
             self.assertEqual(facts, [])
+
+    def test_runtime_agent_requires_attestation_when_overlay_is_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "overlay.sqlite"
+            seed_base(base)
+            overlay.write_bytes(b"overlay")
+            with self.assertRaisesRegex(ValueError, "attestation is required"):
+                DisclosureAgent(AgentSettings(base, overlay))
+
+    def test_api_overlay_without_attestation_returns_empty_without_hashing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "overlay.sqlite"
+            seed_base(base)
+            overlay.write_bytes(b"overlay")
+
+            class Service:
+                base_database = base
+                overlay_database = overlay
+                attestation = None
+
+            with patch("disclosure_db.financial_overlay.sha256_file", side_effect=AssertionError("request hash")):
+                self.assertEqual(_fetch_financial_facts(Service(), limit=1), [])
+
+    def test_cli_agent_query_requires_attestation_before_any_base_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "overlay.sqlite"
+            base.write_bytes(b"fixture")
+            overlay.write_bytes(b"overlay")
+            argv = [
+                "disclosure-agent", "agent-query",
+                "--database", str(base), "--overlay", str(overlay),
+                "--question", "테스트 질문",
+            ]
+            with patch.object(sys, "argv", argv), patch(
+                "disclosure_db.financial_overlay.sha256_file", side_effect=AssertionError("request hash")
+            ), self.assertRaisesRegex(SystemExit, "attestation is required"):
+                agent_main()
 
 
 if __name__ == "__main__":

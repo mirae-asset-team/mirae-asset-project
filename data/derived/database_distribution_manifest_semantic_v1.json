@@ -31,7 +31,8 @@
   },
   "database": {
     "uncompressed_bytes": 38773280768,
-    "uncompressed_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563"
+    "uncompressed_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563",
+    "mtime_ns": 1786982413000000000
   },
   "validation": {
     "zstd_integrity_test": "passed",

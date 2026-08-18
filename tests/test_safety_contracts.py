@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from disclosure_db.lineage import build_lineage
 from disclosure_db.parsers import extract_first_submission_date
@@ -104,6 +105,19 @@ class SafetyContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             self.assertEqual(fetch_event_facts(root / "base.sqlite", root / "missing.sqlite"), [])
+
+    def test_event_overlay_read_surface_never_hashes_without_attestation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "overlay.sqlite"
+            base.write_bytes(b"fixture")
+            connection = sqlite3.connect(overlay)
+            connection.execute("CREATE TABLE overlay_revision(overlay_revision TEXT, source_database_sha256 TEXT)")
+            connection.execute("INSERT INTO overlay_revision VALUES('semantic-v1-agent-overlay', 'a' || printf('%064d', 0))")
+            connection.commit()
+            connection.close()
+            with patch("disclosure_db.financial_overlay.sha256_file", side_effect=AssertionError("request hash")):
+                self.assertEqual(fetch_event_facts(base, overlay), [])
 
     def test_retrieval_query_is_fts_safe_and_keeps_domain_terms(self) -> None:
         query = compile_retrieval_query(

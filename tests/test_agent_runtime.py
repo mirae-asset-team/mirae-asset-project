@@ -33,10 +33,37 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(citation.locator, {})
         self.assertEqual(answer.citations, [])
         self.assertIsNone(answer.calculation)
-
         serialized = to_jsonable(bundle)
         self.assertEqual(serialized["event_facts"], [])
         self.assertEqual(serialized["retrieval_diagnostics"], {})
+
+    def test_populated_citation_serializes_metadata_locator_and_calculation(self) -> None:
+        citation = CitationRef(
+            "ev1",
+            "f1",
+            report_name="report.xml",
+            filed_at="2024-03-01",
+            locator={"sheet": "BS", "row": 4, "column": 2, "calculation": "sum"},
+        )
+        answer = VerifiedAnswer(
+            "답",
+            ["ev1"],
+            True,
+            True,
+            citations=[citation],
+            calculation=calculate("sum", ["1", "2"], evidence_ids=["ev1"]),
+        )
+        serialized = to_jsonable(answer)
+        self.assertEqual(serialized["citations"][0], {
+            "evidence_id": "ev1",
+            "filing_id": "f1",
+            "report_name": "report.xml",
+            "filed_at": "2024-03-01",
+            "locator": {"sheet": "BS", "row": 4, "column": 2, "calculation": "sum"},
+        })
+        self.assertEqual(serialized["calculation"]["operation"], "sum")
+        self.assertEqual(serialized["calculation"]["value"], "3")
+        self.assertEqual(json.loads(json.dumps(serialized))["citations"][0]["locator"]["row"], 4)
 
     def test_api_is_optional_and_lazy(self) -> None:
         class Service:

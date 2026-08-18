@@ -121,6 +121,7 @@ $py = 'C:\Users\lark0\.cache\codex-runtimes\codex-primary-runtime\dependencies\p
 & $py -m disclosure_db.cli agent-query `
   --database 'D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite' `
   --overlay 'D:\mirae-asset-project\db\agent\financial_overlay.sqlite' `
+  --attestation 'data/derived/database_distribution_manifest_semantic_v1.json' `
   --question '삼성전자 매출액은 얼마인가?'
 
 # Gold 회귀 평가(결과는 derived JSON으로 남김)
@@ -135,6 +136,12 @@ HTTP API가 필요하면 `pip install -e .[agent]` 후 `disclosure-agent serve`�
 uvicorn은 선택 의존성으로 지연 로딩되며, 핵심 CLI·테스트에는 필요하지 않습니다. API 응답에는
 `request_id`, `corpus_revision`, `latency_ms`가 공통으로 붙고, overlay가 설정됐지만 base attestation에
 실패하면 `/health`가 `ready=false`를 반환합니다.
+
+Runtime `agent-query`/`serve` requires `--attestation` whenever `--overlay` or `--search-index` is
+configured. The distribution manifest records the offline-verified SHA-256, byte size, and trusted
+`mtime_ns`; a missing or mismatched trusted mtime fails closed. Copying or re-extracting the database
+requires a new offline SHA/size/mtime attestation and regeneration of dependent artifacts. Base-only
+SSOT reads may run without an attestation because they do not validate or serve an overlay/index.
 
 ## Agent-audited Gold 회귀 기준
 

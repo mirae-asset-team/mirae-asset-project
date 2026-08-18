@@ -24,7 +24,7 @@ def _fetch_financial_facts(
     as_of: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, object]]:
-    if not getattr(service, "overlay_database", None):
+    if not getattr(service, "overlay_database", None) or getattr(service, "attestation", None) is None:
         return []
     from .financial_overlay import fetch_overlay_facts
     return fetch_overlay_facts(
@@ -49,7 +49,7 @@ def _fetch_event_facts(
 ) -> list[dict[str, object]]:
     """Read only attested, evidence-backed event facts for the API surface."""
     overlay_database = getattr(service, "overlay_database", None)
-    if not overlay_database:
+    if not overlay_database or getattr(service, "attestation", None) is None:
         return []
     from .financial_overlay import fetch_event_facts
     return fetch_event_facts(

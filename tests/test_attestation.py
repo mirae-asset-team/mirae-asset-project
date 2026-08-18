@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,10 +25,74 @@ class AttestationTests(unittest.TestCase):
                 "database": {
                     "uncompressed_bytes": database.stat().st_size,
                     "uncompressed_sha256": "a" * 64,
+                    "mtime_ns": database.stat().st_mtime_ns,
                 },
             }), encoding="utf-8")
             attestation = load_distribution_attestation(manifest, database=database)
             self.assertTrue(verify_fast_identity(database, attestation))
+
+    def test_same_size_replacement_before_fresh_load_fails_trusted_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            database = root / "base.sqlite"
+            database.write_bytes(b"fixture")
+            trusted_mtime_ns = database.stat().st_mtime_ns
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({
+                "database_version": "semantic-v1",
+                "database": {
+                    "uncompressed_bytes": 7,
+                    "uncompressed_sha256": "a" * 64,
+                    "mtime_ns": trusted_mtime_ns,
+                },
+            }), encoding="utf-8")
+            database.write_bytes(b"changed")
+            os.utime(database, ns=(trusted_mtime_ns + 1_000_000_000, trusted_mtime_ns + 1_000_000_000))
+            attestation = load_distribution_attestation(manifest, database=database)
+            self.assertEqual(attestation.mtime_ns, trusted_mtime_ns)
+            self.assertFalse(verify_fast_identity(database, attestation))
+
+    def test_manifest_trusted_mtime_passes_and_missing_mtime_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            database = root / "base.sqlite"
+            database.write_bytes(b"fixture")
+            manifest = root / "manifest.json"
+            manifest.write_text(json.dumps({
+                "database_version": "semantic-v1",
+                "database": {
+                    "uncompressed_bytes": 7,
+                    "uncompressed_sha256": "a" * 64,
+                    "mtime_ns": database.stat().st_mtime_ns,
+                },
+            }), encoding="utf-8")
+            self.assertTrue(verify_fast_identity(database, load_distribution_attestation(manifest, database=database)))
+            manifest.write_text(json.dumps({
+                "database_version": "semantic-v1",
+                "database": {"uncompressed_bytes": 7, "uncompressed_sha256": "a" * 64},
+            }), encoding="utf-8")
+            missing = load_distribution_attestation(manifest, database=database)
+            self.assertIsNone(missing.mtime_ns)
+            self.assertFalse(verify_fast_identity(database, missing))
+
+    def test_manifest_rejects_malformed_trusted_mtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            database = root / "base.sqlite"
+            database.write_bytes(b"fixture")
+            manifest = root / "manifest.json"
+            for malformed in (True, 1.5, -1, "not-an-integer"):
+                with self.subTest(malformed=malformed):
+                    manifest.write_text(json.dumps({
+                        "database_version": "semantic-v1",
+                        "database": {
+                            "uncompressed_bytes": 7,
+                            "uncompressed_sha256": "a" * 64,
+                            "mtime_ns": malformed,
+                        },
+                    }), encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "mtime_ns"):
+                        load_distribution_attestation(manifest, database=database)
 
     def test_size_change_fails_fast_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

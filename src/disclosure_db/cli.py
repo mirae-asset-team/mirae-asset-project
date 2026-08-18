@@ -146,10 +146,14 @@ def agent_main() -> None:
             encoding="utf-8",
         )
     elif args.command == "agent-query":
+        if (args.overlay or args.search_database) and args.attestation is None:
+            raise SystemExit("--attestation is required when --overlay or --search-index is configured")
         from .agent import AgentSettings, DisclosureAgent
         settings = AgentSettings(base_database=args.database, overlay_database=args.overlay, attestation_path=args.attestation, search_database=args.search_database)
         result = to_jsonable(DisclosureAgent(settings).answer(args.question, company=args.company, as_of=args.as_of, limit=args.limit))
     else:
+        if (args.overlay or args.search_database) and args.attestation is None:
+            raise SystemExit("--attestation is required when --overlay or --search-index is configured")
         try:
             import uvicorn
         except ImportError as exc:
