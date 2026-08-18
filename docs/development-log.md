@@ -77,3 +77,4 @@
   - `Get-Item`/`Get-FileHash` on immutable base → 38,773,280,768 bytes and SHA-256 `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563`.
 - Release result: `agent_audited` baseline is regression-ready; `human_verified` promotion is still a human decision. Unlimited generic-fact extraction remains a separately reproducible long-running command.
 - Pre-close HEAD: `a70553a docs: record agent gold audit and development process`.
+- Closeout commit: `44856d5 docs: close agent gold audit`.
