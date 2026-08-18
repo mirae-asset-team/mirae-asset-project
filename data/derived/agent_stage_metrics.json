@@ -1,7 +1,7 @@
 {
-  "planner_p95_ms": 0.41,
-  "fact_lookup_p95_ms": 172.61,
-  "local_retrieval_p95_ms": 156.53,
-  "reranked_retrieval_p95_ms": 0.04,
+  "planner_p95_ms": 9.68,
+  "fact_lookup_p95_ms": 28.87,
+  "local_retrieval_p95_ms": 55.28,
+  "reranked_retrieval_p95_ms": 0.01,
   "reranker_provider_configured": false
 }

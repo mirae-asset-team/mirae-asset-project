@@ -244,3 +244,13 @@
 - Candidate search: `indexed_rows=329,323`, `trigram_rows=298,128`, `quick_check=ok`, revision `safe-search-v1`, candidate SHA-256 `e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793`.
 - Representative checks: q001 `240993039040원`, q004 `495278073440원`, q009 `1940200주`, q010 `495472주`; each returned one selected numeric evidence cell. Live overlay/index were promoted after port 8000 was confirmed stopped. Previous files were preserved as `agent_overlay.20260819-044541.previous.sqlite` and `agent_search.20260819-044541.previous.sqlite`; no base file was modified.
 - Verification: fresh full suite → `194 passed, 1 skipped`. Post-promotion live quick checks are `ok`, overlay matches base attestation, and live search metadata validates.
+
+## 2026-08-19T04:53:00+09:00 — Plan 2 Task 6: corrected 114-case regression
+
+- Intent: rerun the same audited/holdout evaluation after the correctness rebuild without changing any contract thresholds.
+- Verification: full suite → `194 passed, 1 skipped`; holdout rebuild → `83` unique rows, `0` schema errors, SHA-256 `ee13e9ba0b576f370e0aaf8ac03f037e7abfa8601c84612e40df6465742bda08`.
+- Stage benchmark: planner p95 `9.68ms`, fact lookup `28.87ms`, local retrieval `55.28ms`, rerank fallback `0.01ms`; `reranker_provider_configured=false`.
+- Audited 31: pass `9`, verified `14`, answerability agreement `0.774194`, numeric exactness `0.615385`, citation precision `0.566667`, citation recall `0.5625`, end-to-end p95 `2190.06ms`.
+- Holdout 83: pass `9`, verified `14`, answerability agreement `0.915663`, numeric exactness `0.615385`, citation precision `0.566667`, citation recall `0.5625`, end-to-end p95 `2066.84ms`.
+- Retrieval: 16 eligible questions, target Recall@20 `0.7647058824`, question-complete recall `0.75`, MRR `0.3449449856`; post-rerank is not measured because provider is not configured.
+- Hard safety results: audited and holdout both have `false_numeric_claim_count=0`, `unsafe_answer_count=0`, and `error_count=0`. Quality gates remain false for answerability/numeric/citation/retrieval/provider metrics; these are recorded as remaining quality gaps, with no gate reduction. External provider/NCP validation remains blocked by absent credentials/resources.

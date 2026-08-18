@@ -375,13 +375,13 @@ git commit -m "docs: record corrected agent database rebuild"
 **Interfaces:**
 - 31 audited and 83 holdout cases; exact same question IDs and expected answers as baseline.
 
-- [ ] **Step 1: Run complete unit verification**
+- [x] **Step 1: Run complete unit verification**
 
 Run: `python -m unittest discover -s tests -v`
 
 Expected: all tests PASS except documented optional skips.
 
-- [ ] **Step 2: Rebuild holdout deterministically**
+- [x] **Step 2: Rebuild holdout deterministically**
 
 Run:
 
@@ -391,21 +391,21 @@ python scripts/build_agent_holdout.py --input 'data\derived\gold_qa.agent_audite
 
 Expected: 83 rows and zero schema errors.
 
-- [ ] **Step 3: Measure stage latency**
+- [x] **Step 3: Measure stage latency**
 
 Run `scripts/benchmark_agent_stages.py` with the live D-drive base, overlay, search index, attestation, audited Gold, `--limit 8`, and output `data/derived/agent_stage_metrics.json`.
 
 Expected: finite planner/fact/local/rerank fields; provider configuration is reported truthfully.
 
-- [ ] **Step 4: Evaluate audited and holdout sets**
+- [x] **Step 4: Evaluate audited and holdout sets**
 
 Run `scripts/evaluate_agent.py` twice using the same D-drive inputs, first with `gold_qa.agent_audited.jsonl`, then `agent_holdout.jsonl`. Run `scripts/evaluate_retrieval.py` for Recall@20. Do not edit `config/evaluation_contract.json` after seeing results.
 
-- [ ] **Step 5: Compare by question ID**
+- [x] **Step 5: Compare by question ID**
 
 Record baseline and new values for answerability matches, numeric exactness, citation precision/recall, Recall@20, false numeric claims, unsafe answers, and p95 stages. List every remaining failure with primary cause. Stop immediately if false numeric claims or unsafe answers exceed zero.
 
-- [ ] **Step 6: Commit reproducible summaries and log**
+- [x] **Step 6: Commit reproducible summaries and log**
 
 ```powershell
 git add data/derived/agent_eval_vertical_slice.json data/derived/agent_holdout_eval.json data/derived/retrieval_vertical_slice.json data/derived/agent_stage_metrics.json docs/development-log.md
