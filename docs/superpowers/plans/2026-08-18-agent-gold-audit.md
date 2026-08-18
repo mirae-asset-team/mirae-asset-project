@@ -70,6 +70,8 @@ git commit -m "test: define safe agent gold predicates"
 
 **Files:**
 - Modify: `scripts/build_agent_gold.py`
+- Modify: `config/gold_annotation_schema.json`
+- Modify: `src/disclosure_db/gold_validation.py`
 - Test: `tests/test_agent_gold.py`
 
 **Interfaces:**
@@ -155,7 +157,11 @@ Run: `$env:PYTHONPATH='src'; & $py -m unittest tests.test_agent_gold -v`
 
 Expected: FAIL for the unimplemented auditor.
 
-- [ ] **Step 3: Implement the auditor with existing `gold_validation` rules**
+- [ ] **Step 3: Extend the annotation contract for the explicit agent-audited state**
+
+Add `agent_audited` to the review-status enum in `config/gold_annotation_schema.json`. Update `src/disclosure_db/gold_validation.py` so `answer_origin=model_generated` is valid when review status is either `candidate` or `agent_audited`; retain the existing checks that only `human_verified` records may be `approved` and that an approved record needs a distinct reviewer and timestamp. Add a focused test proving a deterministic record passes contract validation and an approved model-generated record still fails.
+
+- [ ] **Step 4: Implement the auditor with existing `gold_validation` rules**
 
 Implement the decision order below so one candidate has stable, explainable reasons and no partial record is emitted:
 
@@ -175,16 +181,16 @@ def audit_candidate(candidate, base, *, source_sha256):
 
 Preserve original `human_verified` records; assign new records `review.status='agent_audited'`, `review.annotator='deterministic_agent_gold_v1'`, and `review.reviewer=None`. Use the fixed reason codes `evidence_not_found`, `cross_filing_evidence`, `lineage_not_answer_safe`, `visual_evidence_blocked`, `numeric_not_decimal`, `duplicate_candidate`, `schema_invalid`, `source_parse_failed`, `table_parse_failed`, and `citation_mismatch`.
 
-- [ ] **Step 4: Run tests and validate atomic output behavior**
+- [ ] **Step 5: Run tests and validate atomic output behavior**
 
 Run: `$env:PYTHONPATH='src'; & $py -m unittest tests.test_agent_gold -v`
 
 Expected: PASS; interrupted writes leave no partial target file.
 
-- [ ] **Step 5: Commit the audit gates**
+- [ ] **Step 6: Commit the audit gates**
 
 ```powershell
-git add scripts/build_agent_gold.py tests/test_agent_gold.py
+git add scripts/build_agent_gold.py config/gold_annotation_schema.json src/disclosure_db/gold_validation.py tests/test_agent_gold.py
 git commit -m "feat: add strict agent gold audit gates"
 ```
 

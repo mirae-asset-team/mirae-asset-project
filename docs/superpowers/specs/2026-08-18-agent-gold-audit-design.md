@@ -25,7 +25,7 @@ Use deterministic candidate generation plus independent structural and semantic 
 | `human_verified` | A human reviewer explicitly approved the record | Yes, under the existing contract |
 | `rejected` | Any required check failed; retained in the reject ledger | No |
 
-The generator must never rewrite an existing `human_verified` record and must never set `review.status=approved` for a newly generated record.
+The generator must never rewrite an existing `human_verified` record and must never set `review.status=approved` for a newly generated record. The annotation schema and validator explicitly allow `review.status=agent_audited` for deterministic output while keeping `answer_origin=model_generated`; this is a diagnostic state, not a release approval.
 
 ## Candidate sources and strict gates
 
@@ -69,6 +69,7 @@ flowchart LR
 
 - `scripts/build_agent_gold.py`: deterministic generator; read-only base access; atomic output writes.
 - `config/agent_gold_predicates.json`: explicit allowlist and question templates.
+- `config/gold_annotation_schema.json` and `src/disclosure_db/gold_validation.py`: allow and validate the explicit `agent_audited` review state without weakening human approval rules.
 - `data/derived/gold_qa.agent_audited.jsonl`: generated regression dataset.
 - `data/derived/gold_qa_agent_audit_summary.json`: counts, gates, hashes, and rejection distribution.
 - `data/derived/gold_qa_agent_rejects.jsonl`: one record per rejected candidate.
