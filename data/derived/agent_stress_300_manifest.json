@@ -2,7 +2,7 @@
   "schema_version": "0.1.0",
   "generator": "deterministic_stress_v1",
   "seed": 20260819,
-  "git_commit": "d1c5cb636cc2382e27c73d1226977bbc48398b54",
+  "git_commit": "b6728e57d50c59916236595c243ceac890d99d86",
   "input_sha256": "04377097c8aa0f159b87c26c787d0d0bf84a1579cf5e07d6f94fd9cfc9e2d681",
   "output_sha256": "1b014f0bfca75c8db6f6306dcdab80fff4cafb80dfb3709bf1e9d3bb8d8dd2a0",
   "case_count": 300,
@@ -24,5 +24,5 @@
   "trust_tier_counts": {
     "agent_audited": 300
   },
-  "built_at": "2026-08-18T20:33:15.065182+00:00"
+  "built_at": "2026-08-18T20:38:32.642744+00:00"
 }
