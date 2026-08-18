@@ -16,6 +16,85 @@ from disclosure_db.generation import DeterministicGenerator, HyperClovaGenerator
 
 
 class AgentRuntimeTests(unittest.TestCase):
+    def test_contest_query_echoes_question_id_and_maps_citations(self):
+        from fastapi.testclient import TestClient
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite") as base:
+            class ReadyService:
+                base_database = Path(base.name)
+                overlay_database = None
+                search_database = None
+                attestation = None
+                corpus_revision = "test-revision"
+
+                def company_candidates(self):
+                    return ["테스트"]
+
+            class FakeAgent:
+                evidence_service = ReadyService()
+
+                def answer(self, question, **kwargs):
+                    return VerifiedAnswer(
+                        answer="답",
+                        citation_ids=["ev1"],
+                        verified=True,
+                        answerable=True,
+                        citations=[CitationRef("ev1", "f1", report_name="사업보고서")],
+                    )
+
+            client = TestClient(create_app(FakeAgent()))
+            response = client.post("/query", json={"question_id": "q-1", "question": "테스트 질문"})
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["question_id"], "q-1")
+        self.assertEqual(body["evidence"][0]["receipt_no"], "f1")
+        self.assertTrue(body["verified"])
+
+    def test_contest_query_rejects_empty_and_oversized_questions(self):
+        from fastapi.testclient import TestClient
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite") as base:
+            class ReadyService:
+                base_database = Path(base.name)
+                overlay_database = None
+                search_database = None
+                attestation = None
+                corpus_revision = "test-revision"
+
+                def company_candidates(self):
+                    return ["테스트"]
+
+            class FakeAgent:
+                evidence_service = ReadyService()
+
+                def answer(self, question, **kwargs):
+                    return VerifiedAnswer("답", ["ev1"], True, True)
+
+            client = TestClient(create_app(FakeAgent()))
+            self.assertEqual(client.post("/query", json={"question": ""}).status_code, 422)
+            self.assertEqual(client.post("/query", json={"question": "가" * 4001}).status_code, 422)
+
+    def test_contest_query_returns_503_when_runtime_is_not_ready(self):
+        from fastapi.testclient import TestClient
+
+        class MissingService:
+            base_database = Path("missing.sqlite")
+            overlay_database = None
+            search_database = None
+            attestation = None
+            corpus_revision = "test-revision"
+
+        class MissingAgent:
+            evidence_service = MissingService()
+
+            def answer(self, question, **kwargs):
+                return VerifiedAnswer("답", ["ev1"], True, True)
+
+        client = TestClient(create_app(MissingAgent()))
+        response = client.post("/query", json={"question": "질문"})
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"], "runtime_not_ready")
+
     def test_serializable_contracts_have_backward_compatible_routing_defaults(self) -> None:
         plan = QueryPlan("질문")
         bundle = EvidenceBundle(question="질문")
@@ -391,8 +470,16 @@ class AgentRuntimeTests(unittest.TestCase):
         routes = {getattr(route, "path", ""): route for route in app.routes}
         self.assertIn("/v1/event-facts", routes)
         params = {item.name: item for item in routes["/v1/event-facts"].dependant.query_params}
-        self.assertEqual(params["limit"].field_info.ge, 1)
-        self.assertEqual(params["limit"].field_info.le, 100)
+        field_info = params["limit"].field_info
+
+        def constraint(name):
+            value = getattr(field_info, name, None)
+            if value is not None:
+                return value
+            return next(getattr(item, name) for item in field_info.metadata if hasattr(item, name))
+
+        self.assertEqual(constraint("ge"), 1)
+        self.assertEqual(constraint("le"), 100)
 
 
 if __name__ == "__main__":

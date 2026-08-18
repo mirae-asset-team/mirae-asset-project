@@ -162,3 +162,11 @@
 - GREEN: created `src/disclosure_db/runtime.py` with required database/attestation environment validation, file validation, agent settings conversion, and boolean-only provider status.
 - Verification: `$env:PYTHONPATH='src'; .venv\Scripts\python.exe -m unittest tests.test_runtime_config tests.test_attestation -v` → 13 passed; baseline remains 175 passed, 2 optional skips; compileall and `git diff --check` passed.
 - External status: provider key not configured; no provider call was attempted.
+
+## 2026-08-19T03:15:31+09:00 — Plan 1 Task 2: competition query adapter
+
+- Intent: add the validated `POST /query` contract while keeping `/v1/*` routes intact.
+- Dependency: installed the existing `.[agent]` extra with approval. The installed Starlette TestClient also required environment-only `httpx2`; it was installed without changing project dependencies or tracked files.
+- RED: focused route tests first returned `404` for `/query`. After implementation, FastAPI 0.141.1 treated the nested request model as a query parameter; the exact response showed `loc=["query", "request"]`. The root cause was a deferred local annotation under `from __future__ import annotations`; binding the actual model before route registration fixed it.
+- GREEN: `/query` now validates bounded request fields, fails closed with `503 runtime_not_ready`, calls the agent, maps citations to evidence with `receipt_no`, and emits the standard request/corpus/latency envelope.
+- Verification: focused route suite → 3 passed; `tests.test_agent_runtime` → 24 passed. No provider call was attempted and no secret was logged.

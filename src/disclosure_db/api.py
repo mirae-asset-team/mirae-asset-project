@@ -125,6 +125,13 @@ def create_app(agent: DisclosureAgent):
         as_of: str | None = None
         limit: int = Field(default=20, ge=1, le=100)
 
+    class ContestQueryRequest(BaseModel):
+        question_id: str | None = Field(default=None, max_length=200)
+        question: str = Field(min_length=1, max_length=4000)
+        company: str | None = Field(default=None, max_length=200)
+        as_of: str | None = Field(default=None, pattern=r"^20\d{2}-\d{2}-\d{2}$")
+        limit: int = Field(default=20, ge=1, le=100)
+
     class SearchRequest(QueryRequest):
         limit: int = Field(default=20, ge=1, le=100)
 
@@ -153,6 +160,33 @@ def create_app(agent: DisclosureAgent):
     def health() -> dict[str, Any]:
         started = perf_counter()
         return envelope(_health_status(agent.evidence_service), started)
+
+    def contest_query(request: ContestQueryRequest) -> dict[str, Any]:
+        started = perf_counter()
+        health_status = _health_status(agent.evidence_service)
+        if not health_status["ready"]:
+            raise HTTPException(status_code=503, detail="runtime_not_ready")
+        answer = agent.answer(
+            request.question,
+            company=request.company,
+            as_of=request.as_of,
+            limit=request.limit,
+        )
+        body = to_jsonable(answer)
+        citations = body.pop("citations", [])
+        body.pop("citation_ids", None)
+        body["question_id"] = request.question_id
+        body["evidence"] = [
+            {**citation, "receipt_no": citation["filing_id"]}
+            for citation in citations
+        ]
+        return envelope(body, started)
+
+    # ``from __future__ import annotations`` stores this nested model as a
+    # string, while newer FastAPI versions resolve route annotations from the
+    # module namespace. Bind the local model before registering the route.
+    contest_query.__annotations__["request"] = ContestQueryRequest
+    app.post("/query")(contest_query)
 
     @app.post("/v1/query/plan")
     def query_plan(request: QueryRequest) -> dict[str, Any]:

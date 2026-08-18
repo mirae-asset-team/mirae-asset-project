@@ -157,13 +157,13 @@ git commit -m "feat: add contest runtime configuration"
 - Consumes: `DisclosureAgent.answer(question, company=None, as_of=None, limit=20)` and `_health_status`
 - Produces: `POST /query`; response fields `question_id`, `answer`, `answerable`, `verified`, `evidence`, `reason_codes`, `request_id`, `corpus_revision`, `latency_ms`
 
-- [ ] **Step 1: Install the existing API extra in the active virtual environment**
+- [x] **Step 1: Install the existing API extra in the active virtual environment**
 
 Run: `python -m pip install -e ".[agent]"`
 
 Expected: FastAPI and Uvicorn import successfully. Do not add a new dependency group.
 
-- [ ] **Step 2: Write failing route tests**
+- [x] **Step 2: Write failing route tests**
 
 ```python
 class ReadyService:
@@ -202,13 +202,13 @@ def test_contest_query_rejects_empty_and_oversized_questions(self):
 
 At test setup, create `existing_base_fixture` as an empty temporary file so `_health_status` sees an existing unattested base.
 
-- [ ] **Step 3: Run both tests and confirm `/query` is 404**
+- [x] **Step 3: Run both tests and confirm `/query` is 404**
 
 Run: `python -m unittest tests.test_agent_runtime.AgentRuntimeTests.test_contest_query_echoes_question_id_and_maps_citations tests.test_agent_runtime.AgentRuntimeTests.test_contest_query_rejects_empty_and_oversized_questions -v`
 
 Expected: FAIL because `/query` does not exist.
 
-- [ ] **Step 4: Implement the request and response mapping**
+- [x] **Step 4: Implement the request and response mapping**
 
 ```python
 class ContestQueryRequest(BaseModel):
@@ -239,7 +239,7 @@ def contest_query(request: ContestQueryRequest) -> dict[str, Any]:
     return envelope(contest_payload(answer, request.question_id), started)
 ```
 
-- [ ] **Step 5: Add and run a fail-closed readiness test**
+- [x] **Step 5: Add and run a fail-closed readiness test**
 
 ```python
 def test_contest_query_returns_503_when_runtime_is_not_ready(self):
@@ -257,7 +257,7 @@ Run: `python -m unittest tests.test_agent_runtime -v`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/disclosure_db/api.py tests/test_agent_runtime.py
