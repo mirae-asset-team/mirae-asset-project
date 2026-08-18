@@ -8,7 +8,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Iterable
 
-from .attestation import CorpusAttestation
+from .attestation import CorpusAttestation, verify_fast_identity
 from .agent_contracts import EvidenceBundle, EvidenceRef, QueryPlan
 from .financial_overlay import fetch_overlay_facts, overlay_matches_base
 from .pipeline import query_database
@@ -44,7 +44,13 @@ class EvidenceService:
         except (OSError, json.JSONDecodeError):
             self.account_aliases = {}
 
+    def _base_identity_valid(self) -> bool:
+        return self.attestation is None or verify_fast_identity(self.base_database, self.attestation)
+
     def company_candidates(self) -> list[str]:
+        if not self._base_identity_valid():
+            self._companies = []
+            return []
         if self._companies is None:
             with closing(sqlite3.connect(f"file:{self.base_database.resolve().as_posix()}?mode=ro", uri=True)) as connection:
                 columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(filing)")}
@@ -55,6 +61,13 @@ class EvidenceService:
         return list(self._companies)
 
     def search(self, plan: QueryPlan, *, limit: int = 20) -> EvidenceBundle:
+        if not self._base_identity_valid():
+            plan.reason_codes.append("base_attestation_failed")
+            return EvidenceBundle(
+                question=plan.question,
+                answerable=False,
+                reason_codes=list(plan.reason_codes),
+            )
         refs: list[EvidenceRef] = []
         financial_facts: list[dict[str, object]] = []
         account_terms = list(plan.account_terms)

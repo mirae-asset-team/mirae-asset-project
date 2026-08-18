@@ -73,6 +73,11 @@ class AttestationTests(unittest.TestCase):
             health = _health_status(agent.evidence_service)
             self.assertEqual(health["status"], "degraded")
             self.assertFalse(health["ready"])
+            database.write_bytes(b"fixture")
+            self.assertFalse(verify_fast_identity(database, agent.evidence_service.attestation))
+            health = _health_status(agent.evidence_service)
+            self.assertEqual(health["status"], "degraded")
+            self.assertFalse(health["ready"])
 
     def test_attested_request_refuses_after_database_size_changes_before_retrieval(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
