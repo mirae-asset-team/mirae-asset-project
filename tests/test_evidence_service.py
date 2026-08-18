@@ -49,7 +49,18 @@ class EvidenceServiceTests(unittest.TestCase):
             self.assertTrue(bundle.evidence)
             self.assertEqual(bundle.evidence[0].evidence_id, "ev1")
             self.assertEqual(bundle.evidence[0].lineage_status, "root")
-            self.assertTrue(bundle.answerable)
+            self.assertFalse(bundle.answerable)
+            self.assertIn("validated_event_fact_required", bundle.reason_codes)
+
+    def test_event_text_question_requires_audited_event_fact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp) / "base.sqlite"
+            seed_search_db(base)
+            service = EvidenceService(base)
+            plan = plan_query("삼성전자 계약상대는 누구인가?", company_candidates=["삼성전자"])
+            bundle = service.search(plan)
+            self.assertFalse(bundle.answerable)
+            self.assertIn("validated_event_fact_required", bundle.reason_codes)
 
     def test_query_plan_resolves_company_and_operation_without_model(self) -> None:
         plan = plan_query("삼성전자 2023년 매출액 증가율은?", company_candidates=["삼성전자"])

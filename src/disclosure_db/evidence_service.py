@@ -155,7 +155,7 @@ class EvidenceService:
             reasons.append("answering_disabled_for_question_type")
         if plan.fact_domain == "financial" and not financial_facts:
             reasons.append("validated_financial_fact_required")
-        if plan.question_type == "event_numeric" and not event_facts:
+        if plan.fact_domain == "event" and not event_facts:
             reasons.append("validated_event_fact_required")
         unresolved_company = plan.company is None or "company_unresolved" in plan.reason_codes
         if unresolved_company and "answering_disabled_for_unresolved_company" not in reasons:
@@ -169,7 +169,7 @@ class EvidenceService:
         answerable = bool(final_evidence) and plan.question_type not in {"adversarial", "out_of_scope"}
         if plan.fact_domain == "financial":
             answerable = answerable and bool(financial_facts)
-        elif plan.question_type == "event_numeric":
+        elif plan.fact_domain == "event":
             answerable = answerable and bool(event_facts)
         if unresolved_company or "required_claim_term_missing" in reasons:
             answerable = False

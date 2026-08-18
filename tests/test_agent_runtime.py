@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from decimal import Decimal
 
-from disclosure_db.agent_contracts import CitationRef, EvidenceBundle, EvidenceRef, QueryPlan, VerifiedAnswer, to_jsonable
+from disclosure_db.agent_contracts import AnswerDraft, CitationRef, EvidenceBundle, EvidenceRef, QueryPlan, VerifiedAnswer, to_jsonable
 from disclosure_db.agent import DisclosureAgent
 from disclosure_db.answer_verifier import verify_answer
 from disclosure_db.api import create_app
@@ -87,6 +87,52 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertTrue(answer.answerable)
         self.assertEqual(answer.numeric_values, ["2000"])
         self.assertEqual(answer.citation_ids, ["ev1"])
+
+    def test_numeric_text_claim_without_trusted_fact_fails_closed(self) -> None:
+        class Service:
+            def company_candidates(self):
+                return ["테스트회사"]
+
+            def search(self, plan, **kwargs):
+                return EvidenceBundle(
+                    question=plan.question,
+                    evidence=[EvidenceRef("ev1", "f1", "s1", "직원 수 100명", {}, "root")],
+                    answerable=True,
+                )
+
+        class NumericTextGenerator:
+            def generate(self, bundle):
+                return AnswerDraft(
+                    answer="직원 수는 100명입니다.",
+                    citation_ids=["ev1"],
+                    numeric_values=["100"],
+                    answerable=True,
+                )
+
+        answer = DisclosureAgent(evidence_service=Service(), generator=NumericTextGenerator()).answer(
+            "테스트회사 직원 수는 몇 명인가?"
+        )
+        self.assertFalse(answer.verified)
+        self.assertFalse(answer.answerable)
+        self.assertIn("numeric_claim_not_grounded", answer.reason_codes)
+
+    def test_structured_fact_without_declared_evidence_fails_closed(self) -> None:
+        evidence = EvidenceRef("ev1", "f1", "s1", "매출액 1000원", {}, "root")
+        bundle = EvidenceBundle(
+            question="매출액?",
+            evidence=[evidence],
+            answerable=True,
+            financial_facts=[{"value_numeric": "1000", "evidence_ids": []}],
+        )
+        draft = AnswerDraft(
+            answer="매출액은 1000원입니다.",
+            citation_ids=["ev1"],
+            numeric_values=["1000"],
+            answerable=True,
+        )
+        verified = verify_answer(bundle, draft)
+        self.assertFalse(verified.verified)
+        self.assertIn("structured_citation_missing", verified.reason_codes)
 
     def test_multi_period_operation_fails_closed_with_one_fact(self) -> None:
         class FakeService:
