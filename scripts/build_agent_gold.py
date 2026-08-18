@@ -506,7 +506,10 @@ def _version_payload(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _source_payload(connection: sqlite3.Connection, source_id: str) -> dict[str, Any] | None:
-    row = _record_source_row(connection, source_id)
+    row = connection.execute(
+        "SELECT source_id,filing_id,sha256,detected_format,parse_status FROM source_document WHERE source_id=?",
+        (source_id,),
+    ).fetchone()
     if row is None:
         return None
     return {
@@ -515,9 +518,9 @@ def _source_payload(connection: sqlite3.Connection, source_id: str) -> dict[str,
         "sha256": str(row["sha256"]),
         "detected_format": str(row["detected_format"]),
         "parse_status": str(row["parse_status"]),
-        "fragment_count": int(row[5]),
-        "table_count": int(row[6]),
-        "cell_count": int(row[7]),
+        "fragment_count": 0,
+        "table_count": 0,
+        "cell_count": 0,
         "table_structure_status": "parsed_unreviewed",
     }
 
