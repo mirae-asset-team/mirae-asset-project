@@ -13,6 +13,7 @@ from .agent_contracts import EvidenceBundle, EvidenceRef, QueryPlan
 from .financial_overlay import fetch_event_facts, fetch_overlay_facts, overlay_matches_base
 from .pipeline import query_database
 from .retrieval_evaluation import compile_retrieval_query, retrieval_tokens
+from .reranker import ClovaReranker
 
 
 _PROMPT_INJECTION_MARKERS = (
@@ -30,12 +31,14 @@ class EvidenceService:
         corpus_revision: str = "semantic-v1",
         attestation: CorpusAttestation | None = None,
         search_database: Path | None = None,
+        reranker: ClovaReranker | None = None,
     ):
         self.base_database = Path(base_database)
         self.overlay_database = Path(overlay_database) if overlay_database else None
         self.corpus_revision = corpus_revision
         self.attestation = attestation
         self.search_database = Path(search_database) if search_database else None
+        self.reranker = reranker
         self._companies: list[str] | None = None
         aliases_path = Path(__file__).resolve().parents[2] / "config" / "financial_account_aliases.json"
         try:
@@ -187,7 +190,25 @@ class EvidenceService:
             if ref.evidence_id not in seen and ref.lineage_status in {"root", "resolved"} and not any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS):
                 seen.add(ref.evidence_id)
                 unique.append(ref)
-        final_evidence = unique[:min(limit, 8)]
+        final_limit = max(0, min(limit, 8))
+        retrieval_diagnostics: dict[str, object] = {}
+        ordered = unique
+        if self.reranker is not None:
+            if structured_domain:
+                retrieval_diagnostics = {
+                    "reranker_used_provider": False,
+                    "reranker_reason_codes": ["reranker_structured_bypass"],
+                }
+            else:
+                rerank_result = self.reranker.rerank(plan.question, unique[:30], limit=final_limit)
+                by_id = {ref.evidence_id: ref for ref in unique}
+                reranked = [by_id[evidence_id] for evidence_id in rerank_result.evidence_ids if evidence_id in by_id]
+                ordered = reranked or unique
+                retrieval_diagnostics = {
+                    "reranker_used_provider": rerank_result.used_provider,
+                    "reranker_reason_codes": list(rerank_result.reason_codes),
+                }
+        final_evidence = ordered[:final_limit]
         final_ids = {ref.evidence_id for ref in final_evidence}
         financial_facts = self._facts_with_final_evidence(financial_facts, final_ids)
         event_facts = self._facts_with_final_evidence(event_facts, final_ids)
@@ -221,6 +242,7 @@ class EvidenceService:
             reason_codes=reasons,
             financial_facts=financial_facts,
             event_facts=event_facts,
+            retrieval_diagnostics=retrieval_diagnostics,
         )
 
     def _hydrate_facts(

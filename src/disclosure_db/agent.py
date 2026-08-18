@@ -12,6 +12,7 @@ from .calculator import calculate
 from .evidence_service import EvidenceService
 from .generation import DeterministicGenerator, HyperClovaGenerator
 from .query_planner import plan_query
+from .reranker import ClovaReranker
 
 
 @dataclass(slots=True)
@@ -22,6 +23,7 @@ class AgentSettings:
     use_hcx: bool = True
     attestation_path: Path | None = None
     search_database: Path | None = None
+    reranker: object | None = None
 
 
 class DisclosureAgent:
@@ -35,13 +37,17 @@ class DisclosureAgent:
         search_database: Path | None = None,
         evidence_service: EvidenceService | None = None,
         generator: object | None = None,
+        reranker: object | None = None,
     ):
+        configured_reranker = reranker
         if evidence_service is None:
             if settings is not None:
                 base_database = settings.base_database
                 overlay_database = settings.overlay_database
                 attestation_path = settings.attestation_path
                 search_database = settings.search_database
+                if configured_reranker is None:
+                    configured_reranker = settings.reranker
             if base_database is None:
                 raise ValueError("base_database or evidence_service is required")
             attestation: CorpusAttestation | None = None
@@ -52,6 +58,7 @@ class DisclosureAgent:
                 overlay_database,
                 attestation=attestation,
                 search_database=search_database,
+                reranker=configured_reranker if configured_reranker is not None else ClovaReranker(),
             )
         self.evidence_service = evidence_service
         self.generator = generator or (HyperClovaGenerator() if settings is None or settings.use_hcx else DeterministicGenerator())

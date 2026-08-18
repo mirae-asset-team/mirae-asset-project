@@ -5,10 +5,11 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from disclosure_db.attestation import load_distribution_attestation
 from disclosure_db.agent_contracts import QueryPlan
+from disclosure_db.reranker import RerankResult
 from disclosure_db.schema import create_schema, create_indexes
 from disclosure_db.evidence_service import EvidenceService
 from disclosure_db.query_planner import plan_query
@@ -39,6 +40,54 @@ def seed_search_db(path: Path) -> None:
 
 
 class EvidenceServiceTests(unittest.TestCase):
+    @staticmethod
+    def _search_rows() -> list[dict[str, object]]:
+        return [
+            {
+                "evidence_id": "ev1", "filing_id": "f1", "source_id": "s1",
+                "text_normalized": "첫 번째 근거", "locator_json": "{}",
+                "lineage_status": "root", "score": 1.0, "detected_format": "xml",
+                "image_reference_count": 0, "filed_at": "2024-03-01", "report_name_raw": "사업보고서",
+                "is_current": 1,
+            },
+            {
+                "evidence_id": "ev2", "filing_id": "f1", "source_id": "s1",
+                "text_normalized": "두 번째 근거", "locator_json": "{}",
+                "lineage_status": "root", "score": 0.9, "detected_format": "xml",
+                "image_reference_count": 0, "filed_at": "2024-03-01", "report_name_raw": "사업보고서",
+                "is_current": 1,
+            },
+        ]
+
+    def test_text_candidates_are_reranked_and_diagnostics_are_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp) / "base.sqlite"
+            seed_search_db(base)
+            reranker = Mock()
+            reranker.rerank.return_value = RerankResult(["ev2"], True, [])
+            service = EvidenceService(base, reranker=reranker)
+            plan = QueryPlan("질문", company="삼성전자", fact_domain="text")
+            with patch("disclosure_db.evidence_service.query_database", return_value=self._search_rows()):
+                bundle = service.search(plan, limit=8)
+            reranker.rerank.assert_called_once()
+            self.assertEqual(bundle.evidence[0].evidence_id, "ev2")
+            self.assertTrue(bundle.retrieval_diagnostics["reranker_used_provider"])
+            self.assertEqual(bundle.retrieval_diagnostics["reranker_reason_codes"], [])
+
+    def test_structured_fact_candidates_bypass_reranker(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp) / "base.sqlite"
+            seed_search_db(base)
+            reranker = Mock()
+            service = EvidenceService(base, reranker=reranker)
+            plan = QueryPlan("매출액", company="삼성전자", fact_domain="financial")
+            with patch("disclosure_db.evidence_service.query_database", return_value=self._search_rows()):
+                bundle = service.search(plan, limit=8)
+            reranker.rerank.assert_not_called()
+            self.assertEqual(bundle.evidence[0].evidence_id, "ev1")
+            self.assertFalse(bundle.retrieval_diagnostics["reranker_used_provider"])
+            self.assertEqual(bundle.retrieval_diagnostics["reranker_reason_codes"], ["reranker_structured_bypass"])
+
     def test_search_returns_safe_evidence_refs_and_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp) / "base.sqlite"
