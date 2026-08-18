@@ -546,7 +546,19 @@ def _validate_event_candidate(
             scale = 1
             evidence_ids = sorted({value for value in str(row["evidence_ids"] or "").split(",") if value})
     else:
-        evidence_ids = sorted({value for value in str(row["evidence_ids"] or "").split(",") if value})
+        linked_cells = base.execute(
+            """SELECT fe.evidence_id,c.cell_kind,c.text_normalized
+                 FROM fact_evidence fe
+                 JOIN table_cell c ON c.evidence_id=fe.evidence_id
+                WHERE fe.fact_id=?
+                ORDER BY c.table_id,c.row_index,c.column_index,fe.evidence_id""",
+            (candidate_id,),
+        ).fetchall()
+        value_evidence_ids = [
+            str(cell[0]) for cell in linked_cells
+            if str(cell[1]) == "data" and str(cell[2] or "").strip() == value_raw
+        ]
+        evidence_ids = value_evidence_ids or sorted({value for value in str(row["evidence_ids"] or "").split(",") if value})
     return {
         "event_fact_id": candidate_id,
         "filing_id": str(row["filing_id"]),

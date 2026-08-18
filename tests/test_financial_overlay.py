@@ -156,6 +156,35 @@ class FinancialOverlayTests(unittest.TestCase):
             self.assertEqual(rows[0]["trust_tier"], "agent_audited")
             self.assertEqual(rows[0]["evidence_ids"], ["c2"])
 
+    def test_agent_overlay_text_event_keeps_value_cell_citation_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates = root / "financial.jsonl", root / "predicates.json"
+            seed_base(base)
+            with closing(sqlite3.connect(base)) as connection:
+                connection.execute(
+                    "INSERT INTO table_cell VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("label", "t1", "s1", "f1", 2, 0, 1, 1, "data", "[]", "[]", "{}", "계약상대", "계약상대", "1"),
+                )
+                connection.execute(
+                    "INSERT INTO table_cell VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("value", "t1", "s1", "f1", 2, 1, 1, 1, "data", "[]", "[]", "{}", "상대회사", "상대회사", "1"),
+                )
+                connection.execute("UPDATE fact SET predicate='계약상대', value_raw='상대회사' WHERE fact_id='fact1'")
+                connection.execute("DELETE FROM fact_evidence WHERE fact_id='fact1'")
+                connection.executemany("INSERT INTO fact_evidence VALUES('fact1',?)", [("label",), ("value",)])
+                connection.commit()
+            seed.write_text("", encoding="utf-8")
+            predicates.write_text(json.dumps({"predicates": [{
+                "id": "counterparty", "answer_kind": "text",
+                "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약상대"],
+            }]}, ensure_ascii=False), encoding="utf-8")
+            result = build_agent_overlay(base, overlay, seed, predicates)
+            self.assertEqual(result.event_imported, 1)
+            rows = fetch_event_facts(base, overlay, company="테스트", predicate_terms=["계약상대"])
+            self.assertEqual(rows[0]["evidence_ids"], ["value"])
+
     def test_agent_overlay_rejects_disallowed_event_validation_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
