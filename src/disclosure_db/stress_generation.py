@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
@@ -150,7 +151,124 @@ def validate_stress_cases(cases: Iterable[dict[str, object]]) -> None:
         seen.add(question_id)
 
 
+def _answerable_case(record: dict[str, object]) -> bool:
+    return str(record.get("answerability")) == "answerable" and isinstance(record.get("answer"), dict)
+
+
+def _normalize_answer(case: dict[str, object]) -> None:
+    answer = case.get("answer")
+    evidence = case.get("evidence")
+    evidence_items = evidence if isinstance(evidence, list) else []
+    evidence_ids = [item.get("evidence_id") for item in evidence_items if isinstance(item, dict) and item.get("evidence_id")]
+    filing_ids = [item.get("filing_id") for item in evidence_items if isinstance(item, dict) and item.get("filing_id")]
+    if not isinstance(answer, dict):
+        return
+    if answer.get("kind") in {"numeric", "text"}:
+        answer.setdefault("evidence_ids", evidence_ids[:1])
+        if answer.get("kind") == "numeric":
+            answer.setdefault("filing_id", filing_ids[0] if filing_ids else None)
+    elif answer.get("kind") == "multi_numeric":
+        for value in answer.get("values", []):
+            if isinstance(value, dict):
+                value.setdefault("evidence_ids", evidence_ids[:1])
+                value.setdefault("filing_id", filing_ids[0] if filing_ids else None)
+
+
+def _make_stress_case(
+    record: dict[str, object],
+    *,
+    category: str,
+    index: int,
+    seed: int,
+) -> dict[str, object]:
+    base_id = str(record.get("question_id") or f"record_{index:03d}")
+    case = deepcopy(record)
+    case["schema_version"] = "0.1.0"
+    case["question_id"] = f"stress_{category}_{index:03d}_{base_id}"
+    case.setdefault("question_type", "unknown")
+    case.setdefault("question", base_id)
+    case.setdefault("answerability", "answerable")
+    _normalize_answer(case)
+    oracle = "exact"
+    if category == "fault":
+        oracle = "fault"
+    elif category in {"unanswerable", "adversarial"}:
+        oracle = "abstention"
+    if category in {"fault", "unanswerable", "adversarial"}:
+        case["answerability"] = "unanswerable"
+        case["answer"] = {"kind": "unanswerable", "reason": "stress case requires safe abstention"}
+        case["evidence"] = []
+    case["stress"] = {
+        "oracle": oracle,
+        "category": category,
+        "base_id": base_id,
+        "group_id": base_id,
+        "mutation_id": f"{category}_{index:03d}",
+        "generator": "deterministic_stress_v1",
+        "seed": seed,
+        "source_sha256": source_sha256(record),
+        "trust_tier": str(record.get("review", {}).get("status") if isinstance(record.get("review"), dict) else "agent_audited"),
+    }
+    if case["stress"]["trust_tier"] not in ALLOWED_TRUST_TIERS:  # type: ignore[index]
+        case["stress"]["trust_tier"] = "agent_audited"  # type: ignore[index]
+    if case["answerability"] == "answerable":
+        try:
+            validate_stress_case(case)
+        except ValueError:
+            case["answerability"] = "unanswerable"
+            case["answer"] = {"kind": "unanswerable", "reason": "source evidence is incomplete"}
+            case["evidence"] = []
+            case["stress"]["oracle"] = "abstention"  # type: ignore[index]
+    return case
+
+
+def build_stress_cases(
+    gold_records: Iterable[dict[str, object]],
+    contract: dict[str, object],
+    *,
+    seed: int = 20260819,
+) -> list[dict[str, object]]:
+    if seed != int(contract.get("seed", seed)):
+        raise ValueError("stress seed does not match contract")
+    records = sorted((deepcopy(record) for record in gold_records), key=lambda item: str(item.get("question_id", "")))
+    if not records:
+        raise ValueError("at least one gold record is required")
+    allocation = contract.get("allocation")
+    if not isinstance(allocation, dict) or not allocation:
+        raise ValueError("contract allocation is required")
+    expected = sum(int(value) for value in allocation.values())
+    if expected != int(contract.get("case_count", expected)):
+        raise ValueError("allocation does not match contract case_count")
+    cases: list[dict[str, object]] = []
+    cursor = 0
+    for category in sorted(str(key) for key in allocation):
+        count = int(allocation[category])
+        if count < 0:
+            raise ValueError("allocation counts must be non-negative")
+        for _ in range(count):
+            record = records[cursor % len(records)]
+            cases.append(_make_stress_case(record, category=category, index=cursor, seed=seed))
+            cursor += 1
+    validate_stress_cases(cases)
+    return cases
+
+
+def split_groups(cases: Iterable[dict[str, object]], holdout_ratio: float) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    if not 0 < holdout_ratio < 1:
+        raise ValueError("holdout_ratio must be between 0 and 1")
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for case in cases:
+        group_id = str(case.get("stress", {}).get("group_id", case.get("question_id")))  # type: ignore[union-attr]
+        grouped.setdefault(group_id, []).append(case)
+    groups = sorted(grouped)
+    holdout_count = max(1, round(len(groups) * holdout_ratio)) if groups else 0
+    holdout_groups = set(groups[-holdout_count:])
+    train = [case for group in groups if group not in holdout_groups for case in grouped[group]]
+    holdout = [case for group in groups if group in holdout_groups for case in grouped[group]]
+    return train, holdout
+
+
 __all__ = [
-    "ALLOWED_CATEGORIES", "ALLOWED_ORACLES", "canonical_json", "source_sha256",
-    "validate_stress_case", "validate_stress_cases",
+    "ALLOWED_CATEGORIES", "ALLOWED_ORACLES", "build_stress_cases", "canonical_json",
+    "source_sha256", "split_groups", "validate_stress_case", "validate_stress_cases",
 ]

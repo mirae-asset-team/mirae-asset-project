@@ -261,3 +261,10 @@
 - RED: `tests.test_agent_stress` initially failed with `ModuleNotFoundError: disclosure_db.stress_generation`.
 - GREEN: added canonical JSON/hash helpers, strict oracle/category/trust/provenance validation, exact numeric/text/multi-numeric evidence checks, and abstention no-claim checks. Added `config/stress_evaluation_contract.json` with the exact 300-case allocation and zero-valued safety hard gates.
 - Verification: `python -m unittest tests.test_agent_stress -v` → 4 passed.
+
+## 2026-08-19T05:02:00+09:00 — Plan 3 Task 2: deterministic stress case generation
+
+- Intent: generate the exact 300-case allocation from audited Gold with deterministic IDs, source hashes, group IDs, and safe abstention fallback for incomplete source evidence.
+- RED: generator tests initially failed on the missing `build_stress_cases`/`split_groups` interfaces; the real Gold build then exposed answerable text records without evidence IDs.
+- GREEN: incomplete answerable sources now become explicit abstention cases rather than unsafe numeric/text cases. Added deterministic case generation, group-disjoint holdout splitting, atomic JSONL output, and provenance manifest CLI.
+- Verification: `tests.test_agent_stress` → 6 passed. Two builds from reversed-equivalent input produced identical output SHA-256 `5279beb78b0a2fb05c800e21b6820c976a28f4de2aab33e5d2b6eaf15c453507`; 300 unique cases, exact allocation, 31 groups, zero group leakage in the split test.

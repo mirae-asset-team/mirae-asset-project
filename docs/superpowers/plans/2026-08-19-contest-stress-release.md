@@ -122,7 +122,7 @@ git commit -m "test: define disclosure stress contract"
 - Produces: `build_stress_cases(gold_records, contract, seed=20260819) -> list[dict]`
 - Produces: `split_groups(cases, holdout_ratio) -> tuple[list, list]`
 
-- [ ] **Step 1: Write failing count, determinism, and leakage tests**
+- [x] **Step 1: Write failing count, determinism, and leakage tests**
 
 ```python
 def test_build_300_is_byte_deterministic_and_matches_category_counts(self):
@@ -137,13 +137,13 @@ def test_group_split_never_separates_base_and_mutations(self):
     self.assertTrue({c["stress"]["group_id"] for c in train}.isdisjoint({c["stress"]["group_id"] for c in holdout}))
 ```
 
-- [ ] **Step 2: Run and confirm missing generator functions**
+- [x] **Step 2: Run and confirm missing generator functions**
 
 Run: `python -m unittest tests.test_agent_stress -v`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement deterministic mutation families**
+- [x] **Step 3: Implement deterministic mutation families**
 
 Use sorted source records and a local `random.Random(seed)`. Mutations are pure functions with fixed IDs:
 
@@ -157,7 +157,7 @@ Use sorted source records and a local `random.Random(seed)`. Mutations are pure 
 
 Do not generate a numeric case when source evidence, unit, scale, period, lineage, or trust tier is incomplete.
 
-- [ ] **Step 4: Implement the CLI and manifest**
+- [x] **Step 4: Implement the CLI and manifest**
 
 ```powershell
 python scripts/build_agent_stress.py --gold data/derived/gold_qa.agent_audited.jsonl --contract config/stress_evaluation_contract.json --count 300 --seed 20260819 --output D:\mirae-asset-project\runs\evaluation\agent_stress_300.jsonl --manifest data/derived/agent_stress_300_manifest.json
@@ -165,7 +165,7 @@ python scripts/build_agent_stress.py --gold data/derived/gold_qa.agent_audited.j
 
 The manifest contains input/output SHA-256, git commit, seed, case/base/mutation/company/filing counts, category counts, trust-tier counts, and UTC build timestamp. It contains no question/answer text.
 
-- [ ] **Step 5: Run tests, build twice, and compare hashes**
+- [x] **Step 5: Run tests, build twice, and compare hashes**
 
 Run: `python -m unittest tests.test_agent_stress -v`
 

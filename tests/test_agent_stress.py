@@ -4,7 +4,9 @@ import copy
 import unittest
 
 from disclosure_db.stress_generation import (
+    build_stress_cases,
     canonical_json,
+    split_groups,
     source_sha256,
     validate_stress_case,
     validate_stress_cases,
@@ -71,6 +73,37 @@ class AgentStressContractTests(unittest.TestCase):
         case["answer"] = {"kind": "unanswerable", "reason": "근거 없음"}
         case["evidence"] = []
         validate_stress_case(case)
+
+    def test_build_cases_is_deterministic_and_matches_category_counts(self) -> None:
+        contract = {
+            "case_count": 9,
+            "allocation": {
+                "financial": 1, "event": 1, "correction": 1,
+                "calculation": 1, "retrieval": 1, "unanswerable": 1,
+                "adversarial": 1, "language": 1, "fault": 1,
+            },
+        }
+        records = [valid_case()]
+        first = build_stress_cases(records, contract)
+        second = build_stress_cases(list(reversed(records)), contract)
+        self.assertEqual(canonical_json(first), canonical_json(second))
+        self.assertEqual(len(first), 9)
+        self.assertEqual({case["stress"]["category"] for case in first}, set(contract["allocation"]))
+        validate_stress_cases(first)
+
+    def test_group_split_never_separates_base_and_mutations(self) -> None:
+        cases = []
+        for index in range(10):
+            case = valid_case()
+            case["question_id"] = f"stress_{index}"
+            case["stress"]["group_id"] = f"group_{index // 2}"  # type: ignore[index]
+            cases.append(case)
+        train, holdout = split_groups(cases, 0.2)
+        self.assertTrue(
+            {case["stress"]["group_id"] for case in train}.isdisjoint(
+                {case["stress"]["group_id"] for case in holdout}
+            )
+        )
 
 
 if __name__ == "__main__":
