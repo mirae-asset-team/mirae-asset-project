@@ -135,3 +135,27 @@ HTTP API가 필요하면 `pip install -e .[agent]` 후 `disclosure-agent serve`�
 uvicorn은 선택 의존성으로 지연 로딩되며, 핵심 CLI·테스트에는 필요하지 않습니다. API 응답에는
 `request_id`, `corpus_revision`, `latency_ms`가 공통으로 붙고, overlay가 설정됐지만 base attestation에
 실패하면 `/health`가 `ready=false`를 반환합니다.
+
+## Agent-audited Gold 회귀 기준
+
+자동 생성 Gold는 사람 승인 Gold와 분리합니다. `review.status=agent_audited`는 결정론적
+evidence·lineage·단위·Decimal·citation 게이트를 통과했다는 뜻이며 `human_verified/approved`로
+자동 승격되지 않습니다. 재현 명령과 reject 해석은 [Gold audit guide](docs/gold-set-audit.md),
+단계별 명령·결과·커밋은 [development log](docs/development-log.md)에 기록합니다.
+
+```powershell
+$env:PYTHONPATH='src'
+python scripts/build_agent_gold.py `
+  --database 'D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite' `
+  --gold 'data/derived/gold_qa.jsonl' `
+  --overlay-seed 'data/derived/financial_fact_gold_seed.jsonl' `
+  --output 'data/derived/gold_qa.agent_audited.jsonl' `
+  --summary 'data/derived/gold_qa_agent_audit_summary.json' `
+  --rejects 'data/derived/gold_qa_agent_rejects.jsonl' `
+  --precomputed-base-sha256 'b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563' `
+  --fact-limit 0
+```
+
+`--fact-limit 0`은 현재 baseline(기존 Gold 23건 + validated financial overlay 8건)이며, generic
+predicate 후보까지 전수 생성하려면 옵션을 생략합니다. 대형 SQLite 전수 조인은 장시간 실행될 수
+있고, 중단되어도 원자적 출력으로 기존 artifact는 손상되지 않습니다.

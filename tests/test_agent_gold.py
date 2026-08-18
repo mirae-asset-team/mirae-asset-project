@@ -224,6 +224,17 @@ class AgentGoldTests(unittest.TestCase):
                 if line.strip():
                     self.assertTrue(json.loads(line)["reason_codes"])
 
+    def test_audit_docs_record_generator_and_release_boundary(self) -> None:
+        audit = Path("docs/gold-set-audit.md").read_text(encoding="utf-8")
+        development = Path("docs/development-log.md").read_text(encoding="utf-8")
+        for text in ("Quick start", "Dataset states", "Gate decision table", "Reject ledger", "Evidence → Finding → Path", "Release boundary"):
+            self.assertIn(text, audit)
+        self.assertIn("build_agent_gold.py", audit)
+        self.assertIn("agent_audited", audit)
+        self.assertIn("human_verified", audit)
+        self.assertIn("b882f19", development)
+        self.assertIn("gold_qa.agent_audited.jsonl", development)
+
 
 if __name__ == "__main__":
     unittest.main()
