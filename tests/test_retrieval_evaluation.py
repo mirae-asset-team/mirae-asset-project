@@ -74,6 +74,32 @@ class RetrievalEvaluationTests(unittest.TestCase):
         self.assertIsNone(result["post_rerank_recall_at_8"])
         self.assertEqual(result["post_rerank_reason"], "reranker_timeout")
 
+    def test_mixed_reranker_success_and_failure_keeps_failed_question_in_denominator(self) -> None:
+        class Mixed:
+            def __init__(self):
+                self.calls = 0
+            def rerank(self, question, candidates, *, limit):
+                self.calls += 1
+                if self.calls == 1:
+                    return {"evidence_ids": ["frag1"], "used_provider": True, "reason_codes": []}
+                raise TimeoutError("provider timeout")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = root / "empty.sqlite"
+            sqlite3.connect(database).close()
+            gold = root / "gold.jsonl"
+            rows = [{"question_id": f"q{i}", "question": "테스트", "question_type": "single_filing_fact", "answerability": "answerable", "evidence": [{"evidence_id": f"ev{i}"}], "candidate_filing_ids": ["f1"], "company_resolution": {}} for i in (1, 2)]
+            gold.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+            with patch("disclosure_db.retrieval_evaluation.retrieval_tokens", return_value=["term"]), \
+                 patch("disclosure_db.retrieval_evaluation._rrf_term_search", side_effect=[[{"evidence_id": "frag1"}], [{"evidence_id": "frag2"}]]), \
+                 patch("disclosure_db.retrieval_evaluation._target_fragments", side_effect=[["frag1"], ["frag2"]]):
+                result = evaluate_retrieval(database=database, gold_path=gold, limit=20, reranker=Mixed())
+        self.assertEqual(result["post_rerank_recall_at_8"], 0.5)
+        self.assertEqual(result["post_rerank_attempted_count"], 2)
+        self.assertEqual(result["post_rerank_success_count"], 1)
+        self.assertEqual(result["post_rerank_failure_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

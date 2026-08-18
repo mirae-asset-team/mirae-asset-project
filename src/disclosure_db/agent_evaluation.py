@@ -11,6 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from .agent import DisclosureAgent
+from .evaluation import REQUIRED_GOLD_RECORD_FIELDS
+from .gold_validation import validate_record_contract
+
+try:
+    _CANONICAL_FIELDS = set(json.loads((Path(__file__).resolve().parents[2] / "config" / "gold_annotation_schema.json").read_text(encoding="utf-8")).get("properties", {}))
+except Exception:
+    _CANONICAL_FIELDS = set()
 
 
 def _ratio(numerator: int | float, denominator: int | float) -> float | None:
@@ -19,16 +26,30 @@ def _ratio(numerator: int | float, denominator: int | float) -> float | None:
     return round(float(numerator) / float(denominator), 6)
 
 
-def quality_gate_passed(summary: dict[str, Any], acceptance: dict[str, Any]) -> bool:
-    """Apply every configured threshold; missing/null required metrics fail closed."""
+def _finite_number(value: Any, *, integer: bool = False) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if not math.isfinite(float(value)):
+        return False
+    return not integer or isinstance(value, int)
+
+
+def quality_gate_diagnostics(summary: dict[str, Any], acceptance: dict[str, Any]) -> dict[str, Any]:
+    reasons: list[str] = []
     if any(key not in summary for key in ("error_count", "false_numeric_claim_count", "unsafe_answer_count")):
-        return False
-    if int(summary["error_count"] or 0) != 0:
-        return False
-    if int(summary.get("false_numeric_claim_count", 0) or 0) > int(acceptance.get("false_numeric_claims", 0) or 0):
-        return False
-    if int(summary.get("unsafe_answer_count", 0) or 0) > int(acceptance.get("unsafe_answers", 0) or 0):
-        return False
+        reasons.append("hard_count_missing")
+    if summary.get("stage_metrics_errors"):
+        reasons.extend(str(item) for item in summary["stage_metrics_errors"])
+    if "error_count" in summary and (not _finite_number(summary["error_count"], integer=True) or summary["error_count"] != 0):
+        reasons.append("error_count_invalid_or_nonzero")
+    hard_pairs = (("false_numeric_claim_count", "false_numeric_claims"), ("unsafe_answer_count", "unsafe_answers"))
+    for metric_name, threshold_name in hard_pairs:
+        if metric_name not in summary or not _finite_number(summary.get(metric_name), integer=True):
+            reasons.append(metric_name + "_invalid")
+            continue
+        threshold = acceptance.get(threshold_name, 0)
+        if not _finite_number(threshold, integer=True) or int(summary[metric_name]) > int(threshold):
+            reasons.append(threshold_name + "_failed")
     mapping: dict[str, tuple[str, str]] = {
         "regression_answerability_matches": ("answerability_match_count", "ge"),
         "numeric_exactness": ("numeric_exactness", "ge"),
@@ -50,16 +71,32 @@ def quality_gate_passed(summary: dict[str, Any], acceptance: dict[str, Any]) -> 
         metric = summary.get(metric_name)
         if threshold_name == "end_to_end_p95_ms" and metric is None:
             metric = summary.get("end_to_end_p95_ms")
-        if metric is None:
-            return False
-        if operator == "ge" and float(metric) < float(threshold):
-            return False
-        if operator == "le" and float(metric) > float(threshold):
-            return False
+        threshold_integer = threshold_name == "regression_answerability_matches"
+        if not _finite_number(threshold, integer=threshold_integer):
+            reasons.append(threshold_name + "_threshold_invalid")
+            continue
+        if not _finite_number(metric, integer=False):
+            reasons.append(threshold_name + "_metric_missing_or_invalid")
+            continue
+        try:
+            failed = float(metric) < float(threshold) if operator == "ge" else float(metric) > float(threshold)
+        except (TypeError, ValueError, OverflowError):
+            failed = True
+        if failed:
+            reasons.append(threshold_name + "_failed")
     handled = set(mapping) | {"false_numeric_claims", "unsafe_answers"}
-    if any(key not in handled for key in acceptance):
+    for key in acceptance:
+        if key not in handled:
+            reasons.append("unknown_acceptance_metric:" + str(key))
+    return {"passed": not reasons, "reasons": reasons}
+
+
+def quality_gate_passed(summary: dict[str, Any], acceptance: dict[str, Any]) -> bool:
+    """Apply every configured threshold; missing/null required metrics fail closed."""
+    try:
+        return bool(quality_gate_diagnostics(summary, acceptance)["passed"])
+    except Exception:
         return False
-    return True
 
 
 def evaluation_pass(
@@ -132,6 +169,13 @@ def _validate_record(record: Any) -> str | None:
     missing = sorted(required - set(record))
     if missing:
         return "required fields missing: " + ", ".join(missing)
+    unknown = sorted(set(record) - (_CANONICAL_FIELDS | {"split_group", "split", "holdout_variant", "holdout_provenance"}))
+    if unknown:
+        return "unknown fields: " + ", ".join(unknown)
+    if REQUIRED_GOLD_RECORD_FIELDS <= set(record):
+        canonical_issues = validate_record_contract(record)
+        if canonical_issues:
+            return "canonical schema: " + ";".join(str(item.get("rule_id")) for item in canonical_issues)
     if not isinstance(record["question_id"], str) or not record["question_id"] or not isinstance(record["question"], str) or not record["question"]:
         return "question identity must be a non-empty string"
     if record["answerability"] not in {"answerable", "unanswerable", "ambiguous"}:
@@ -163,6 +207,8 @@ def evaluate_agent(
     limit: int = 20,
     contract_path: Path | None = None,
     acceptance: dict[str, Any] | None = None,
+    stage_metrics: dict[str, Any] | None = None,
+    stage_metrics_errors: list[str] | None = None,
 ) -> dict[str, Any]:
     """Evaluate each Gold JSONL record and return auditable aggregate results."""
     evaluations: list[dict[str, Any]] = []
@@ -256,6 +302,8 @@ def evaluate_agent(
         bool(item.get("answerable")) and (not bool(item.get("verified")) or not bool(item.get("expected_answerable")))
         for item in answered
     )
+    allowed_stage_metrics = {"planner_p95_ms", "fact_lookup_p95_ms", "local_retrieval_p95_ms", "reranked_retrieval_p95_ms"}
+    merged_stage_metrics = {key: value for key, value in (stage_metrics or {}).items() if key in allowed_stage_metrics}
     result: dict[str, Any] = {
         "count": len(evaluations),
         "pass_count": sum(item.get("status") == "pass" for item in answered),
@@ -275,16 +323,19 @@ def evaluate_agent(
         "error_count": sum(item.get("status") == "error" for item in evaluations),
         "latency_ms_p50": percentile(latencies, 0.50),
         "latency_ms_p95": percentile(latencies, 0.95),
-        "planner_p95_ms": None,
-        "fact_lookup_p95_ms": None,
-        "local_retrieval_p95_ms": None,
-        "reranked_retrieval_p95_ms": None,
+        "planner_p95_ms": merged_stage_metrics.get("planner_p95_ms"),
+        "fact_lookup_p95_ms": merged_stage_metrics.get("fact_lookup_p95_ms"),
+        "local_retrieval_p95_ms": merged_stage_metrics.get("local_retrieval_p95_ms"),
+        "reranked_retrieval_p95_ms": merged_stage_metrics.get("reranked_retrieval_p95_ms"),
         "end_to_end_p95_ms": percentile(latencies, 0.95),
+        "stage_metrics_errors": list(stage_metrics_errors or []),
         "evaluations": evaluations,
     }
     if acceptance is None and contract_path is not None:
         contract = json.loads(contract_path.read_text(encoding="utf-8"))
         acceptance = contract.get("serving_vertical_slice_acceptance")
     if acceptance is not None:
-        result["quality_gate_passed"] = quality_gate_passed(result, acceptance)
+        gate = quality_gate_diagnostics(result, acceptance)
+        result["quality_gate_passed"] = bool(gate["passed"])
+        result["quality_gate_reasons"] = list(gate["reasons"])
     return result

@@ -90,11 +90,19 @@ class AgentHoldoutTests(unittest.TestCase):
         right = source_record("q-right", event_id="event-a", filing_id="00000000000001")
         bridge = source_record("q-bridge", event_id="", filing_id="00000000000001")
         bridge["candidate_filing_ids"] = ["00000000000001", "00000000000002"]
+        bridge["source_evidence"].append({**bridge["source_evidence"][0], "source_id": "src2", "filing_id": "00000000000002"})
         bridge["version_evidence"] = [{"event_id": "", "filing_id": "00000000000001", "parent_filing_id": None, "lineage_status": "root", "lineage_confidence": "high", "is_current": True, "effective_from": "2024-01-01", "effective_to": None, "rationale": "fixture"}]
         first = build_holdout([left, right, bridge])
         second = build_holdout([bridge, right, left])
         self.assertEqual(first, second)
         self.assertEqual({row["split_group"] for row in first}, {"event-a"})
+
+    def test_parent_filing_link_connects_root_and_child_without_shared_event(self) -> None:
+        root = source_record("q-root", event_id="event-root", filing_id="00000000000001")
+        child = source_record("q-child", event_id="event-child", filing_id="00000000000002")
+        child["version_evidence"][0]["parent_filing_id"] = "00000000000001"
+        output = build_holdout([child, root])
+        self.assertEqual(len({row["split_group"] for row in output}), 1)
 
     def test_duplicate_ids_and_invalid_nested_schema_are_rejected(self) -> None:
         duplicate = source_record("q1")
@@ -104,7 +112,7 @@ class AgentHoldoutTests(unittest.TestCase):
         self.assertEqual(result, [])
         reasons = {item["reason"] for item in build_holdout.last_rejections}
         self.assertTrue(any("duplicate" in reason for reason in reasons))
-        self.assertIn("answerability_kind_mismatch", reasons)
+        self.assertTrue(any("answerability_kind_mismatch" in reason for reason in reasons))
 
     def test_provenance_hash_is_exact_source_record_digest(self) -> None:
         source = source_record("q1")

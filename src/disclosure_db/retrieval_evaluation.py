@@ -217,9 +217,17 @@ def evaluate_retrieval(
         if any(target["rank"] is not None for target in item["targets"])
     ]
     target_recall = (len(found) / len(target_rows)) if target_rows else None
-    post_rows = [target for item in evaluations if item["post_rerank_reason"] == "ok" for target in item["post_rerank_targets"]]
+    post_rerank_attempted = len(evaluations) if reranker is not None else 0
+    post_rerank_success = sum(item["post_rerank_reason"] == "ok" for item in evaluations)
+    post_rerank_failure = post_rerank_attempted - post_rerank_success
+    post_rows = [target for item in evaluations for target in item["post_rerank_targets"]] if post_rerank_success else []
     post_rerank_found = [target for target in post_rows if target["rank"] is not None and int(target["rank"]) <= 8]
-    post_rerank_available = any(item["post_rerank_reason"] == "ok" for item in evaluations)
+    post_rerank_available = post_rerank_success > 0
+    reasons: dict[str, int] = {}
+    for item in evaluations:
+        if item["post_rerank_reason"] != "ok":
+            reason = str(item["post_rerank_reason"])
+            reasons[reason] = reasons.get(reason, 0) + 1
     return {
         "database": portable_path(database),
         "gold": portable_path(gold_path),
@@ -233,5 +241,9 @@ def evaluate_retrieval(
         "mrr_at_k": (sum(1 / rank for rank in first_relevant_ranks) / len(evaluations)) if evaluations else None,
         "post_rerank_recall_at_8": (len(post_rerank_found) / len(post_rows)) if post_rerank_available and post_rows else None,
         "post_rerank_reason": "ok" if post_rerank_available else (evaluations[0]["post_rerank_reason"] if evaluations else "no_eligible_questions"),
+        "post_rerank_attempted_count": post_rerank_attempted,
+        "post_rerank_success_count": post_rerank_success,
+        "post_rerank_failure_count": post_rerank_failure,
+        "post_rerank_failure_reasons": reasons,
         "evaluations": evaluations,
     }

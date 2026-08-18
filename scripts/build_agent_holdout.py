@@ -8,6 +8,8 @@ import json
 import re
 from typing import Any, Iterable
 
+from disclosure_db.gold_validation import validate_record_contract
+
 
 _YEAR_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})(?:[-./]\d{2}(?:[-./]\d{2})?)?")
 _QUESTION_TAIL_RE = re.compile(r"(?:의|의\s+)?(.+?)(?:은|는|이|가)\s*(?:얼마인가|누구인가|무엇인가)\??$")
@@ -21,6 +23,10 @@ _EVIDENCE_REQUIRED = {"evidence_id", "filing_id", "source_sha256", "locator", "r
 _VERSION_REQUIRED = {"filing_id", "parent_filing_id", "lineage_status", "lineage_confidence", "is_current", "effective_from", "effective_to", "rationale"}
 _SOURCE_REQUIRED = {"source_id", "filing_id", "sha256", "detected_format", "parse_status", "fragment_count", "table_count", "cell_count", "table_structure_status"}
 _REVIEW_REQUIRED = {"status", "annotator", "reviewer", "reviewed_at", "notes"}
+try:
+    _CANONICAL_FIELDS = set(json.loads((__import__("pathlib").Path(__file__).resolve().parents[1] / "config" / "gold_annotation_schema.json").read_text(encoding="utf-8")).get("properties", {}))
+except Exception:
+    _CANONICAL_FIELDS = set()
 
 
 def _record_nodes(record: dict[str, Any]) -> set[tuple[str, str]]:
@@ -32,6 +38,8 @@ def _record_nodes(record: dict[str, Any]) -> set[tuple[str, str]]:
         if isinstance(item, dict):
             if item.get("filing_id"):
                 nodes.add(("filing", str(item["filing_id"])))
+            if item.get("parent_filing_id"):
+                nodes.add(("filing", str(item["parent_filing_id"])))
             if item.get("event_id"):
                 nodes.add(("event", str(item["event_id"])))
     return nodes
@@ -135,6 +143,12 @@ def _positive_question(record: dict[str, Any]) -> tuple[str, str]:
 def _eligible(record: Any) -> tuple[bool, str]:
     if not isinstance(record, dict):
         return False, "record_not_object"
+    unknown = sorted(set(record) - _CANONICAL_FIELDS)
+    if unknown:
+        return False, "unknown_fields:" + ",".join(unknown)
+    canonical_issues = validate_record_contract(record)
+    if canonical_issues:
+        return False, "canonical_schema:" + ";".join(str(item.get("rule_id")) for item in canonical_issues)
     missing = sorted(_TOP_REQUIRED - set(record))
     if missing:
         return False, "required_fields_missing:" + ",".join(missing)
@@ -179,6 +193,12 @@ def _eligible(record: Any) -> tuple[bool, str]:
         return False, "answer_unanswerable_shape_invalid"
     if not isinstance(record.get("evidence"), list) or len({item.get("evidence_id") for item in record["evidence"] if isinstance(item, dict)}) != len(record["evidence"]) or any(not isinstance(item, dict) or not _EVIDENCE_REQUIRED <= set(item) or not isinstance(item.get("evidence_id"), str) or not isinstance(item.get("filing_id"), str) or not isinstance(item.get("locator"), dict) or item.get("role") not in {"support", "operand", "version_before", "version_after", "distractor"} or item.get("lineage_status") not in {"root", "resolved", "unresolved", "missing_original"} or not isinstance(item.get("is_current"), bool) or item.get("source_format") not in {"xml", "html", "pdf", "other"} or item.get("table_structure_status") not in {"human_validated", "parsed_unreviewed", "unvalidated", "not_applicable"} for item in record["evidence"]):
         return False, "evidence_shape_invalid"
+    if record["question_type"] == "table_cell" and any(not {"table_id", "cell_evidence_id", "unit"} <= set(item) for item in record["evidence"]):
+        return False, "table_cell_evidence_shape_invalid"
+    if record["question_type"] == "correction_aware" and (not record["version_evidence"] or any(not item.get("event_id") for item in record["version_evidence"])):
+        return False, "correction_version_shape_invalid"
+    if record["question_type"] in {"period_comparison", "cross_company_comparison"} and not isinstance(record.get("formula"), dict):
+        return False, "comparison_formula_missing"
     if not isinstance(record.get("version_evidence"), list) or any(not isinstance(item, dict) or not _VERSION_REQUIRED <= set(item) or ("event_id" in item and item.get("event_id") is not None and not isinstance(item.get("event_id"), str)) or not isinstance(item.get("filing_id"), str) or (item.get("parent_filing_id") is not None and not isinstance(item.get("parent_filing_id"), str)) or item.get("lineage_status") not in {"root", "resolved", "unresolved", "missing_original"} or not isinstance(item.get("is_current"), bool) for item in record["version_evidence"]):
         return False, "version_evidence_shape_invalid"
     if not isinstance(record.get("source_evidence"), list) or not record["source_evidence"] or len({item.get("source_id") for item in record["source_evidence"] if isinstance(item, dict)}) != len(record["source_evidence"]) or any(not isinstance(item, dict) or not _SOURCE_REQUIRED <= set(item) or not isinstance(item.get("source_id"), str) or not isinstance(item.get("filing_id"), str) or not isinstance(item.get("fragment_count"), int) or item.get("fragment_count") < 0 or not isinstance(item.get("table_count"), int) or item.get("table_count") < 0 or not isinstance(item.get("cell_count"), int) or item.get("cell_count") < 0 for item in record["source_evidence"]):

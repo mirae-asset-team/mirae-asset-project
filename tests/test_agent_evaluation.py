@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 
 from disclosure_db.agent_contracts import VerifiedAnswer
 from disclosure_db.agent_evaluation import evaluate_agent, evaluation_pass, percentile, quality_gate_passed
+from scripts.evaluate_agent import load_stage_metrics
 
 
 class AgentEvaluationTests(unittest.TestCase):
@@ -222,6 +223,36 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(result["error_count"], 1)
         self.assertEqual(result["evaluations"][0]["status"], "error")
         self.assertFalse(result["quality_gate_passed"])
+
+    def test_quality_gate_rejects_nonfinite_and_invalid_numeric_types_without_raising(self) -> None:
+        base = {"error_count": 0, "false_numeric_claim_count": 0, "unsafe_answer_count": 0, "numeric_exactness": 1.0}
+        self.assertFalse(quality_gate_passed({**base, "numeric_exactness": float("nan")}, {"numeric_exactness": 1.0}))
+        self.assertFalse(quality_gate_passed({**base, "numeric_exactness": float("inf")}, {"numeric_exactness": 1.0}))
+        self.assertFalse(quality_gate_passed({**base, "numeric_exactness": True}, {"numeric_exactness": 1.0}))
+        self.assertFalse(quality_gate_passed({**base, "error_count": "0"}, {"numeric_exactness": 1.0}))
+        self.assertFalse(quality_gate_passed(base, {"numeric_exactness": float("nan")}))
+
+    def test_stage_metrics_artifact_requires_finite_numeric_p95_values(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "stages.json"
+            path.write_text('{"planner_p95_ms": 1, "fact_lookup_p95_ms": 2, "local_retrieval_p95_ms": 3, "reranked_retrieval_p95_ms": 4}\n', encoding="utf-8")
+            values, errors = load_stage_metrics(path)
+            self.assertEqual(values["planner_p95_ms"], 1.0)
+            self.assertEqual(errors, [])
+            path.write_text('{"planner_p95_ms": NaN, "fact_lookup_p95_ms": true}\n', encoding="utf-8")
+            values, errors = load_stage_metrics(path)
+        self.assertEqual(values, {})
+        self.assertTrue(errors)
+
+    def test_stage_metrics_missing_artifact_is_auditable_and_gate_fails(self) -> None:
+        values, errors = load_stage_metrics(None)
+        self.assertEqual(values, {})
+        self.assertIn("stage_metrics_missing", errors)
+
+    def test_complete_stage_metrics_can_satisfy_stage_latency_thresholds(self) -> None:
+        summary = {"error_count": 0, "false_numeric_claim_count": 0, "unsafe_answer_count": 0, "answerability_match_count": 31, "numeric_exactness": 1.0, "citation_precision": 1.0, "target_recall_at_20": 1.0, "post_rerank_recall_at_8": 0.9, "citation_recall": 0.9, "answerability_agreement": 0.9, "planner_p95_ms": 20.0, "fact_lookup_p95_ms": 200.0, "local_retrieval_p95_ms": 800.0, "reranked_retrieval_p95_ms": 5000.0, "latency_ms_p95": 10000.0}
+        acceptance = {"regression_answerability_matches": 31, "numeric_exactness": 1.0, "citation_precision": 1.0, "retrieval_recall_at_20": 1.0, "post_rerank_recall_at_8": 0.9, "citation_recall": 0.9, "holdout_answerability_agreement": 0.9, "false_numeric_claims": 0, "unsafe_answers": 0, "planner_p95_ms": 20, "fact_lookup_p95_ms": 200, "local_retrieval_p95_ms": 800, "reranked_retrieval_p95_ms": 5000, "end_to_end_p95_ms": 10000}
+        self.assertTrue(quality_gate_passed(summary, acceptance))
 
 
 if __name__ == "__main__":
