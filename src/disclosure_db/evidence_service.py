@@ -178,6 +178,7 @@ class EvidenceService:
                         company=plan.company,
                         limit=max(1, limit - len(refs)),
                         as_of=version_as_of,
+                        correction_policy=plan.correction_policy,
                     )
                     refs.extend(self._fragment_refs(rows))
         unique: list[EvidenceRef] = []

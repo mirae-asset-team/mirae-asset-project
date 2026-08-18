@@ -11,7 +11,7 @@ from unittest.mock import patch
 from disclosure_db.attestation import CorpusAttestation
 from disclosure_db.agent_contracts import QueryPlan
 from disclosure_db.evidence_service import EvidenceService
-from disclosure_db.schema import create_schema
+from disclosure_db.schema import create_schema, create_indexes
 from disclosure_db.search_index import SafeSearchIndex, build_search_index
 
 
@@ -41,6 +41,7 @@ def _seed_base(path: Path) -> None:
         ("ev_unresolved", "f_unresolved", "s_unresolved", "heading", 0, "[]", None, None, "{}", "계약금액 unsafe", "계약금액 unsafe", "1"),
         ("ev_pdf", "f_pdf", "s_pdf", "paragraph", 0, "[]", 1, None, "{}", "계약금액 PDF", "계약금액 PDF", "1"),
     ])
+    create_indexes(connection)
     connection.commit()
     connection.close()
 
@@ -143,6 +144,17 @@ class SearchIndexTests(unittest.TestCase):
         self.assertEqual(index.search("계약금액", company="테스트", as_of=None), [])
         self.assertEqual([row["evidence_id"] for row in index.search("계약금액", company="테스트", as_of=None, correction_policy="original")], ["ev_safe"])
 
+    def test_correction_policy_corrected_selects_correction(self) -> None:
+        connection = sqlite3.connect(self.base)
+        connection.execute("UPDATE filing_version SET lineage_status='resolved', is_current=1 WHERE filing_id='f_unresolved'")
+        connection.execute("UPDATE filing SET is_correction=1 WHERE filing_id='f_unresolved'")
+        connection.commit()
+        connection.close()
+        self.attestation = CorpusAttestation(hashlib.sha256(self.base.read_bytes()).hexdigest(), self.base.stat().st_size, self.base.stat().st_mtime_ns, "semantic-v1")
+        build_search_index(self.base, self.index, self.attestation)
+        index = SafeSearchIndex(self.index, base_sha256=self.attestation.sha256, expected_base_size=self.attestation.size_bytes)
+        self.assertEqual([row["evidence_id"] for row in index.search("계약금액", company="테스트", as_of=None, correction_policy="corrected")], ["ev_unresolved"])
+
     def test_company_aliases_filter_index(self) -> None:
         build_search_index(self.base, self.index, self.attestation)
         index = SafeSearchIndex(self.index, base_sha256=self.attestation.sha256, expected_base_size=self.attestation.size_bytes)
@@ -185,6 +197,31 @@ class SearchIndexTests(unittest.TestCase):
             bundle = service.search(QueryPlan("테스트 계약금액", company="테스트"))
         self.assertTrue(fallback.called)
         self.assertIn("search_index_attestation_mismatch", bundle.reason_codes)
+
+    def test_ssot_fallback_preserves_original_correction_policy(self) -> None:
+        connection = sqlite3.connect(self.base)
+        connection.execute("UPDATE filing_version SET is_current=0 WHERE filing_id='f_safe'")
+        connection.execute("UPDATE filing_version SET lineage_status='resolved', is_current=1 WHERE filing_id='f_unresolved'")
+        connection.execute("UPDATE filing SET is_correction=1 WHERE filing_id='f_unresolved'")
+        connection.commit()
+        connection.close()
+        self.attestation = CorpusAttestation(hashlib.sha256(self.base.read_bytes()).hexdigest(), self.base.stat().st_size, self.base.stat().st_mtime_ns, "semantic-v1")
+        missing = self.index.with_name("missing-original.sqlite")
+        service = EvidenceService(self.base, attestation=self.attestation, search_database=missing)
+        bundle = service.search(QueryPlan("계약금액", company="테스트", correction_policy="original"))
+        self.assertEqual([ref.evidence_id for ref in bundle.evidence], ["ev_safe"])
+
+    def test_ssot_fallback_preserves_corrected_correction_policy(self) -> None:
+        connection = sqlite3.connect(self.base)
+        connection.execute("UPDATE filing_version SET lineage_status='resolved', is_current=1 WHERE filing_id='f_unresolved'")
+        connection.execute("UPDATE filing SET is_correction=1 WHERE filing_id='f_unresolved'")
+        connection.commit()
+        connection.close()
+        self.attestation = CorpusAttestation(hashlib.sha256(self.base.read_bytes()).hexdigest(), self.base.stat().st_size, self.base.stat().st_mtime_ns, "semantic-v1")
+        missing = self.index.with_name("missing-corrected.sqlite")
+        service = EvidenceService(self.base, attestation=self.attestation, search_database=missing)
+        bundle = service.search(QueryPlan("계약금액", company="테스트", correction_policy="corrected"))
+        self.assertEqual([ref.evidence_id for ref in bundle.evidence], ["ev_unresolved"])
 
     def test_evidence_service_falls_back_when_index_is_corrupt(self) -> None:
         self.index.write_bytes(b"not sqlite")

@@ -541,6 +541,7 @@ def query_database(
     as_of: str | None = None,
     include_unsafe: bool = False,
     filing_ids: list[str] | tuple[str, ...] | None = None,
+    correction_policy: str = "current",
 ) -> list[dict[str, object]]:
     """Search evidence with safe current/PIT lineage filtering by default.
 
@@ -559,6 +560,14 @@ def query_database(
         version_params: list[object] = []
         if not include_unsafe:
             version_sql, version_params = version_filter_sql(as_of=as_of)
+            if correction_policy == "original":
+                version_sql = "v.lineage_status='root'"
+                version_params = []
+                if as_of is not None:
+                    version_sql += " AND v.effective_from<=? AND (v.effective_to IS NULL OR ? < v.effective_to)"
+                    version_params = [as_of, as_of]
+            elif correction_policy == "corrected":
+                version_sql += " AND f.is_correction=1"
         if company or filing_ids is not None:
             eligible_where: list[str] = []
             eligible_params: list[object] = []
