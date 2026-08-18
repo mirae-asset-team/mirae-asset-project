@@ -90,6 +90,126 @@ class FinancialOverlayTests(unittest.TestCase):
             self.assertEqual(rows[0]["trust_tier"], "agent_audited")
             self.assertEqual(rows[0]["evidence_ids"], ["c2"])
 
+    def test_agent_overlay_rejects_disallowed_event_validation_status(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates = root / "financial.jsonl", root / "predicates.json"
+            seed_base(base)
+            with closing(sqlite3.connect(base)) as connection:
+                connection.execute("UPDATE fact SET validation_status='rejected' WHERE fact_id='fact1'")
+                connection.commit()
+            seed.write_text("", encoding="utf-8")
+            predicates.write_text(json.dumps({"predicates": [{
+                "id": "contract_amount", "answer_kind": "numeric",
+                "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약금액"],
+            }]}, ensure_ascii=False), encoding="utf-8")
+            result = build_agent_overlay(base, overlay, seed, predicates)
+            self.assertEqual(result.event_imported, 0)
+            with closing(sqlite3.connect(overlay)) as connection:
+                self.assertEqual(
+                    connection.execute("SELECT reason_code FROM build_reject").fetchone()[0],
+                    "event_validation_status_invalid",
+                )
+
+    def test_agent_overlay_rejects_missing_event_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates = root / "financial.jsonl", root / "predicates.json"
+            seed_base(base)
+            with closing(sqlite3.connect(base)) as connection:
+                connection.execute("DELETE FROM fact_evidence WHERE fact_id='fact1'")
+                connection.commit()
+            seed.write_text("", encoding="utf-8")
+            predicates.write_text(json.dumps({"predicates": [{
+                "id": "contract_amount", "answer_kind": "numeric",
+                "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약금액"],
+            }]}, ensure_ascii=False), encoding="utf-8")
+            result = build_agent_overlay(base, overlay, seed, predicates)
+            self.assertEqual(result.event_imported, 0)
+            self.assertIn("event_evidence_missing", result.reasons[0])
+
+    def test_agent_overlay_rejects_cross_filing_event_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates = root / "financial.jsonl", root / "predicates.json"
+            seed_base(base)
+            with closing(sqlite3.connect(base)) as connection:
+                connection.execute("""INSERT INTO filing VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                    "f2", "doc_f2", "00000001", "000001", "테스트", "테스트", "제출인", "IT", "IT",
+                    "periodic", "사업보고서", "사업보고서", "사업보고서", "사업보고서", "2024-04-01", 2023, 12, 0, "xml", 1,
+                ))
+                connection.execute("""INSERT INTO source_document VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (
+                    "s2", "f2", "main", "f2.xml", ".xml", "dart_xml", "utf-8", "utf-8", "b" * 64, 10,
+                    "2024-04-01T00:00:00Z", "test", "1", "success", 1, 0, "[]", "{}",
+                ))
+                connection.execute("INSERT INTO filing_event VALUES(?,?,?,?,?)", ("e2", "00000001", "periodic", "f2", "test"))
+                connection.execute("INSERT INTO filing_version VALUES(?,?,?,?,?,?,?,?,?,?)", (
+                    "f2", "e2", 1, None, "root", "high", "2024-04-01", None, 1, "test",
+                ))
+                connection.execute("INSERT INTO table_record VALUES(?,?,?,?,?,?,?,?,?,?,?)", (
+                    "t2", "f2", "s2", 0, "[]", "계약", "원", 1, 1, "success", "{}",
+                ))
+                connection.execute("INSERT INTO table_cell VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+                    "c3", "t2", "s2", "f2", 0, 0, 1, 1, "data", "[]", "[]", "{}", "계약금액 2,000원", "계약금액 2,000원", "1",
+                ))
+                connection.execute("DELETE FROM fact_evidence WHERE fact_id='fact1'")
+                connection.execute("DELETE FROM fact WHERE fact_id='fact1'")
+                connection.execute("INSERT INTO fact VALUES(?,?,?,?,?,?,?,?,?)", (
+                    "fact1", "f2", "event_kv_candidate", "테스트", "계약금액", "2000", "원", "parser", "candidate",
+                ))
+                connection.execute("INSERT INTO fact_evidence VALUES('fact1','c3')")
+                connection.execute("UPDATE fact SET filing_id='f1' WHERE fact_id='fact1'")
+                connection.commit()
+            seed.write_text("", encoding="utf-8")
+            predicates.write_text(json.dumps({"predicates": [{
+                "id": "contract_amount", "answer_kind": "numeric",
+                "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약금액"],
+            }]}, ensure_ascii=False), encoding="utf-8")
+            result = build_agent_overlay(base, overlay, seed, predicates)
+            self.assertEqual(result.event_imported, 0)
+            self.assertIn("event_cross_filing_evidence", result.reasons[0])
+
+    def test_agent_overlay_keeps_safe_historical_event_version_for_as_of_reads(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates = root / "financial.jsonl", root / "predicates.json"
+            seed_base(base)
+            with closing(sqlite3.connect(base)) as connection:
+                connection.execute("UPDATE filing_version SET is_current=0 WHERE filing_id='f1'")
+                connection.commit()
+            seed.write_text("", encoding="utf-8")
+            predicates.write_text(json.dumps({"predicates": [{
+                "id": "contract_amount", "answer_kind": "numeric",
+                "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약금액"],
+            }]}, ensure_ascii=False), encoding="utf-8")
+            result = build_agent_overlay(base, overlay, seed, predicates)
+            self.assertEqual(result.event_imported, 1)
+            self.assertEqual(fetch_event_facts(base, overlay), [])
+            rows = fetch_event_facts(base, overlay, as_of="2024-03-02")
+            self.assertEqual(rows[0]["filing_id"], "f1")
+
+    def test_agent_overlay_sorts_event_evidence_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates = root / "financial.jsonl", root / "predicates.json"
+            seed_base(base)
+            with closing(sqlite3.connect(base)) as connection:
+                connection.execute("INSERT INTO fact_evidence VALUES('fact1','c1')")
+                connection.commit()
+            seed.write_text("", encoding="utf-8")
+            predicates.write_text(json.dumps({"predicates": [{
+                "id": "contract_amount", "answer_kind": "numeric",
+                "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약금액"],
+            }]}, ensure_ascii=False), encoding="utf-8")
+            build_agent_overlay(base, overlay, seed, predicates)
+            rows = fetch_event_facts(base, overlay)
+            self.assertEqual(rows[0]["evidence_ids"], ["c1", "c2"])
+
     def test_agent_overlay_audits_numeric_and_evidence_rejections(self) -> None:
         cases = (
             ("not-a-number", "원", "event_numeric_not_decimal"),

@@ -357,14 +357,14 @@ def _event_candidates(base: sqlite3.Connection, allowlist: dict[tuple[str, str],
                    MIN(CASE WHEN c.evidence_id IS NOT NULL AND s.parse_status='success'
                             AND tr.parse_status='success' THEN 1 ELSE 0 END) parse_success,
                    MAX(CASE WHEN s.detected_format='pdf' THEN 1 ELSE 0 END) has_pdf,
-                   MIN(CASE WHEN v.lineage_status IN ('root','resolved') THEN 1 ELSE 0 END) lineage_safe,
+                   MAX(CASE WHEN v.lineage_status IN ('root','resolved') THEN 1 ELSE 0 END) lineage_safe,
                    GROUP_CONCAT(DISTINCT fe.evidence_id) evidence_ids
               FROM fact f
               LEFT JOIN fact_evidence fe ON fe.fact_id=f.fact_id
               LEFT JOIN table_cell c ON c.evidence_id=fe.evidence_id
               LEFT JOIN table_record tr ON tr.table_id=c.table_id
               LEFT JOIN source_document s ON s.source_id=c.source_id
-              LEFT JOIN filing_version v ON v.filing_id=f.filing_id AND v.is_current=1
+              LEFT JOIN filing_version v ON v.filing_id=f.filing_id
              WHERE {clauses}
              GROUP BY f.fact_id
              ORDER BY f.fact_id""",
@@ -381,6 +381,8 @@ def _clear_unit(unit: object) -> bool:
 
 def _validate_event_candidate(row: sqlite3.Row, predicate_id: str, answer_kind: str) -> dict[str, Any]:
     candidate_id = str(row["fact_id"])
+    if str(row["validation_status"] or "") != "candidate":
+        raise ValueError("event_validation_status_invalid")
     if not row["evidence_present"]:
         raise ValueError("event_evidence_missing")
     if not row["same_filing"]:
@@ -408,7 +410,7 @@ def _validate_event_candidate(row: sqlite3.Row, predicate_id: str, answer_kind: 
             raise ValueError("event_numeric_unit_missing" if not str(unit or "").strip() else "event_numeric_unit_ambiguous")
         value_numeric = format(numeric, "f")
         scale = 1
-    evidence_ids = [value for value in str(row["evidence_ids"] or "").split(",") if value]
+    evidence_ids = sorted({value for value in str(row["evidence_ids"] or "").split(",") if value})
     return {
         "event_fact_id": candidate_id,
         "filing_id": str(row["filing_id"]),
@@ -621,7 +623,7 @@ def fetch_overlay_facts(
         item = dict(row)
         if str(item.get("detected_format") or "") == "pdf":
             continue
-        item["evidence_ids"] = str(item.get("evidence_ids") or "").split(",") if item.get("evidence_ids") else []
+        item["evidence_ids"] = sorted(str(item.get("evidence_ids") or "").split(",")) if item.get("evidence_ids") else []
         try:
             item["evidence_texts"] = json.loads(str(item.get("evidence_texts") or "[]"))
         except json.JSONDecodeError:
@@ -690,7 +692,7 @@ def fetch_event_facts(
     result: list[dict[str, object]] = []
     for row in rows:
         item = dict(row)
-        item["evidence_ids"] = str(item.get("evidence_ids") or "").split(",") if item.get("evidence_ids") else []
+        item["evidence_ids"] = sorted(str(item.get("evidence_ids") or "").split(",")) if item.get("evidence_ids") else []
         try:
             item["evidence_texts"] = json.loads(str(item.get("evidence_texts") or "[]"))
         except json.JSONDecodeError:
