@@ -48,3 +48,52 @@ Result: `Ran 53 tests ... OK (skipped=1)`.
 ## Concerns
 
 - The short-run p95 contract expects the observed upper-tail value (`4.0` for `[1, 2, 3, 4]`); the percentile helper preserves an observed value for quantiles at or above 0.95 while retaining linear interpolation for ordinary quantiles.
+
+## Fix round 1: malformed and non-object JSONL rows
+
+### Change
+
+- Added focused tests proving malformed JSON and non-object JSON rows are recorded as `status="error"` with a line-based question ID and that later valid rows continue to evaluate.
+- Moved JSON parsing and object-shape validation inside the per-row exception boundary. Invalid rows now append an auditable error and continue without invoking the agent.
+
+### RED evidence
+
+Command:
+
+```text
+$env:PYTHONPATH = (Resolve-Path 'src').Path; python -m unittest tests.test_agent_evaluation -v
+```
+
+Output:
+
+```text
+Ran 6 tests in 0.104s
+FAILED (errors=2)
+JSONDecodeError: Expecting ',' delimiter
+AttributeError: 'list' object has no attribute 'get'
+```
+
+The two new tests failed at the previously unguarded `json.loads()` and `record.get()` calls.
+
+### GREEN evidence
+
+Command:
+
+```text
+$env:PYTHONPATH = (Resolve-Path 'src').Path; python -m unittest tests.test_agent_evaluation tests.test_agent_runtime -v
+```
+
+Output:
+
+```text
+Ran 11 tests in 0.038s
+OK
+```
+
+Full-suite verification:
+
+```text
+$env:PYTHONPATH = (Resolve-Path 'src').Path; python -m unittest discover -s tests -v
+```
+
+Output: `Ran 55 tests in 5.476s` and `OK (skipped=1)`.

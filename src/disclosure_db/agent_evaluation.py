@@ -77,8 +77,15 @@ def evaluate_agent(agent: DisclosureAgent, gold_path: Path, *, limit: int = 20) 
     for line_no, line in enumerate(gold_path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
-        record = json.loads(line)
-        question_id = record.get("question_id", f"line-{line_no}")
+        question_id = f"line-{line_no}"
+        try:
+            record = json.loads(line)
+            if not isinstance(record, dict):
+                raise TypeError("gold record must be a JSON object")
+            question_id = record.get("question_id", question_id)
+        except Exception as exc:  # keep malformed rows auditable and continue evaluating
+            evaluations.append({"question_id": question_id, "status": "error", "error": str(exc)})
+            continue
         started = time.perf_counter()
         try:
             answer = agent.answer(str(record["question"]), as_of=record.get("as_of"), limit=limit)
