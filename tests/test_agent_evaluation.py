@@ -110,7 +110,7 @@ class AgentEvaluationTests(unittest.TestCase):
 
         with TemporaryDirectory() as directory:
             gold = Path(directory) / "gold.jsonl"
-            gold.write_text('{"question_id":"safe","question":"미래 전망?","answerability":"unanswerable","answer":{"kind":"unanswerable"},"evidence":[]}\n', encoding="utf-8")
+            gold.write_text('{"question_id":"safe","question":"미래 전망?","answerability":"unanswerable","answer":{"kind":"unanswerable","reason":"근거 없음"},"evidence":[]}\n', encoding="utf-8")
             result = evaluate_agent(FakeAgent(), gold)
 
         self.assertEqual(result["answerability_agreement"], 1.0)
@@ -223,6 +223,48 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(result["error_count"], 1)
         self.assertEqual(result["evaluations"][0]["status"], "error")
         self.assertFalse(result["quality_gate_passed"])
+
+    def test_lightweight_records_validate_nested_answer_and_evidence_shapes(self) -> None:
+        class TrackingAgent:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def answer(self, question: str, *, as_of: str | None, limit: int) -> VerifiedAnswer:
+                self.calls += 1
+                return VerifiedAnswer("답", [], True, True)
+
+        cases = [
+            {"answer": {"kind": "numeric", "value": "1", "unit": "원", "scale": True}},
+            {"answer": "not-an-object"},
+            {"answer": {"kind": "unanswerable"}},
+            {"answer": {"kind": "multi_numeric", "values": [{"value": "1"}, {"value": "2"}]}},
+            {"evidence": ["not-an-object"]},
+            {"evidence": [{"evidence_id": True}]},
+        ]
+        with TemporaryDirectory() as directory:
+            for index, overrides in enumerate(cases):
+                record = self._record(answerability="answerable", answer={"kind": "numeric", "value": "1", "unit": "원", "scale": 1}, evidence=[{"evidence_id": "ev1"}])
+                record.update(overrides)
+                answer_override = overrides.get("answer")
+                if isinstance(answer_override, dict) and answer_override.get("kind") == "unanswerable":
+                    record["answerability"] = "unanswerable"
+                    record["evidence"] = []
+                agent = TrackingAgent()
+                gold = Path(directory) / f"gold-{index}.jsonl"
+                gold.write_text(__import__("json").dumps(record) + "\n", encoding="utf-8")
+                result = evaluate_agent(agent, gold)
+                self.assertEqual(result["error_count"], 1, overrides)
+                self.assertEqual(result["evaluations"][0]["status"], "error", overrides)
+                self.assertEqual(agent.calls, 0, overrides)
+
+    def test_quality_gate_rejects_negative_fractional_boolean_and_overflow_counts(self) -> None:
+        base = {"error_count": 0, "false_numeric_claim_count": 0, "unsafe_answer_count": 0, "numeric_exactness": 1.0}
+        for value in (-1, 0.5, True, 10**10000):
+            summary = {**base, "pass_count": value}
+            self.assertFalse(quality_gate_passed(summary, {"numeric_exactness": 1.0}), value)
+        for field in ("error_count", "false_numeric_claim_count", "unsafe_answer_count"):
+            summary = {**base, field: -1}
+            self.assertFalse(quality_gate_passed(summary, {"numeric_exactness": 1.0}), field)
 
     def test_quality_gate_rejects_nonfinite_and_invalid_numeric_types_without_raising(self) -> None:
         base = {"error_count": 0, "false_numeric_claim_count": 0, "unsafe_answer_count": 0, "numeric_exactness": 1.0}

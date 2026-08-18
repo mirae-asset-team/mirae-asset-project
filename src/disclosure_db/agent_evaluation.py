@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 from collections.abc import Sequence
 from decimal import Decimal, InvalidOperation
@@ -18,6 +19,15 @@ try:
     _CANONICAL_FIELDS = set(json.loads((Path(__file__).resolve().parents[2] / "config" / "gold_annotation_schema.json").read_text(encoding="utf-8")).get("properties", {}))
 except Exception:
     _CANONICAL_FIELDS = set()
+
+_NUMERIC_PATTERN = re.compile(r"^-?(0|[1-9][0-9]*)(\.[0-9]+)?$")
+_COUNT_FIELDS = frozenset({
+    "count", "pass_count", "verified_count", "answerability_match_count", "scored_count",
+    "answerability_denominator", "numeric_denominator", "citation_precision_denominator",
+    "citation_recall_denominator", "error_count", "false_numeric_claim_count",
+    "unsafe_answer_count", "eligible_questions", "target_evidence_count",
+    "post_rerank_attempted_count", "post_rerank_success_count", "post_rerank_failure_count",
+})
 
 
 def _ratio(numerator: int | float, denominator: int | float) -> float | None:
@@ -40,17 +50,24 @@ def _finite_number(value: Any, *, integer: bool = False, nonnegative: bool = Fal
     return not nonnegative or value >= 0
 
 
+def _nonnegative_count(value: Any) -> bool:
+    return _finite_number(value, integer=True, nonnegative=True)
+
+
 def quality_gate_diagnostics(summary: dict[str, Any], acceptance: dict[str, Any]) -> dict[str, Any]:
     reasons: list[str] = []
     if any(key not in summary for key in ("error_count", "false_numeric_claim_count", "unsafe_answer_count")):
         reasons.append("hard_count_missing")
     if summary.get("stage_metrics_errors"):
         reasons.extend(str(item) for item in summary["stage_metrics_errors"])
-    if "error_count" in summary and (not _finite_number(summary["error_count"], integer=True, nonnegative=True) or summary["error_count"] != 0):
+    for field in sorted(_COUNT_FIELDS - {"error_count", "false_numeric_claim_count", "unsafe_answer_count"}):
+        if field in summary and not _nonnegative_count(summary[field]):
+            reasons.append(field + "_invalid")
+    if "error_count" in summary and (not _nonnegative_count(summary["error_count"]) or summary["error_count"] != 0):
         reasons.append("error_count_invalid_or_nonzero")
     hard_pairs = (("false_numeric_claim_count", "false_numeric_claims"), ("unsafe_answer_count", "unsafe_answers"))
     for metric_name, threshold_name in hard_pairs:
-        if metric_name not in summary or not _finite_number(summary.get(metric_name), integer=True, nonnegative=True):
+        if metric_name not in summary or not _nonnegative_count(summary.get(metric_name)):
             reasons.append(metric_name + "_invalid")
             continue
         threshold = acceptance.get(threshold_name, 0)
@@ -194,12 +211,50 @@ def _validate_record(record: Any) -> str | None:
         return "answer shape is invalid"
     if (record["answerability"] == "answerable") == (answer.get("kind") == "unanswerable"):
         return "answerability and answer kind disagree"
-    if not isinstance(record["evidence"], list) or any(not isinstance(item, dict) or not item.get("evidence_id") for item in record["evidence"]):
-        return "evidence must be a list of objects with evidence_id"
-    if answer.get("kind") == "multi_numeric":
+    kind = answer["kind"]
+    if kind == "text" and (not isinstance(answer.get("text"), str) or not answer["text"]):
+        return "text answer shape is invalid"
+    if kind == "numeric" and (
+        not isinstance(answer.get("value"), str)
+        or not _NUMERIC_PATTERN.fullmatch(answer["value"])
+        or not isinstance(answer.get("unit"), str)
+        or not answer["unit"]
+        or isinstance(answer.get("scale"), bool)
+        or not isinstance(answer.get("scale"), int)
+        or answer["scale"] < 1
+    ):
+        return "numeric answer shape is invalid"
+    if kind == "multi_numeric":
         values = answer.get("values")
-        if not isinstance(values, list) or len(values) < 2 or any(not isinstance(item, dict) or "value" not in item for item in values):
+        if not isinstance(values, list) or len(values) < 2:
             return "multi_numeric answer shape is invalid"
+        for item in values:
+            if (
+                not isinstance(item, dict)
+                or not isinstance(item.get("label"), str)
+                or not item["label"]
+                or not isinstance(item.get("value"), str)
+                or not _NUMERIC_PATTERN.fullmatch(item["value"])
+                or not isinstance(item.get("unit"), str)
+                or not item["unit"]
+                or isinstance(item.get("scale"), bool)
+                or not isinstance(item.get("scale"), int)
+                or item["scale"] < 1
+                or not isinstance(item.get("evidence_ids"), list)
+                or not item["evidence_ids"]
+                or any(not isinstance(evidence_id, str) or not evidence_id for evidence_id in item["evidence_ids"])
+                or len(item["evidence_ids"]) != len(set(item["evidence_ids"]))
+            ):
+                return "multi_numeric answer shape is invalid"
+    if kind == "unanswerable" and (not isinstance(answer.get("reason"), str) or not answer["reason"]):
+        return "unanswerable answer shape is invalid"
+    if not isinstance(record["evidence"], list) or any(
+        not isinstance(item, dict)
+        or not isinstance(item.get("evidence_id"), str)
+        or not item["evidence_id"]
+        for item in record["evidence"]
+    ):
+        return "evidence must be a list of objects with evidence_id"
     return None
 
 
