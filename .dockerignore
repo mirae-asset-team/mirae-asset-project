@@ -1,0 +1,10 @@
+.git
+.github
+.env
+data/
+references/official/source_archives/
+tests/
+docs/
+notebooks/
+__pycache__/
+*.py[cod]

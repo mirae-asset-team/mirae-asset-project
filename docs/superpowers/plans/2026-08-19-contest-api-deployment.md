@@ -409,7 +409,7 @@ git commit -m "feat: serve disclosure agent from environment"
 - Host variables: `DISCLOSURE_BASE_DB_HOST`, `DISCLOSURE_AGENT_DB_DIR_HOST`, `DISCLOSURE_ATTESTATION_HOST`, `DISCLOSURE_RUNTIME_DIR_HOST`, `CLOVASTUDIO_API_KEY`
 - Container paths: `/data/base/disclosure.sqlite`, `/data/agent/agent_overlay.sqlite`, `/data/agent/agent_search.sqlite`, `/data/attestation.json`, `/runtime`
 
-- [ ] **Step 1: Write failing static artifact tests**
+- [x] **Step 1: Write failing static artifact tests**
 
 ```python
 def test_compose_mounts_databases_read_only_and_has_healthcheck(self):
@@ -424,13 +424,13 @@ def test_dockerfile_does_not_copy_local_data(self):
     self.assertNotIn("D:\\", Path("Dockerfile").read_text(encoding="utf-8"))
 ```
 
-- [ ] **Step 2: Run and confirm missing-file failures**
+- [x] **Step 2: Run and confirm missing-file failures**
 
 Run: `python -m unittest tests.test_deployment_artifacts -v`
 
 Expected: FAIL because artifacts do not exist.
 
-- [ ] **Step 3: Create the Dockerfile**
+- [x] **Step 3: Create the Dockerfile**
 
 ```dockerfile
 FROM python:3.11-slim
@@ -445,7 +445,7 @@ EXPOSE 8000
 CMD ["disclosure-agent", "serve"]
 ```
 
-- [ ] **Step 4: Create Compose and secret-free example environment**
+- [x] **Step 4: Create Compose and secret-free example environment**
 
 ```yaml
 services:
@@ -483,7 +483,7 @@ Run: `docker build -t mirae-disclosure-agent:local .`
 
 Expected: tests PASS, Compose config resolves after copying `.env.example` to local `.env`, image build exits 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add Dockerfile compose.yaml .dockerignore .env.example tests/test_deployment_artifacts.py

@@ -185,3 +185,10 @@
 - RED: `tests.test_cli` failed to import the planned `_serving_settings` selector because it did not exist.
 - GREEN: added all-or-none explicit path selection, runtime environment loading and validation, and host/port selection; `agent-query` behavior remains unchanged.
 - Verification: `python -m unittest tests.test_cli tests.test_runtime_config -v` → 4 passed. No database files or provider credentials were accessed.
+
+## 2026-08-19T03:22:18+09:00 — Plan 1 Task 5: container package
+
+- Intent: package the server without copying the D-drive databases into the image and without committing secrets.
+- RED/GREEN: static artifact tests initially failed with missing `compose.yaml`/`.dockerignore`; after adding the Dockerfile, Compose, ignore rules, and `.env.example`, `python -m unittest tests.test_deployment_artifacts -v` → 2 passed.
+- Blocked verification: `docker compose config` could not run because the Docker CLI is not installed in this environment. No Docker build or container smoke result is claimed; the Task 5 Docker verification checkbox remains open.
+- Hygiene: a temporary secret-free `.env` was created only for the attempted config check and removed immediately. No credential, DB, raw response, or runtime log was created or committed.
