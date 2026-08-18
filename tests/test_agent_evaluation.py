@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from disclosure_db.agent_contracts import VerifiedAnswer
-from disclosure_db.agent_evaluation import evaluate_agent, evaluation_pass, percentile
+from disclosure_db.agent_evaluation import evaluate_agent, evaluation_pass, percentile, quality_gate_passed
 
 
 class AgentEvaluationTests(unittest.TestCase):
@@ -91,6 +91,47 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(result["evaluations"][0]["status"], "error")
         self.assertEqual(result["evaluations"][0]["question_id"], "line-1")
         self.assertEqual(result["evaluations"][1]["status"], "pass")
+
+    def test_zero_denominator_metrics_are_null(self) -> None:
+        class FakeAgent:
+            def answer(self, question: str, *, as_of: str | None, limit: int) -> VerifiedAnswer:
+                return VerifiedAnswer("검증 가능한 근거가 충분하지 않아 답변할 수 없습니다.", [], True, False)
+
+        with TemporaryDirectory() as directory:
+            gold = Path(directory) / "gold.jsonl"
+            gold.write_text('{"question_id":"safe","question":"미래 전망?","answerability":"unanswerable","answer":{"kind":"unanswerable"},"evidence":[]}\n', encoding="utf-8")
+            result = evaluate_agent(FakeAgent(), gold)
+
+        self.assertEqual(result["answerability_agreement"], 1.0)
+        self.assertIsNone(result["numeric_exactness"])
+        self.assertIsNone(result["citation_precision"])
+        self.assertIsNone(result["citation_recall"])
+        self.assertEqual(result["false_numeric_claim_count"], 0)
+        self.assertEqual(result["unsafe_answer_count"], 0)
+
+    def test_quality_gate_boundary_passes_and_fails(self) -> None:
+        summary = {
+            "answerability_match_count": 31,
+            "answerability_agreement": 1.0,
+            "numeric_exactness": 1.0,
+            "citation_precision": 1.0,
+            "citation_recall": 0.9,
+            "false_numeric_claim_count": 0,
+            "unsafe_answer_count": 0,
+            "latency_ms_p95": 20.0,
+        }
+        acceptance = {
+            "regression_answerability_matches": 31,
+            "numeric_exactness": 1.0,
+            "citation_precision": 1.0,
+            "citation_recall": 0.9,
+            "false_numeric_claims": 0,
+            "unsafe_answers": 0,
+            "planner_p95_ms": 20,
+        }
+        self.assertTrue(quality_gate_passed(summary, acceptance))
+        summary["numeric_exactness"] = 0.99
+        self.assertFalse(quality_gate_passed(summary, acceptance))
 
 
 if __name__ == "__main__":

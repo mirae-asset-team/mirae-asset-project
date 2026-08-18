@@ -167,7 +167,15 @@ def evaluate_retrieval(
     target_rows = [target for item in evaluations for target in item["targets"]]
     found = [target for target in target_rows if target["rank"] is not None]
     fully_covered = sum(all(target["rank"] is not None for target in item["targets"]) for item in evaluations)
-    reciprocal_ranks = [1 / int(target["rank"]) for target in target_rows if target["rank"] is not None]
+    # MRR is question-level: one reciprocal rank for the first relevant target in
+    # each eligible question. Target recall keeps the evidence-level denominator.
+    first_relevant_ranks = [
+        min(int(target["rank"]) for target in item["targets"] if target["rank"] is not None)
+        for item in evaluations
+        if any(target["rank"] is not None for target in item["targets"])
+    ]
+    post_rerank_found = [target for target in target_rows if target["rank"] is not None and int(target["rank"]) <= 8]
+    target_recall = (len(found) / len(target_rows)) if target_rows else None
     return {
         "database": portable_path(database),
         "gold": portable_path(gold_path),
@@ -175,8 +183,10 @@ def evaluate_retrieval(
         "evaluation_scope": "retrieval conditioned on Gold company and candidate-filing metadata",
         "eligible_questions": len(evaluations),
         "target_evidence_count": len(target_rows),
-        "target_recall_at_k": (len(found) / len(target_rows)) if target_rows else None,
+        "target_recall_at_k": target_recall,
+        "target_recall_at_20": target_recall if limit == 20 else None,
         "question_complete_recall_at_k": (fully_covered / len(evaluations)) if evaluations else None,
-        "mrr_at_k": (sum(reciprocal_ranks) / len(target_rows)) if target_rows else None,
+        "mrr_at_k": (sum(1 / rank for rank in first_relevant_ranks) / len(evaluations)) if evaluations else None,
+        "post_rerank_recall_at_8": (len(post_rerank_found) / len(target_rows)) if target_rows else None,
         "evaluations": evaluations,
     }

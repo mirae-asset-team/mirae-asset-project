@@ -63,6 +63,22 @@
     "minimum_target_recall_at_20": 1.0,
     "note": "This gate does not evaluate entity resolution, unanswerable detection, or answer generation."
   },
+  "serving_vertical_slice_acceptance": {
+    "regression_answerability_matches": 31,
+    "numeric_exactness": 1.0,
+    "citation_precision": 1.0,
+    "retrieval_recall_at_20": 1.0,
+    "post_rerank_recall_at_8": 0.9,
+    "citation_recall": 0.9,
+    "holdout_answerability_agreement": 0.9,
+    "false_numeric_claims": 0,
+    "unsafe_answers": 0,
+    "planner_p95_ms": 20,
+    "fact_lookup_p95_ms": 200,
+    "local_retrieval_p95_ms": 800,
+    "reranked_retrieval_p95_ms": 5000,
+    "end_to_end_p95_ms": 10000
+  },
   "quality_gates": {
     "structure_fail": [
       "manifest_or_source_missing",
