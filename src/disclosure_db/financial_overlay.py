@@ -792,6 +792,7 @@ def fetch_event_facts(
     predicate_terms: Iterable[str] = (),
     as_of: str | None = None,
     limit: int = 100,
+    correction_policy: str = "current",
     attestation: CorpusAttestation | None = None,
 ) -> list[dict[str, object]]:
     if limit <= 0 or not Path(overlay_database).exists():
@@ -799,6 +800,14 @@ def fetch_event_facts(
     if not overlay_matches_base(Path(base_database), Path(overlay_database), attestation=attestation):
         return []
     version_sql, version_params = version_filter_sql(alias="v", as_of=as_of)
+    if correction_policy == "original":
+        version_sql = "v.lineage_status='root'"
+        version_params = []
+        if as_of is not None:
+            version_sql += " AND v.effective_from<=? AND (v.effective_to IS NULL OR ? < v.effective_to)"
+            version_params = [as_of, as_of]
+    elif correction_policy == "corrected":
+        version_sql += " AND f.is_correction=1"
     where = [
         "c.filing_id=ef.filing_id", "s.filing_id=c.filing_id",
         "s.parse_status='success'", "s.detected_format<>'pdf'", version_sql,

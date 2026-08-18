@@ -14,7 +14,7 @@ from disclosure_db.stress_generation import (
     validate_stress_case,
     validate_stress_cases,
 )
-from disclosure_db.stress_evaluation import run_fault_case, score_case, score_metamorphic_group, should_skip
+from disclosure_db.stress_evaluation import resolve_case_company, run_fault_case, score_case, score_metamorphic_group, should_skip
 
 
 def valid_case() -> dict[str, object]:
@@ -171,6 +171,10 @@ class AgentStressContractTests(unittest.TestCase):
             result = run_fault_case(source, Path(directory) / "fault")
             self.assertTrue(result["fault_isolated"])
             self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
+
+    def test_case_company_prefers_filing_issuer_over_reporter_query_name(self) -> None:
+        case = {"company_resolution": {"issuer_name": "레인보우로보틱스", "query_name": "삼성전자", "corp_code": "01261644"}}
+        self.assertEqual(resolve_case_company(case), "레인보우로보틱스")
 
 
 if __name__ == "__main__":

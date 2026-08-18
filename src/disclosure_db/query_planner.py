@@ -102,6 +102,8 @@ def plan_query(
     ]
     if "보통주식" in text and "issued_shares" not in event_terms:
         event_terms.append("issued_shares")
+    if "처분예정주식" in text and "treasury_disposal_shares" not in event_terms:
+        event_terms.append("treasury_disposal_shares")
     if question_type in {"adversarial", "out_of_scope"}:
         fact_domain = "none"
     elif account_terms:

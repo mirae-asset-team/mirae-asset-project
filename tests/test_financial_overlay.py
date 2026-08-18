@@ -185,6 +185,27 @@ class FinancialOverlayTests(unittest.TestCase):
             rows = fetch_event_facts(base, overlay, company="테스트", predicate_terms=["계약상대"])
             self.assertEqual(rows[0]["evidence_ids"], ["value"])
 
+    def test_event_fact_respects_original_correction_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates = root / "financial.jsonl", root / "predicates.json"
+            seed_base(base)
+            with closing(sqlite3.connect(base)) as connection:
+                connection.execute("UPDATE filing_version SET lineage_status='resolved' WHERE filing_id='f1'")
+                connection.commit()
+            seed.write_text("", encoding="utf-8")
+            predicates.write_text(json.dumps({"predicates": [{
+                "id": "contract_amount", "answer_kind": "numeric",
+                "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약금액"],
+            }]}, ensure_ascii=False), encoding="utf-8")
+            build_agent_overlay(base, overlay, seed, predicates)
+            self.assertTrue(fetch_event_facts(base, overlay, company="테스트", predicate_terms=["계약금액"]))
+            self.assertEqual(
+                fetch_event_facts(base, overlay, company="테스트", predicate_terms=["계약금액"], correction_policy="original"),
+                [],
+            )
+
     def test_agent_overlay_rejects_disallowed_event_validation_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

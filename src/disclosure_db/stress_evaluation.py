@@ -159,6 +159,17 @@ def should_skip(case: dict[str, object], git_commit: str, completed: dict[str, o
     )
 
 
+def resolve_case_company(case: dict[str, object]) -> str | None:
+    resolution = case.get("company_resolution")
+    if not isinstance(resolution, dict):
+        return None
+    for key in ("issuer_name", "query_name", "corp_code"):
+        value = resolution.get(key)
+        if value:
+            return str(value)
+    return None
+
+
 def run_fault_case(source: Path, temporary_root: Path) -> dict[str, object]:
     source = Path(source)
     temporary_root = Path(temporary_root)
@@ -223,5 +234,5 @@ def aggregate_scores(scores: Iterable[CaseScore], contract: dict[str, object]) -
 
 __all__ = [
     "CAUSE_ORDER", "CaseScore", "aggregate_scores", "classify_failure", "run_fault_case",
-    "score_case", "score_metamorphic_group", "should_skip",
+    "resolve_case_company", "score_case", "score_metamorphic_group", "should_skip",
 ]

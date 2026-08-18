@@ -14,7 +14,7 @@ from disclosure_db.agent_contracts import to_jsonable
 from disclosure_db.attestation import load_distribution_attestation, verify_fast_identity
 from disclosure_db.financial_overlay import overlay_matches_base
 from disclosure_db.search_index import SafeSearchIndex
-from disclosure_db.stress_evaluation import aggregate_scores, run_fault_case, score_case, should_skip
+from disclosure_db.stress_evaluation import aggregate_scores, resolve_case_company, run_fault_case, score_case, should_skip
 from disclosure_db.stress_generation import canonical_json, validate_stress_cases
 
 
@@ -113,8 +113,7 @@ def main() -> None:
             from disclosure_db.stress_evaluation import CaseScore
             score = CaseScore(case_id, bool(fault["fault_isolated"]), [] if fault["fault_isolated"] else ["fault_isolation_failed"], "unclassified", {"fault_isolation": fault["fault_isolated"]})
         else:
-            resolution = case.get("company_resolution") if isinstance(case.get("company_resolution"), dict) else {}
-            company = resolution.get("query_name") or resolution.get("corp_code")
+            company = resolve_case_company(case)
             try:
                 verified = agent.answer(str(case["question"]), company=str(company) if company else None, as_of=case.get("as_of") if isinstance(case.get("as_of"), str) else None, limit=20)
                 actual = _runtime_result(verified, case)

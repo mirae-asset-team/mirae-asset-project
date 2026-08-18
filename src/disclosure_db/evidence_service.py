@@ -48,6 +48,16 @@ class EvidenceService:
             self.account_aliases = {str(key): [str(item) for item in values] for key, values in raw_aliases.items()}
         except (OSError, json.JSONDecodeError):
             self.account_aliases = {}
+        predicate_path = Path(__file__).resolve().parents[2] / "config" / "agent_gold_predicates.json"
+        try:
+            predicate_payload = json.loads(predicate_path.read_text(encoding="utf-8"))
+            self.event_predicate_aliases = {
+                str(item["id"]): [str(item["id"]), *(str(value) for value in item.get("predicate_values", []))]
+                for item in predicate_payload.get("predicates", [])
+                if isinstance(item, dict) and item.get("id")
+            }
+        except (OSError, json.JSONDecodeError):
+            self.event_predicate_aliases = {}
 
     def _base_identity_valid(self) -> bool:
         if self.overlay_database is not None or self.search_database is not None:
@@ -102,6 +112,63 @@ class EvidenceService:
             as_of=as_of,
             correction_policy=correction_policy,
         )
+
+    def _expand_event_terms(self, terms: Iterable[str]) -> list[str]:
+        expanded = list(dict.fromkeys(str(term) for term in terms if str(term)))
+        for term in list(expanded):
+            for aliases in self.event_predicate_aliases.values():
+                if term in aliases:
+                    expanded.extend(aliases)
+        return list(dict.fromkeys(expanded))
+
+    def _reporter_value_refs(
+        self,
+        plan: QueryPlan,
+        *,
+        as_of: str | None = None,
+        correction_policy: str = "current",
+    ) -> list[EvidenceRef]:
+        if not plan.company or not plan.filing_date or "보고자" not in plan.question:
+            return []
+        company_fields = ["f.issuer_name=?", "f.listed_name=?", "f.stock_code=?", "f.issuer_corp_code=?"]
+        params: list[object] = [plan.company] * len(company_fields)
+        params.append(plan.filing_date)
+        with closing(sqlite3.connect(f"file:{self.base_database.resolve().as_posix()}?mode=ro", uri=True)) as connection:
+            rows = connection.execute(
+                f"""SELECT DISTINCT value.evidence_id
+                       FROM table_cell label
+                       JOIN table_cell value
+                         ON value.table_id=label.table_id
+                        AND value.filing_id=label.filing_id
+                        AND value.row_index=label.row_index
+                        AND value.column_index>label.column_index
+                       JOIN filing f ON f.filing_id=value.filing_id
+                      WHERE label.text_normalized LIKE '%보고자%'
+                        AND value.cell_kind='data'
+                        AND ({' OR '.join(company_fields)})
+                        AND f.filed_at=?
+                      ORDER BY value.table_id,value.row_index,value.column_index,value.evidence_id""",
+                params,
+            ).fetchall()
+        refs = self._hydrate_ids(
+            [str(row[0]) for row in rows],
+            as_of=as_of,
+            correction_policy=correction_policy,
+        )
+        candidates = self.company_candidates()
+        preferred = [
+            ref for ref in refs
+            if any(
+                candidate
+                and candidate not in plan.company
+                and plan.company not in candidate
+                and candidate in ref.text
+                for candidate in candidates
+            )
+        ]
+        if preferred:
+            return [max(preferred, key=lambda ref: (len(ref.text.strip()), ref.text))]
+        return refs[:1]
 
     def search(self, plan: QueryPlan, *, limit: int = 20) -> EvidenceBundle:
         if not self._base_identity_valid():
@@ -162,9 +229,10 @@ class EvidenceService:
                 self.base_database,
                 self.overlay_database,
                 company=plan.company,
-                predicate_terms=plan.predicate_terms,
+                predicate_terms=self._expand_event_terms(plan.predicate_terms),
                 as_of=version_as_of,
                 limit=limit,
+                correction_policy=plan.correction_policy,
                 attestation=self.attestation,
             )
             event_facts, structured_refs = self._hydrate_facts(
@@ -229,6 +297,7 @@ class EvidenceService:
                     refs.extend(self._fragment_refs(rows))
         refs = [
             *self._title_value_refs(plan, as_of=version_as_of, correction_policy=plan.correction_policy),
+            *self._reporter_value_refs(plan, as_of=version_as_of, correction_policy=plan.correction_policy),
             *refs,
         ]
         unique: list[EvidenceRef] = []
