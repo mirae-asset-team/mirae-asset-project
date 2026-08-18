@@ -97,6 +97,15 @@ class AgentStressContractTests(unittest.TestCase):
         self.assertIn("주가 전망", adversarial["question"])
         validate_stress_cases(first)
 
+    def test_source_unanswerable_is_mutated_to_safe_abstention_prompt(self) -> None:
+        record = valid_case()
+        record["answerability"] = "unanswerable"
+        record["answer"] = {"kind": "unanswerable", "reason": "none"}
+        record["evidence"] = []
+        cases = build_stress_cases([record], {"case_count": 1, "allocation": {"calculation": 1}})
+        self.assertEqual(cases[0]["answerability"], "unanswerable")
+        self.assertIn("확인할 수 없는 미래 사실", cases[0]["question"])
+
     def test_group_split_never_separates_base_and_mutations(self) -> None:
         cases = []
         for index in range(10):

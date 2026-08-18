@@ -289,3 +289,4 @@
 - Initial run `20260818T200347Z-5279beb78b0a` stopped after 1 case with `false_numeric_claim_count=1`; no unsafe answer, unknown/cross-filing citation, or evaluator error occurred.
 - Root cause: adversarial/unanswerable stress records retained the original answerable question while declaring abstention. The agent correctly answered the original question, exposing an invalid stress mutation rather than a runtime safety failure.
 - RED/GREEN: added a regression assertion for adversarial question mutation and changed negative mutations to deterministic out-of-scope/injection prompts. The safety gate remains unchanged.
+- The second run exposed the same invalid shape when an explicitly unanswerable Gold record was assigned to another category. RED/GREEN: all source-unanswerable records now receive the same safe abstention prompt and abstention oracle. Stress tests remain green (`12 passed`).
