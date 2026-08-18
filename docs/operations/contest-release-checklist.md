@@ -6,13 +6,13 @@ This checklist records binary evidence without credentials or raw provider respo
 
 | Item | Status | Evidence |
 |---|---|---|
-| Source/image commit | PASS | `962216a35de8179e5c5319683470601a061c2c4c` |
+| Source/image commit | PASS | `e7c8e28` (`e7c8e28` narrow correction-aware multi-value routing; parent `548f66a`) |
 | Immutable base size/SHA-256 | PASS | `38,773,280,768` bytes / `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563` |
 | Live overlay SHA-256 | PASS | `92ffe3ce1740153cfec457f5354685535a31cc5fe0d7722d61f1195f2ac1d3ad` |
 | Live search SHA-256/revision | PASS | `e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793` / `safe-search-v1` |
 | Overlay integrity/base attestation | PASS | `integrity_check=ok`, `overlay_matches_base=true`, event facts `1,423` |
-| 300-case manifest | PASS | SHA-256 `1b014f0bfca75c8db6f6306dcdab80fff4cafb80dfb3709bf1e9d3bb8d8dd2a0`; `300/300` pass; all hard gates pass |
-| Full local regression | PASS | `213 passed, 1 skipped, 17 subtests passed`; compileall passed |
+| 300-case manifest | PASS | SHA-256 `1b014f0bfca75c8db6f6306dcdab80fff4cafb80dfb3709bf1e9d3bb8d8dd2a0`; run `20260818T214805Z-1b014f0bfca7`; `300/300` pass; all hard gates pass |
+| Full local regression | PASS | `214 passed, 1 skipped, 17 subtests passed`; compileall passed |
 | Provider configured | BLOCKED_EXTERNAL | No rotated `CLOVASTUDIO_API_KEY`; local value is `false` |
 | Provider smoke/300-case provider pass | BLOCKED_EXTERNAL | Requires the missing rotated credential; no network call was made |
 | Compose config hash | NOT_RUN | No verified Docker/Compose runtime is available |

@@ -1,28 +1,28 @@
 {
   "count": 31,
-  "pass_count": 15,
+  "pass_count": 16,
   "verified_count": 19,
   "answerability_match_count": 29,
   "scored_count": 31,
   "answerability_denominator": 31,
   "answerability_agreement": 0.935484,
   "numeric_denominator": 13,
-  "numeric_exactness": 0.923077,
+  "numeric_exactness": 1.0,
   "citation_precision_denominator": 19,
   "citation_precision": 0.842105,
   "citation_recall_denominator": 16,
-  "citation_recall": 0.96875,
-  "false_numeric_claim_count": 1,
+  "citation_recall": 1.0,
+  "false_numeric_claim_count": 0,
   "unsafe_answer_count": 0,
   "error_count": 0,
-  "latency_ms_p50": 1746.31,
-  "latency_ms_p95": 1841.64,
+  "latency_ms_p50": 1758.73,
+  "latency_ms_p95": 1852.71,
   "planner_p95_ms": 9.68,
   "fact_lookup_p95_ms": 28.87,
   "local_retrieval_p95_ms": 55.28,
   "reranked_retrieval_p95_ms": 0.01,
   "reranker_provider_configured": false,
-  "end_to_end_p95_ms": 1841.64,
+  "end_to_end_p95_ms": 1852.71,
   "stage_metrics_errors": [],
   "evaluations": [
     {
@@ -35,7 +35,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1748.96,
+      "latency_ms": 1940.27,
       "reason_codes": [],
       "citation_ids": [
         "ev1_ad0443ab98c6ed6c20fa3307e9ae3614"
@@ -55,7 +55,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1724.04,
+      "latency_ms": 1743.29,
       "reason_codes": [],
       "citation_ids": [
         "ev1_507d9ef2916929b0315db2fb07647f08"
@@ -75,7 +75,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1774.78,
+      "latency_ms": 1775.41,
       "reason_codes": [],
       "citation_ids": [
         "ev1_c08a1a0d7188e805eeacbe6971ad4d43"
@@ -95,7 +95,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1725.96,
+      "latency_ms": 1742.35,
       "reason_codes": [],
       "citation_ids": [
         "ev1_3cb127df5b9dbb407ea1abfe96a62684"
@@ -115,7 +115,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1752.37,
+      "latency_ms": 1716.48,
       "reason_codes": [],
       "citation_ids": [
         "ev1_f003ed7ceeb83b34b979d5472179f1d3"
@@ -135,7 +135,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1731.38,
+      "latency_ms": 1723.43,
       "reason_codes": [],
       "citation_ids": [
         "ev1_8dc98a8f0d389f6efdc253502f42a3d2"
@@ -155,7 +155,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1745.17,
+      "latency_ms": 1771.08,
       "reason_codes": [],
       "citation_ids": [
         "ev1_86a468fa9d55b8c8256fba330ca77f5d"
@@ -175,7 +175,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1753.25,
+      "latency_ms": 1751.92,
       "reason_codes": [],
       "citation_ids": [
         "ev1_0c7b7976d3397205893bfec5ab5b2986"
@@ -195,7 +195,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1776.54,
+      "latency_ms": 1781.96,
       "reason_codes": [],
       "citation_ids": [
         "ev1_b022cd0c0f236a3563f1b438364b254d"
@@ -215,7 +215,7 @@
       "citation_precision": 1.0,
       "numeric_match": null,
       "text_match": true,
-      "latency_ms": 1776.11,
+      "latency_ms": 1777.5,
       "reason_codes": [],
       "citation_ids": [
         "ev1_6ce523ff6b2e6cfd8957c312a706bda0"
@@ -233,7 +233,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1746.31,
+      "latency_ms": 1739.11,
       "reason_codes": [
         "explicit_date",
         "event_fact_required",
@@ -255,7 +255,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1750.76,
+      "latency_ms": 1756.26,
       "reason_codes": [],
       "citation_ids": [
         "ev1_24f083e4b792d00d3507dbf9450c3d35"
@@ -270,18 +270,20 @@
       "expected_answerable": true,
       "answerable": true,
       "verified": true,
-      "status": "review",
-      "citation_recall": 0.5,
+      "status": "pass",
+      "citation_recall": 1.0,
       "citation_precision": 1.0,
-      "numeric_match": false,
+      "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1779.32,
+      "latency_ms": 1807.74,
       "reason_codes": [],
       "citation_ids": [
+        "ev1_b022cd0c0f236a3563f1b438364b254d",
         "ev1_24f083e4b792d00d3507dbf9450c3d35"
       ],
-      "answer": "2. 계약내역은(는) 495278073440 원입니다.",
+      "answer": "확인된 값은 240993039040, 495278073440입니다.",
       "numeric_values": [
+        "240993039040",
         "495278073440"
       ]
     },
@@ -295,7 +297,7 @@
       "citation_precision": 1.0,
       "numeric_match": null,
       "text_match": true,
-      "latency_ms": 1795.48,
+      "latency_ms": 1770.21,
       "reason_codes": [],
       "citation_ids": [
         "ev1_8925dd76eb23ca2a0c50ab2f6cf5cd47"
@@ -313,7 +315,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1723.03,
+      "latency_ms": 1758.73,
       "reason_codes": [
         "explicit_date",
         "required_claim_term_missing",
@@ -334,7 +336,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1701.44,
+      "latency_ms": 1691.36,
       "reason_codes": [
         "prompt_injection_question",
         "answering_disabled_for_question_type",
@@ -356,7 +358,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1808.76,
+      "latency_ms": 1828.4,
       "reason_codes": [],
       "citation_ids": [
         "ev1_a94bba9e2b86496c516d9275433e1b59"
@@ -376,7 +378,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1841.64,
+      "latency_ms": 1815.22,
       "reason_codes": [],
       "citation_ids": [
         "ev1_e3367a287004ddd07f084ad4511fb27a"
@@ -396,7 +398,7 @@
       "citation_precision": 1.0,
       "numeric_match": null,
       "text_match": true,
-      "latency_ms": 1856.14,
+      "latency_ms": 1852.71,
       "reason_codes": [],
       "citation_ids": [
         "ev1_d787655ab205a4e2f2a605157f369eda"
@@ -414,7 +416,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1824.78,
+      "latency_ms": 1806.86,
       "reason_codes": [
         "explicit_date",
         "event_fact_required",
@@ -437,7 +439,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1734.94,
+      "latency_ms": 1728.57,
       "reason_codes": [
         "explicit_date",
         "out_of_scope_question",
@@ -459,7 +461,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1744.37,
+      "latency_ms": 1775.3,
       "reason_codes": [
         "explicit_year",
         "out_of_scope_question",
@@ -482,7 +484,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1738.73,
+      "latency_ms": 1762.21,
       "reason_codes": [
         "explicit_date",
         "validated_financial_fact_required",
@@ -503,7 +505,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1797.85,
+      "latency_ms": 1806.47,
       "reason_codes": [
         "explicit_date",
         "validated_financial_fact_required",
@@ -524,7 +526,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1720.85,
+      "latency_ms": 1744.87,
       "reason_codes": [
         "no_safe_evidence",
         "insufficient_evidence",
@@ -544,7 +546,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1709.11,
+      "latency_ms": 1718.09,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -566,7 +568,7 @@
       "citation_precision": 0.0,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1711.14,
+      "latency_ms": 1707.44,
       "reason_codes": [],
       "citation_ids": [
         "ev1_5b62ea6fe725fdc37b2937d7aac27617"
@@ -584,7 +586,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1793.43,
+      "latency_ms": 1807.62,
       "reason_codes": [
         "explicit_date",
         "company_unresolved",
@@ -607,7 +609,7 @@
       "citation_precision": 0.0,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1738.03,
+      "latency_ms": 1717.97,
       "reason_codes": [],
       "citation_ids": [
         "ev1_088dc085589a824c40d22ad9bceda738"
@@ -625,7 +627,7 @@
       "citation_precision": 0.0,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1718.3,
+      "latency_ms": 1712.08,
       "reason_codes": [],
       "citation_ids": [
         "ev1_a96973b57143a242fec31a7390952a24"
@@ -643,7 +645,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1717.6,
+      "latency_ms": 1732.01,
       "reason_codes": [
         "validated_event_fact_required",
         "insufficient_evidence",

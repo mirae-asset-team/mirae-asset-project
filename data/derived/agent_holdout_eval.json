@@ -1,28 +1,28 @@
 {
   "count": 83,
-  "pass_count": 15,
+  "pass_count": 16,
   "verified_count": 19,
   "answerability_match_count": 81,
   "scored_count": 83,
   "answerability_denominator": 83,
   "answerability_agreement": 0.975904,
   "numeric_denominator": 13,
-  "numeric_exactness": 0.923077,
+  "numeric_exactness": 1.0,
   "citation_precision_denominator": 19,
   "citation_precision": 0.842105,
   "citation_recall_denominator": 16,
-  "citation_recall": 0.96875,
-  "false_numeric_claim_count": 1,
+  "citation_recall": 1.0,
+  "false_numeric_claim_count": 0,
   "unsafe_answer_count": 0,
   "error_count": 0,
-  "latency_ms_p50": 1722.69,
-  "latency_ms_p95": 1818.99,
+  "latency_ms_p50": 1715.52,
+  "latency_ms_p95": 1765.92,
   "planner_p95_ms": 9.68,
   "fact_lookup_p95_ms": 28.87,
   "local_retrieval_p95_ms": 55.28,
   "reranked_retrieval_p95_ms": 0.01,
   "reranker_provider_configured": false,
-  "end_to_end_p95_ms": 1818.99,
+  "end_to_end_p95_ms": 1765.92,
   "stage_metrics_errors": [],
   "evaluations": [
     {
@@ -35,7 +35,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1754.22,
+      "latency_ms": 1774.34,
       "reason_codes": [],
       "citation_ids": [
         "ev1_ad0443ab98c6ed6c20fa3307e9ae3614"
@@ -55,7 +55,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1691.51,
+      "latency_ms": 1710.86,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -77,7 +77,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1735.32,
+      "latency_ms": 1730.35,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -100,7 +100,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1719.61,
+      "latency_ms": 1724.52,
       "reason_codes": [],
       "citation_ids": [
         "ev1_507d9ef2916929b0315db2fb07647f08"
@@ -120,7 +120,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1698.55,
+      "latency_ms": 1735.07,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -142,7 +142,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1718.03,
+      "latency_ms": 1750.36,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -165,7 +165,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1704.96,
+      "latency_ms": 1741.55,
       "reason_codes": [],
       "citation_ids": [
         "ev1_c08a1a0d7188e805eeacbe6971ad4d43"
@@ -185,7 +185,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1710.97,
+      "latency_ms": 1743.85,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -207,7 +207,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1687.37,
+      "latency_ms": 1693.99,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -230,7 +230,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1713.47,
+      "latency_ms": 1744.93,
       "reason_codes": [],
       "citation_ids": [
         "ev1_3cb127df5b9dbb407ea1abfe96a62684"
@@ -250,7 +250,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1698.31,
+      "latency_ms": 1697.67,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -272,7 +272,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1715.73,
+      "latency_ms": 1726.89,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -295,7 +295,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1743.83,
+      "latency_ms": 1734.29,
       "reason_codes": [],
       "citation_ids": [
         "ev1_f003ed7ceeb83b34b979d5472179f1d3"
@@ -315,7 +315,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1707.71,
+      "latency_ms": 1712.97,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -337,7 +337,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1746.07,
+      "latency_ms": 1727.3,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -360,7 +360,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1714.09,
+      "latency_ms": 1749.72,
       "reason_codes": [],
       "citation_ids": [
         "ev1_8dc98a8f0d389f6efdc253502f42a3d2"
@@ -380,7 +380,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1720.11,
+      "latency_ms": 1733.77,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -402,7 +402,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1755.81,
+      "latency_ms": 1741.55,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -425,7 +425,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1798.88,
+      "latency_ms": 1798.98,
       "reason_codes": [],
       "citation_ids": [
         "ev1_86a468fa9d55b8c8256fba330ca77f5d"
@@ -445,7 +445,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1715.11,
+      "latency_ms": 1711.16,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -467,7 +467,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1706.5,
+      "latency_ms": 1750.37,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -490,7 +490,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1742.5,
+      "latency_ms": 1733.07,
       "reason_codes": [],
       "citation_ids": [
         "ev1_0c7b7976d3397205893bfec5ab5b2986"
@@ -510,7 +510,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1701.12,
+      "latency_ms": 1643.45,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -532,7 +532,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1722.69,
+      "latency_ms": 1640.17,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -555,7 +555,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1826.67,
+      "latency_ms": 1726.2,
       "reason_codes": [],
       "citation_ids": [
         "ev1_b022cd0c0f236a3563f1b438364b254d"
@@ -575,7 +575,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1728.49,
+      "latency_ms": 1605.41,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -597,7 +597,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1726.09,
+      "latency_ms": 1633.19,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -620,7 +620,7 @@
       "citation_precision": 1.0,
       "numeric_match": null,
       "text_match": true,
-      "latency_ms": 1781.05,
+      "latency_ms": 1675.84,
       "reason_codes": [],
       "citation_ids": [
         "ev1_6ce523ff6b2e6cfd8957c312a706bda0"
@@ -638,7 +638,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1724.45,
+      "latency_ms": 1620.98,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -660,7 +660,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1737.22,
+      "latency_ms": 1622.73,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -683,7 +683,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1725.31,
+      "latency_ms": 1612.07,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -705,7 +705,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1725.34,
+      "latency_ms": 1630.9,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -728,7 +728,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1803.23,
+      "latency_ms": 1687.84,
       "reason_codes": [],
       "citation_ids": [
         "ev1_24f083e4b792d00d3507dbf9450c3d35"
@@ -748,7 +748,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1714.45,
+      "latency_ms": 1632.01,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -770,7 +770,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1721.71,
+      "latency_ms": 1600.55,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -788,18 +788,20 @@
       "expected_answerable": true,
       "answerable": true,
       "verified": true,
-      "status": "review",
-      "citation_recall": 0.5,
+      "status": "pass",
+      "citation_recall": 1.0,
       "citation_precision": 1.0,
-      "numeric_match": false,
+      "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1788.32,
+      "latency_ms": 1724.13,
       "reason_codes": [],
       "citation_ids": [
+        "ev1_b022cd0c0f236a3563f1b438364b254d",
         "ev1_24f083e4b792d00d3507dbf9450c3d35"
       ],
-      "answer": "2. 계약내역은(는) 495278073440 원입니다.",
+      "answer": "확인된 값은 240993039040, 495278073440입니다.",
       "numeric_values": [
+        "240993039040",
         "495278073440"
       ]
     },
@@ -813,7 +815,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1767.88,
+      "latency_ms": 1639.57,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -835,7 +837,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1744.35,
+      "latency_ms": 1652.33,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -858,7 +860,7 @@
       "citation_precision": 1.0,
       "numeric_match": null,
       "text_match": true,
-      "latency_ms": 1784.8,
+      "latency_ms": 1708.53,
       "reason_codes": [],
       "citation_ids": [
         "ev1_8925dd76eb23ca2a0c50ab2f6cf5cd47"
@@ -876,7 +878,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1716.44,
+      "latency_ms": 1631.75,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -898,7 +900,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1718.92,
+      "latency_ms": 1672.87,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -921,7 +923,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1712.59,
+      "latency_ms": 1628.18,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -943,7 +945,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1749.29,
+      "latency_ms": 1675.6,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -966,7 +968,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1708.61,
+      "latency_ms": 1641.85,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -988,7 +990,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1736.54,
+      "latency_ms": 1602.55,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1011,7 +1013,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1835.37,
+      "latency_ms": 1767.94,
       "reason_codes": [],
       "citation_ids": [
         "ev1_a94bba9e2b86496c516d9275433e1b59"
@@ -1031,7 +1033,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1737.93,
+      "latency_ms": 1615.47,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1053,7 +1055,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1746.6,
+      "latency_ms": 1619.76,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1076,7 +1078,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1818.99,
+      "latency_ms": 1748.96,
       "reason_codes": [],
       "citation_ids": [
         "ev1_e3367a287004ddd07f084ad4511fb27a"
@@ -1096,7 +1098,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1706.06,
+      "latency_ms": 1611.14,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1118,7 +1120,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1700.92,
+      "latency_ms": 1631.74,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1141,7 +1143,7 @@
       "citation_precision": 1.0,
       "numeric_match": null,
       "text_match": true,
-      "latency_ms": 1773.55,
+      "latency_ms": 1656.82,
       "reason_codes": [],
       "citation_ids": [
         "ev1_d787655ab205a4e2f2a605157f369eda"
@@ -1159,7 +1161,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1700.82,
+      "latency_ms": 1633.45,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1181,7 +1183,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1728.55,
+      "latency_ms": 1613.58,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1204,7 +1206,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1737.63,
+      "latency_ms": 1635.24,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1226,7 +1228,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1902.11,
+      "latency_ms": 1612.43,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1249,7 +1251,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1708.69,
+      "latency_ms": 1713.75,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1271,7 +1273,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1701.93,
+      "latency_ms": 1742.68,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1294,7 +1296,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1720.1,
+      "latency_ms": 1731.01,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1316,7 +1318,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1683.19,
+      "latency_ms": 1733.09,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1339,7 +1341,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1725.04,
+      "latency_ms": 1723.4,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1361,7 +1363,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1697.02,
+      "latency_ms": 1719.77,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1384,7 +1386,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1691.59,
+      "latency_ms": 1717.82,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1406,7 +1408,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1750.31,
+      "latency_ms": 1722.25,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1429,7 +1431,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1663.64,
+      "latency_ms": 1715.24,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1451,7 +1453,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1760.74,
+      "latency_ms": 1718.55,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1474,7 +1476,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1688.93,
+      "latency_ms": 1722.56,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1496,7 +1498,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1732.53,
+      "latency_ms": 1725.55,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1519,7 +1521,7 @@
       "citation_precision": 0.0,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1705.61,
+      "latency_ms": 1716.09,
       "reason_codes": [],
       "citation_ids": [
         "ev1_5b62ea6fe725fdc37b2937d7aac27617"
@@ -1537,7 +1539,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1731.79,
+      "latency_ms": 1715.52,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1559,7 +1561,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1702.21,
+      "latency_ms": 1698.54,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1582,7 +1584,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1958.97,
+      "latency_ms": 1841.04,
       "reason_codes": [
         "explicit_date",
         "no_safe_evidence",
@@ -1603,7 +1605,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1815.87,
+      "latency_ms": 1709.79,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1625,7 +1627,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1733.38,
+      "latency_ms": 1730.36,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1648,7 +1650,7 @@
       "citation_precision": 0.0,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1753.11,
+      "latency_ms": 1730.8,
       "reason_codes": [],
       "citation_ids": [
         "ev1_088dc085589a824c40d22ad9bceda738"
@@ -1666,7 +1668,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1719.66,
+      "latency_ms": 1723.51,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1688,7 +1690,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1699.47,
+      "latency_ms": 1741.09,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1711,7 +1713,7 @@
       "citation_precision": 0.0,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1712.16,
+      "latency_ms": 1719.8,
       "reason_codes": [],
       "citation_ids": [
         "ev1_a96973b57143a242fec31a7390952a24"
@@ -1729,7 +1731,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1698.43,
+      "latency_ms": 1732.56,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1751,7 +1753,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1690.08,
+      "latency_ms": 1687.23,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1774,7 +1776,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1743.64,
+      "latency_ms": 1765.92,
       "reason_codes": [
         "validated_event_fact_required",
         "insufficient_evidence",
@@ -1794,7 +1796,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1748.84,
+      "latency_ms": 1680.67,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1816,7 +1818,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1672.59,
+      "latency_ms": 1720.8,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
