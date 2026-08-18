@@ -51,6 +51,10 @@ class HyperClovaGenerator:
         self.timeout = timeout
         self.fallback = DeterministicGenerator()
 
+    @property
+    def configured(self) -> bool:
+        return bool(self.api_key)
+
     def generate(self, bundle: EvidenceBundle) -> AnswerDraft:
         if not self.api_key:
             return self.fallback.generate(bundle)

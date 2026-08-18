@@ -170,3 +170,11 @@
 - RED: focused route tests first returned `404` for `/query`. After implementation, FastAPI 0.141.1 treated the nested request model as a query parameter; the exact response showed `loc=["query", "request"]`. The root cause was a deferred local annotation under `from __future__ import annotations`; binding the actual model before route registration fixed it.
 - GREEN: `/query` now validates bounded request fields, fails closed with `503 runtime_not_ready`, calls the agent, maps citations to evidence with `receipt_no`, and emits the standard request/corpus/latency envelope.
 - Verification: focused route suite → 3 passed; `tests.test_agent_runtime` → 24 passed. No provider call was attempted and no secret was logged.
+
+## 2026-08-19T03:18:11+09:00 — Plan 1 Task 3: honest provider readiness
+
+- Intent: report only whether HyperCLOVA X is configured, without exposing the API key.
+- RED: `test_health_reports_provider_configuration_without_exposing_key` failed with `KeyError: 'provider_configured'`.
+- GREEN: added `HyperClovaGenerator.configured`, `DisclosureAgent.provider_configured`, and boolean-only `/health` mapping.
+- Verification: provider-status focused test → 1 passed; `tests.test_agent_runtime tests.test_reranker` → 41 passed. The test used a sentinel key only in memory; it was not written to logs or responses.
+- External status: no rotated production credential is available, so live provider smoke remains blocked and deterministic fallback remains the only verified provider mode.

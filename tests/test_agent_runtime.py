@@ -95,6 +95,28 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["detail"], "runtime_not_ready")
 
+    def test_health_reports_provider_configuration_without_exposing_key(self):
+        from fastapi.testclient import TestClient
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite") as base:
+            class ReadyService:
+                base_database = Path(base.name)
+                overlay_database = None
+                search_database = None
+                attestation = None
+                corpus_revision = "test-revision"
+
+                def company_candidates(self):
+                    return []
+
+            agent = DisclosureAgent(
+                evidence_service=ReadyService(),
+                generator=HyperClovaGenerator(api_key="secret"),
+            )
+            body = TestClient(create_app(agent)).get("/health").json()
+        self.assertTrue(body["provider_configured"])
+        self.assertNotIn("secret", json.dumps(body))
+
     def test_serializable_contracts_have_backward_compatible_routing_defaults(self) -> None:
         plan = QueryPlan("질문")
         bundle = EvidenceBundle(question="질문")

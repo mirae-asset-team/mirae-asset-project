@@ -275,7 +275,7 @@ git commit -m "feat: add contest query endpoint"
 **Interfaces:**
 - Produces: `HyperClovaGenerator.configured: bool`, `DisclosureAgent.provider_configured: bool`, `/health.provider_configured`
 
-- [ ] **Step 1: Write a failing provider-status test**
+- [x] **Step 1: Write a failing provider-status test**
 
 ```python
 def test_health_reports_provider_configuration_without_exposing_key(self):
@@ -293,13 +293,13 @@ def test_health_reports_provider_configuration_without_exposing_key(self):
     self.assertNotIn("secret", json.dumps(body))
 ```
 
-- [ ] **Step 2: Run it and confirm the field is absent**
+- [x] **Step 2: Run it and confirm the field is absent**
 
 Run: `python -m unittest tests.test_agent_runtime.AgentRuntimeTests.test_health_reports_provider_configuration_without_exposing_key -v`
 
 Expected: FAIL on missing `provider_configured`.
 
-- [ ] **Step 3: Implement boolean-only status**
+- [x] **Step 3: Implement boolean-only status**
 
 ```python
 class HyperClovaGenerator:
@@ -315,13 +315,13 @@ class DisclosureAgent:
 
 Add `provider_configured` to the health payload using the agent property. Never serialize generator attributes.
 
-- [ ] **Step 4: Run API tests**
+- [x] **Step 4: Run API tests**
 
 Run: `python -m unittest tests.test_agent_runtime tests.test_reranker -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/disclosure_db/generation.py src/disclosure_db/agent.py src/disclosure_db/api.py tests/test_agent_runtime.py

@@ -75,6 +75,10 @@ class DisclosureAgent:
             raise ValueError("attestation is required when runtime overlay/search is configured")
         self.generator = generator or (HyperClovaGenerator() if settings is None or settings.use_hcx else DeterministicGenerator())
 
+    @property
+    def provider_configured(self) -> bool:
+        return bool(getattr(self.generator, "configured", False))
+
     def answer(self, question: str, *, company: str | None = None, as_of: str | None = None, limit: int = 20) -> VerifiedAnswer:
         attestation = getattr(self.evidence_service, "attestation", None)
         if attestation is not None and not verify_fast_identity(self.evidence_service.base_database, attestation):

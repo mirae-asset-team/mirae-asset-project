@@ -159,7 +159,9 @@ def create_app(agent: DisclosureAgent):
     @app.get("/health")
     def health() -> dict[str, Any]:
         started = perf_counter()
-        return envelope(_health_status(agent.evidence_service), started)
+        health_payload = _health_status(agent.evidence_service)
+        health_payload["provider_configured"] = bool(getattr(agent, "provider_configured", False))
+        return envelope(health_payload, started)
 
     def contest_query(request: ContestQueryRequest) -> dict[str, Any]:
         started = perf_counter()
