@@ -227,3 +227,10 @@
 - RED: financial and text citation tests observed `['ev_selected', 'ev_extra']` and `['ev1', 'ev2']` instead of one citation.
 - GREEN: added bundle-bounded known-ID selection: calculation uses only calculation evidence, structured facts use the first selected fact/event evidence, and text uses the first rendered evidence. Unknown structured evidence produces an abstention draft.
 - Verification: `python -m unittest tests.test_agent_runtime tests.test_safety_contracts -q` → 47 passed, 1 optional skip. Existing calculation citation order remains stable in bundle order.
+
+## 2026-08-19T03:50:00+09:00 — Plan 2 Task 4: row-aware numeric event cells
+
+- Intent: resolve composite event facts only from one labelled numeric sibling cell, with explicit ambiguity and unit gates.
+- RED: the composite fixture was rejected as `event_numeric_not_decimal`, and the two-number row had no row-ambiguity reject.
+- GREEN: added strict full-cell decimal parsing, configured header/suffix/table-unit resolution, selected-cell-only evidence, and issued/treasury-share predicate aliases. Non-composite arbitrary text retains the prior `event_numeric_not_decimal` reject.
+- Verification: targeted resolver tests → 2 passed; `python -m unittest tests.test_financial_overlay -v` → 20 passed. No live D-drive database was read for writing or rebuilt in this task.

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import tempfile
 from contextlib import closing
@@ -23,6 +24,11 @@ from uuid import uuid4
 
 from .attestation import CorpusAttestation, verify_fast_identity
 from .serving import version_filter_sql
+
+
+_DECIMAL_CELL = re.compile(
+    r"^[+-]?[0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?$|^[+-]?[0-9]+(?:\.[0-9]+)?$"
+)
 
 
 OVERLAY_SCHEMA = """
@@ -379,7 +385,126 @@ def _clear_unit(unit: object) -> bool:
     )
 
 
-def _validate_event_candidate(row: sqlite3.Row, predicate_id: str, answer_kind: str) -> dict[str, Any]:
+def _decimal_cell(text: str) -> Decimal | None:
+    compact = text.strip()
+    if not _DECIMAL_CELL.fullmatch(compact):
+        return None
+    try:
+        value = Decimal(compact.replace(",", ""))
+    except InvalidOperation:
+        return None
+    return value if value.is_finite() else None
+
+
+def _compact_label(value: object) -> str:
+    return re.sub(r"[\s\u00a0]+", "", str(value or "")).casefold()
+
+
+def _json_labels(value: object) -> list[str]:
+    try:
+        parsed = json.loads(str(value or "[]"))
+    except json.JSONDecodeError:
+        return []
+    return [str(item) for item in parsed] if isinstance(parsed, list) else []
+
+
+def _header_matches_predicate(text: str, predicate_values: Iterable[str]) -> bool:
+    compact = _compact_label(text)
+    return any(_compact_label(predicate) and _compact_label(predicate) in compact for predicate in predicate_values)
+
+
+def _predicate_suffix_units(header_texts: Iterable[str], predicate_values: Iterable[str]) -> set[str]:
+    units: set[str] = set()
+    for header in header_texts:
+        if not _header_matches_predicate(header, predicate_values):
+            continue
+        match = re.search(r"\(([^()]+)\)\s*$", header.strip())
+        if match and _clear_unit(match.group(1)):
+            units.add(match.group(1).strip())
+    return units
+
+
+def _resolve_numeric_event_cell(
+    base: sqlite3.Connection,
+    fact_id: str,
+    predicate_values: Iterable[str],
+) -> dict[str, object]:
+    """Resolve a composite event value to one labelled numeric table cell."""
+    base.row_factory = sqlite3.Row
+    linked = base.execute(
+        """SELECT f.unit,fe.evidence_id,c.table_id,c.row_index
+             FROM fact f
+             JOIN fact_evidence fe ON fe.fact_id=f.fact_id
+             JOIN table_cell c ON c.evidence_id=fe.evidence_id
+            WHERE f.fact_id=?
+            ORDER BY c.table_id,c.row_index,c.column_index,fe.evidence_id""",
+        (fact_id,),
+    ).fetchall()
+    if not linked:
+        raise ValueError("event_numeric_cell_missing")
+
+    table_ids = sorted({str(row["table_id"]) for row in linked})
+    placeholders = ",".join("?" for _ in table_ids)
+    cells = base.execute(
+        f"""SELECT c.evidence_id,c.table_id,c.row_index,c.column_index,c.cell_kind,
+                         c.text_normalized,c.row_header_path_json,c.column_header_path_json,
+                         t.unit_text
+                    FROM table_cell c
+                    JOIN table_record t ON t.table_id=c.table_id
+                   WHERE c.table_id IN ({placeholders})
+                   ORDER BY c.table_id,c.row_index,c.column_index,c.evidence_id""",
+        table_ids,
+    ).fetchall()
+    headers = [str(cell["text_normalized"] or "").strip() for cell in cells if str(cell["cell_kind"]) == "header"]
+    predicate_values = list(predicate_values)
+    header_match = any(_header_matches_predicate(header, predicate_values) for header in headers)
+    row_keys = {(str(row["table_id"]), int(row["row_index"])) for row in linked}
+    numeric_cells: list[tuple[sqlite3.Row, Decimal]] = []
+    for cell in cells:
+        key = (str(cell["table_id"]), int(cell["row_index"]))
+        if key not in row_keys or str(cell["cell_kind"]) != "data":
+            continue
+        labels = _json_labels(cell["row_header_path_json"]) + _json_labels(cell["column_header_path_json"])
+        cell_matches = header_match or any(_header_matches_predicate(label, predicate_values) for label in labels)
+        if not cell_matches:
+            continue
+        numeric = _decimal_cell(str(cell["text_normalized"] or ""))
+        if numeric is not None:
+            numeric_cells.append((cell, numeric))
+    if not numeric_cells:
+        raise ValueError("event_numeric_cell_missing")
+    if len(numeric_cells) != 1:
+        raise ValueError("event_numeric_cell_ambiguous")
+
+    cell, numeric = numeric_cells[0]
+    candidate_units = {str(row["unit"]).strip() for row in linked if row["unit"] is not None and str(row["unit"]).strip()}
+    if candidate_units:
+        if len(candidate_units) != 1 or not all(_clear_unit(unit) for unit in candidate_units):
+            raise ValueError("event_numeric_unit_ambiguous")
+        unit = next(iter(candidate_units))
+    else:
+        suffix_units = _predicate_suffix_units(headers, predicate_values)
+        table_units = {str(cell["unit_text"]).strip() for cell in cells if cell["unit_text"] is not None and str(cell["unit_text"]).strip()}
+        unit_candidates = suffix_units or table_units
+        if len(unit_candidates) != 1 or not all(_clear_unit(item) for item in unit_candidates):
+            raise ValueError("event_numeric_unit_missing" if not unit_candidates else "event_numeric_unit_ambiguous")
+        unit = next(iter(unit_candidates))
+    return {
+        "value_raw": str(cell["text_normalized"] or "").strip(),
+        "value_numeric": format(numeric, "f"),
+        "unit": unit,
+        "scale": 1,
+        "evidence_ids": [str(cell["evidence_id"])],
+    }
+
+
+def _validate_event_candidate(
+    base: sqlite3.Connection,
+    row: sqlite3.Row,
+    predicate_id: str,
+    answer_kind: str,
+    predicate_values: Iterable[str],
+) -> dict[str, Any]:
     candidate_id = str(row["fact_id"])
     if str(row["validation_status"] or "") != "candidate":
         raise ValueError("event_validation_status_invalid")
@@ -402,15 +527,25 @@ def _validate_event_candidate(row: sqlite3.Row, predicate_id: str, answer_kind: 
     if answer_kind == "numeric":
         try:
             numeric = Decimal(value_raw.replace(",", ""))
-        except InvalidOperation as exc:
-            raise ValueError("event_numeric_not_decimal") from exc
-        if not numeric.is_finite():
-            raise ValueError("event_numeric_not_finite")
-        if not _clear_unit(unit):
-            raise ValueError("event_numeric_unit_missing" if not str(unit or "").strip() else "event_numeric_unit_ambiguous")
-        value_numeric = format(numeric, "f")
-        scale = 1
-    evidence_ids = sorted({value for value in str(row["evidence_ids"] or "").split(",") if value})
+        except InvalidOperation:
+            if "|" not in value_raw:
+                raise ValueError("event_numeric_not_decimal")
+            resolved = _resolve_numeric_event_cell(base, candidate_id, predicate_values)
+            value_raw = str(resolved["value_raw"])
+            value_numeric = str(resolved["value_numeric"])
+            unit = str(resolved["unit"])
+            scale = int(resolved["scale"])
+            evidence_ids = list(resolved["evidence_ids"])
+        else:
+            if not numeric.is_finite():
+                raise ValueError("event_numeric_not_finite")
+            if not _clear_unit(unit):
+                raise ValueError("event_numeric_unit_missing" if not str(unit or "").strip() else "event_numeric_unit_ambiguous")
+            value_numeric = format(numeric, "f")
+            scale = 1
+            evidence_ids = sorted({value for value in str(row["evidence_ids"] or "").split(",") if value})
+    else:
+        evidence_ids = sorted({value for value in str(row["evidence_ids"] or "").split(",") if value})
     return {
         "event_fact_id": candidate_id,
         "filing_id": str(row["filing_id"]),
@@ -454,8 +589,12 @@ def build_agent_overlay(
         candidates: list[dict[str, Any]] = []
         for row in _event_candidates(base, allowlist):
             predicate_id, answer_kind = allowlist[(str(row["fact_type"]), str(row["predicate"]))]
+            predicate_values = [
+                raw for (fact_type, raw), (configured_id, _) in allowlist.items()
+                if fact_type == str(row["fact_type"]) and configured_id == predicate_id
+            ]
             try:
-                candidates.append(_validate_event_candidate(row, predicate_id, answer_kind))
+                candidates.append(_validate_event_candidate(base, row, predicate_id, answer_kind, predicate_values))
             except ValueError as exc:
                 reason = str(exc)
                 rejects.append((str(row["fact_id"]), reason, {"predicate": row["predicate"], "value_raw": row["value_raw"], "unit": row["unit"]}))

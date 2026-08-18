@@ -250,7 +250,7 @@ git commit -m "fix: emit claim-specific disclosure citations"
 - Produces: `_resolve_numeric_event_cell(base, fact_id, predicate_values) -> dict[str, object]`
 - Reject codes: `event_numeric_cell_missing`, `event_numeric_cell_ambiguous`, `event_numeric_unit_missing`, `event_numeric_unit_ambiguous`
 
-- [ ] **Step 1: Add a realistic composite-row failing fixture**
+- [x] **Step 1: Add a realistic composite-row failing fixture**
 
 Create one row with header cells `2. 계약내역`, `계약금액(원)` and data cell `240,993,039,040`. Set `fact.value_raw` to `2. 계약내역 | 계약금액(원) | 240,993,039,040`, and link evidence to one cell in that row.
 
@@ -266,13 +266,13 @@ def test_agent_overlay_resolves_numeric_value_from_labeled_sibling_cell(self):
 
 Add a second row with two parseable data cells and assert `event_numeric_cell_ambiguous`.
 
-- [ ] **Step 2: Run and confirm the composite value is rejected**
+- [x] **Step 2: Run and confirm the composite value is rejected**
 
 Run: `python -m unittest tests.test_financial_overlay.FinancialOverlayTests.test_agent_overlay_resolves_numeric_value_from_labeled_sibling_cell tests.test_financial_overlay.FinancialOverlayTests.test_agent_overlay_rejects_ambiguous_numeric_sibling_cells -v`
 
 Expected: first fails with `event_numeric_not_decimal`; second lacks the new reject.
 
-- [ ] **Step 3: Implement strict row resolution**
+- [x] **Step 3: Implement strict row resolution**
 
 For each numeric candidate:
 
@@ -294,17 +294,17 @@ def _decimal_cell(text: str) -> Decimal | None:
 
 Do not parse a number from an arbitrary sentence or multi-value cell.
 
-- [ ] **Step 4: Add explicit issued/treasury share aliases**
+- [x] **Step 4: Add explicit issued/treasury share aliases**
 
 Extend `agent_gold_predicates.json` with `issued_shares` aliases that occur in q009 and a separate `treasury_disposal_shares` predicate for q010, including `보통주식 처분예정주식 수`, `처분예정주식(주)`, and exact raw labels observed in the trusted cells. Each is numeric, unit `주`, and restricted to `event_kv_candidate`.
 
-- [ ] **Step 5: Run the full overlay safety suite**
+- [x] **Step 5: Run the full overlay safety suite**
 
 Run: `python -m unittest tests.test_financial_overlay -v`
 
 Expected: PASS, including cross-filing, PDF, lineage, ambiguity, missing unit, and conflict rejects.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/disclosure_db/financial_overlay.py config/agent_gold_predicates.json tests/test_financial_overlay.py

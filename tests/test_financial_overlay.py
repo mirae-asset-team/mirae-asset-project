@@ -67,7 +67,71 @@ def seed_base(path: Path) -> None:
     connection.close()
 
 
+def seed_composite_event_base(path: Path, *, ambiguous: bool = False) -> str:
+    seed_base(path)
+    numeric_evidence_id = "event_numeric_cell"
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute(
+            "INSERT INTO table_record VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            ("t2", "f1", "s1", 1, "[]", "계약내역", None, 2, 3 if ambiguous else 2, "success", "{}"),
+        )
+        cells = [
+            ("event_header_label", "t2", "s1", "f1", 0, 0, 1, 1, "header", "[]", "[]", "{}", "2. 계약내역", "2. 계약내역", "1"),
+            ("event_header_amount", "t2", "s1", "f1", 0, 1, 1, 1, "header", "[]", "[]", "{}", "계약금액(원)", "계약금액(원)", "1"),
+            ("event_label", "t2", "s1", "f1", 1, 0, 1, 1, "data", "[]", "[]", "{}", "계약금액", "계약금액", "1"),
+            (numeric_evidence_id, "t2", "s1", "f1", 1, 1, 1, 1, "data", "[]", "[]", "{}", "240,993,039,040", "240,993,039,040", "1"),
+        ]
+        if ambiguous:
+            cells.append(
+                ("event_numeric_cell_2", "t2", "s1", "f1", 1, 2, 1, 1, "data", "[]", "[]", "{}", "2,000", "2,000", "1")
+            )
+        connection.executemany(
+            "INSERT INTO table_cell VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", cells
+        )
+        connection.execute(
+            "UPDATE fact SET value_raw=?, unit=? WHERE fact_id='fact1'",
+            ("2. 계약내역 | 계약금액(원) | 240,993,039,040", None),
+        )
+        connection.execute("DELETE FROM fact_evidence WHERE fact_id='fact1'")
+        connection.execute("INSERT INTO fact_evidence VALUES('fact1',?)", ("event_label",))
+        connection.commit()
+    return numeric_evidence_id
+
+
 class FinancialOverlayTests(unittest.TestCase):
+    def test_agent_overlay_resolves_numeric_value_from_labeled_sibling_cell(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates = root / "financial.jsonl", root / "predicates.json"
+            numeric_evidence_id = seed_composite_event_base(base)
+            seed.write_text("", encoding="utf-8")
+            predicates.write_text(json.dumps({"predicates": [{
+                "id": "contract_amount", "answer_kind": "numeric",
+                "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약금액"],
+            }]}, ensure_ascii=False), encoding="utf-8")
+            result = build_agent_overlay(base, overlay, seed, predicates)
+            rows = fetch_event_facts(base, overlay, company="테스트", predicate_terms=["계약금액"])
+            self.assertEqual(result.event_imported, 1)
+            self.assertEqual(rows[0]["value_numeric"], "240993039040")
+            self.assertEqual(rows[0]["unit"], "원")
+            self.assertEqual(rows[0]["evidence_ids"], [numeric_evidence_id])
+
+    def test_agent_overlay_rejects_ambiguous_numeric_sibling_cells(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates = root / "financial.jsonl", root / "predicates.json"
+            seed_composite_event_base(base, ambiguous=True)
+            seed.write_text("", encoding="utf-8")
+            predicates.write_text(json.dumps({"predicates": [{
+                "id": "contract_amount", "answer_kind": "numeric",
+                "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약금액"],
+            }]}, ensure_ascii=False), encoding="utf-8")
+            result = build_agent_overlay(base, overlay, seed, predicates)
+            self.assertEqual(result.event_imported, 0)
+            self.assertIn("event_numeric_cell_ambiguous", result.reasons[0])
+
     def test_agent_overlay_imports_allowlisted_event_fact_with_trust_tier(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
