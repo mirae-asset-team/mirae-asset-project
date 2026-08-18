@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 from disclosure_db.agent import AgentSettings, DisclosureAgent
@@ -23,6 +24,9 @@ def load_stage_metrics(path: Path | None) -> tuple[dict[str, float], list[str]]:
         return {}, [f"stage_metrics_invalid_json:{exc}"]
     if not isinstance(payload, dict):
         return {}, ["stage_metrics_not_object"]
+    unknown = sorted(set(payload) - set(STAGE_METRIC_KEYS))
+    if unknown:
+        return {}, ["stage_metrics_unknown_fields:" + ",".join(unknown)]
     values: dict[str, float] = {}
     errors: list[str] = []
     for key in STAGE_METRIC_KEYS:
@@ -30,11 +34,16 @@ def load_stage_metrics(path: Path | None) -> tuple[dict[str, float], list[str]]:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             errors.append(f"{key}:missing_or_non_numeric")
             continue
-        if not __import__("math").isfinite(float(value)) or float(value) < 0:
+        try:
+            numeric = float(value)
+        except (OverflowError, TypeError, ValueError):
+            errors.append(f"{key}:non_finite_or_non_numeric")
+            continue
+        if not math.isfinite(numeric) or numeric < 0:
             errors.append(f"{key}:non_finite_or_negative")
             continue
-        values[key] = float(value)
-    return values, errors
+        values[key] = numeric
+    return (values, errors) if not errors else ({}, errors)
 
 
 def main() -> None:

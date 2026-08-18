@@ -5,7 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from disclosure_db.agent_contracts import VerifiedAnswer
-from disclosure_db.agent_evaluation import evaluate_agent, evaluation_pass, percentile, quality_gate_passed
+from disclosure_db.agent_evaluation import evaluate_agent, evaluation_pass, percentile, quality_gate_diagnostics, quality_gate_passed
 from scripts.evaluate_agent import load_stage_metrics
 
 
@@ -232,6 +232,15 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertFalse(quality_gate_passed({**base, "error_count": "0"}, {"numeric_exactness": 1.0}))
         self.assertFalse(quality_gate_passed(base, {"numeric_exactness": float("nan")}))
 
+    def test_quality_gate_rejects_negative_fraction_bool_and_huge_counts_without_raising(self) -> None:
+        acceptance = {"numeric_exactness": 1.0}
+        base = {"numeric_exactness": 1.0, "error_count": 0, "false_numeric_claim_count": 0, "unsafe_answer_count": 0}
+        for key in ("error_count", "false_numeric_claim_count", "unsafe_answer_count"):
+            for value in (-1, 1.5, True, 10**1000):
+                summary = {**base, key: value}
+                self.assertFalse(quality_gate_passed(summary, acceptance))
+                self.assertFalse(quality_gate_diagnostics(summary, acceptance)["passed"])
+
     def test_stage_metrics_artifact_requires_finite_numeric_p95_values(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "stages.json"
@@ -240,6 +249,24 @@ class AgentEvaluationTests(unittest.TestCase):
             self.assertEqual(values["planner_p95_ms"], 1.0)
             self.assertEqual(errors, [])
             path.write_text('{"planner_p95_ms": NaN, "fact_lookup_p95_ms": true}\n', encoding="utf-8")
+            values, errors = load_stage_metrics(path)
+        self.assertEqual(values, {})
+        self.assertTrue(errors)
+
+    def test_stage_metrics_rejects_unknown_and_overflow_fields_fail_closed(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "stages.json"
+            path.write_text(
+                '{"planner_p95_ms": 1, "fact_lookup_p95_ms": 2, "local_retrieval_p95_ms": 3, "reranked_retrieval_p95_ms": 4, "extra": 5}\n',
+                encoding="utf-8",
+            )
+            values, errors = load_stage_metrics(path)
+            self.assertEqual(values, {})
+            self.assertTrue(any("unknown" in error for error in errors))
+            path.write_text(
+                '{"planner_p95_ms": 1e1000, "fact_lookup_p95_ms": 2, "local_retrieval_p95_ms": 3, "reranked_retrieval_p95_ms": 4}\n',
+                encoding="utf-8",
+            )
             values, errors = load_stage_metrics(path)
         self.assertEqual(values, {})
         self.assertTrue(errors)

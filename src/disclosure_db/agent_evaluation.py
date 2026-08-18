@@ -12,7 +12,7 @@ from typing import Any
 
 from .agent import DisclosureAgent
 from .evaluation import REQUIRED_GOLD_RECORD_FIELDS
-from .gold_validation import validate_record_contract
+from .gold_validation import validate_record_contract, validate_record_schema
 
 try:
     _CANONICAL_FIELDS = set(json.loads((Path(__file__).resolve().parents[2] / "config" / "gold_annotation_schema.json").read_text(encoding="utf-8")).get("properties", {}))
@@ -26,12 +26,18 @@ def _ratio(numerator: int | float, denominator: int | float) -> float | None:
     return round(float(numerator) / float(denominator), 6)
 
 
-def _finite_number(value: Any, *, integer: bool = False) -> bool:
+def _finite_number(value: Any, *, integer: bool = False, nonnegative: bool = False) -> bool:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
-    if not math.isfinite(float(value)):
+    try:
+        finite = math.isfinite(float(value))
+    except (OverflowError, TypeError, ValueError):
         return False
-    return not integer or isinstance(value, int)
+    if not finite:
+        return False
+    if integer and not isinstance(value, int):
+        return False
+    return not nonnegative or value >= 0
 
 
 def quality_gate_diagnostics(summary: dict[str, Any], acceptance: dict[str, Any]) -> dict[str, Any]:
@@ -40,15 +46,15 @@ def quality_gate_diagnostics(summary: dict[str, Any], acceptance: dict[str, Any]
         reasons.append("hard_count_missing")
     if summary.get("stage_metrics_errors"):
         reasons.extend(str(item) for item in summary["stage_metrics_errors"])
-    if "error_count" in summary and (not _finite_number(summary["error_count"], integer=True) or summary["error_count"] != 0):
+    if "error_count" in summary and (not _finite_number(summary["error_count"], integer=True, nonnegative=True) or summary["error_count"] != 0):
         reasons.append("error_count_invalid_or_nonzero")
     hard_pairs = (("false_numeric_claim_count", "false_numeric_claims"), ("unsafe_answer_count", "unsafe_answers"))
     for metric_name, threshold_name in hard_pairs:
-        if metric_name not in summary or not _finite_number(summary.get(metric_name), integer=True):
+        if metric_name not in summary or not _finite_number(summary.get(metric_name), integer=True, nonnegative=True):
             reasons.append(metric_name + "_invalid")
             continue
         threshold = acceptance.get(threshold_name, 0)
-        if not _finite_number(threshold, integer=True) or int(summary[metric_name]) > int(threshold):
+        if not _finite_number(threshold, integer=True, nonnegative=True) or int(summary[metric_name]) > int(threshold):
             reasons.append(threshold_name + "_failed")
     mapping: dict[str, tuple[str, str]] = {
         "regression_answerability_matches": ("answerability_match_count", "ge"),
@@ -72,10 +78,10 @@ def quality_gate_diagnostics(summary: dict[str, Any], acceptance: dict[str, Any]
         if threshold_name == "end_to_end_p95_ms" and metric is None:
             metric = summary.get("end_to_end_p95_ms")
         threshold_integer = threshold_name == "regression_answerability_matches"
-        if not _finite_number(threshold, integer=threshold_integer):
+        if not _finite_number(threshold, integer=threshold_integer, nonnegative=True):
             reasons.append(threshold_name + "_threshold_invalid")
             continue
-        if not _finite_number(metric, integer=False):
+        if not _finite_number(metric, integer=threshold_integer, nonnegative=True):
             reasons.append(threshold_name + "_metric_missing_or_invalid")
             continue
         try:
@@ -173,6 +179,9 @@ def _validate_record(record: Any) -> str | None:
     if unknown:
         return "unknown fields: " + ", ".join(unknown)
     if REQUIRED_GOLD_RECORD_FIELDS <= set(record):
+        schema_issues = validate_record_schema(record)
+        if schema_issues:
+            return "canonical schema: " + ";".join(str(item.get("message")) for item in schema_issues[:8])
         canonical_issues = validate_record_contract(record)
         if canonical_issues:
             return "canonical schema: " + ";".join(str(item.get("rule_id")) for item in canonical_issues)

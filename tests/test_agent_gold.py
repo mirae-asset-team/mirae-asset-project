@@ -10,7 +10,7 @@ from pathlib import Path
 from scripts.build_agent_gold import load_predicate_config
 from scripts.build_agent_gold import AuditResult, audit_candidate, extract_fact_candidates, main as build_agent_gold_main, write_jsonl_atomic
 from disclosure_db.schema import create_schema
-from disclosure_db.gold_validation import validate_record_contract
+from disclosure_db.gold_validation import validate_record_contract, validate_record_schema
 
 
 SAFE_CONFIG = load_predicate_config(Path("config/agent_gold_predicates.json"))
@@ -97,6 +97,33 @@ def valid_text_record() -> dict[str, object]:
 
 
 class AgentGoldTests(unittest.TestCase):
+    def test_nested_contract_validation_rejects_malformed_shapes_without_raising(self) -> None:
+        record = valid_text_record()
+        record["review"] = "not-an-object"
+        issues = validate_record_contract(record)
+        self.assertTrue(issues)
+        self.assertTrue(any(item["rule_id"] == "canonical_schema" for item in issues))
+
+    def test_nested_schema_rejects_unknown_fields_and_partial_evidence(self) -> None:
+        record = valid_text_record()
+        record["answer"]["unexpected"] = True
+        record["evidence"][0].pop("locator")
+        issues = validate_record_schema(record)
+        messages = {item["message"] for item in issues}
+        self.assertTrue(any("answer.unexpected" in message for message in messages))
+        self.assertTrue(any("evidence[0].locator" in message for message in messages))
+
+    def test_schema_validation_handles_huge_numeric_values_without_raising(self) -> None:
+        record = valid_text_record()
+        record["formula"] = {
+            "expression": "x",
+            "operand_evidence_ids": [],
+            "expected_result": 10**1000,
+            "unit": None,
+            "scale": None,
+        }
+        self.assertTrue(validate_record_schema(record))
+
     def test_predicate_config_has_only_explicit_safe_predicates(self) -> None:
         config = load_predicate_config(Path("config/agent_gold_predicates.json"))
         self.assertEqual(config["version"], "0.1.0")

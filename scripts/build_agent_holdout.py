@@ -8,7 +8,7 @@ import json
 import re
 from typing import Any, Iterable
 
-from disclosure_db.gold_validation import validate_record_contract
+from disclosure_db.gold_validation import validate_record_contract, validate_record_schema
 
 
 _YEAR_RE = re.compile(r"(?<!\d)((?:19|20)\d{2})(?:[-./]\d{2}(?:[-./]\d{2})?)?")
@@ -146,7 +146,13 @@ def _eligible(record: Any) -> tuple[bool, str]:
     unknown = sorted(set(record) - _CANONICAL_FIELDS)
     if unknown:
         return False, "unknown_fields:" + ",".join(unknown)
-    canonical_issues = validate_record_contract(record)
+    schema_issues = validate_record_schema(record)
+    if schema_issues:
+        return False, "canonical_schema:" + ";".join(str(item.get("message")) for item in schema_issues[:8])
+    try:
+        canonical_issues = validate_record_contract(record)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        return False, "canonical_schema_exception:" + type(exc).__name__
     if canonical_issues:
         return False, "canonical_schema:" + ";".join(str(item.get("rule_id")) for item in canonical_issues)
     missing = sorted(_TOP_REQUIRED - set(record))
@@ -263,6 +269,7 @@ def build_holdout(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             key = str(record["question_id"])
             id_counts[key] = id_counts.get(key, 0) + 1
     eligible: list[dict[str, Any]] = []
+    group_connectors: list[dict[str, Any]] = []
     for record in all_records:
         if isinstance(record, dict) and id_counts.get(str(record.get("question_id")), 0) > 1:
             rejections.append({"question_id": str(record.get("question_id")), "reason": "duplicate_question_id"})
@@ -271,6 +278,20 @@ def build_holdout(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         if not ok:
             question_id = str(record.get("question_id") if isinstance(record, dict) else "<non-object>")
             rejections.append({"question_id": question_id, "reason": reason})
+            # A legacy bridge row can omit an event identifier while still
+            # carrying valid filing links. It is never emitted or evaluated,
+            # but retaining its filing edges preserves deterministic grouping
+            # for the already-supported correction/family split behavior.
+            if (
+                isinstance(record, dict)
+                and reason.startswith("canonical_schema:")
+                and all(
+                    part.endswith(".event_id:minLength")
+                    for part in reason.removeprefix("canonical_schema:").split(";")
+                )
+                and _record_nodes(record)
+            ):
+                group_connectors.append(record)
             continue
         eligible.append(record)
     eligible.sort(key=lambda item: (
@@ -287,10 +308,22 @@ def build_holdout(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         ),
         None,
     )
-    groups = _group_map(eligible)
+    group_inputs = sorted(
+        eligible + group_connectors,
+        key=lambda item: (
+            str(item.get("question_id")),
+            json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        ),
+    )
+    groups = _group_map(group_inputs)
+    groups_by_question_id = {
+        str(item.get("question_id")): groups[index]
+        for index, item in enumerate(group_inputs)
+        if isinstance(item, dict) and item.get("question_id")
+    }
     output: list[dict[str, Any]] = []
-    for index, source in enumerate(eligible):
-        group = groups[index]
+    for source in eligible:
+        group = groups_by_question_id[str(source["question_id"])]
         split_bucket = int(hashlib.sha256(group.encode("utf-8")).hexdigest()[:8], 16) % 10
         split = "holdout" if split_bucket < 2 else "regression"
         canonical = json.dumps(source, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
