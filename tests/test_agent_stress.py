@@ -93,6 +93,8 @@ class AgentStressContractTests(unittest.TestCase):
         self.assertEqual(canonical_json(first), canonical_json(second))
         self.assertEqual(len(first), 9)
         self.assertEqual({case["stress"]["category"] for case in first}, set(contract["allocation"]))
+        adversarial = next(case for case in first if case["stress"]["category"] == "adversarial")
+        self.assertIn("주가 전망", adversarial["question"])
         validate_stress_cases(first)
 
     def test_group_split_never_separates_base_and_mutations(self) -> None:

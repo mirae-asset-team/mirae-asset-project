@@ -283,3 +283,9 @@
 - RED: resume/fault tests initially failed because `run_fault_case` and `should_skip` were absent.
 - GREEN: added atomic checkpoint JSON records keyed by case/input/git identity, attestation/index validation before execution, provider-disabled deterministic runner mode, and fault fixtures that never copy or mutate the 38GB corpus.
 - Verification: `python -m unittest tests.test_agent_stress -v` → 11 passed; runner compiles successfully. No D-drive stress run was started before the runner implementation was committed.
+
+## 2026-08-19T05:23:00+09:00 — Plan 3 Task 5: first hard-stop diagnosis
+
+- Initial run `20260818T200347Z-5279beb78b0a` stopped after 1 case with `false_numeric_claim_count=1`; no unsafe answer, unknown/cross-filing citation, or evaluator error occurred.
+- Root cause: adversarial/unanswerable stress records retained the original answerable question while declaring abstention. The agent correctly answered the original question, exposing an invalid stress mutation rather than a runtime safety failure.
+- RED/GREEN: added a regression assertion for adversarial question mutation and changed negative mutations to deterministic out-of-scope/injection prompts. The safety gate remains unchanged.
