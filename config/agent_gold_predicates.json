@@ -1,0 +1,45 @@
+{
+  "version": "0.1.0",
+  "predicates": [
+    {
+      "id": "contract_amount",
+      "question_type": "table_cell",
+      "answer_kind": "numeric",
+      "allowed_fact_types": ["event_kv_candidate"],
+      "predicate_values": ["계약금액"],
+      "required_evidence_fields": ["evidence_id", "filing_id", "source_sha256", "unit", "scale"],
+      "question_template": "{company}의 {as_of} 공시 계약금액은 얼마인가?"
+    },
+    {
+      "id": "counterparty",
+      "question_type": "single_filing_fact",
+      "answer_kind": "text",
+      "allowed_fact_types": ["event_kv_candidate"],
+      "predicate_values": ["3. 계약상대"],
+      "required_evidence_fields": ["evidence_id", "filing_id", "source_sha256"],
+      "question_template": "{company}의 {as_of} 공시 계약상대는 누구인가?"
+    },
+    {
+      "id": "issued_shares",
+      "question_type": "table_cell",
+      "answer_kind": "numeric",
+      "allowed_fact_types": ["event_kv_candidate"],
+      "predicate_values": [
+        "의결권있는발행주식 총수(I)",
+        "기발행주식 총수(주) (C)",
+        "발행주식총수(주)",
+        "발행주식수"
+      ],
+      "required_evidence_fields": ["evidence_id", "filing_id", "source_sha256", "unit", "scale"],
+      "question_template": "{company}의 {as_of} 공시 발행주식수는 얼마인가?"
+    }
+  ],
+  "templates": [
+    {
+      "id": "missing_fact_abstention",
+      "question_type": "unanswerable",
+      "answer_kind": "unanswerable",
+      "answer_reason": "선언된 근거 셀에서 요청한 사실을 확인할 수 없습니다."
+    }
+  ]
+}
