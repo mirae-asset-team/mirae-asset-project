@@ -46,6 +46,28 @@ def _seed_base(path: Path) -> None:
     connection.close()
 
 
+def _seed_filing_date_base(path: Path) -> None:
+    _seed_base(path)
+    connection = sqlite3.connect(path)
+    connection.execute("UPDATE filing SET filed_at='2023-04-10' WHERE filing_id='f_safe'")
+    connection.execute(
+        "INSERT INTO filing VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("f_nearby", "doc_nearby", "00000001", "000001", "테스트", "테스트상장", "테스트보고", "IT", "IT", "periodic", "사업보고서", "사업보고서", "사업보고서", "사업보고서", "2023-04-03", 2023, 12, 0, "xml", 1),
+    )
+    connection.execute(
+        "INSERT INTO source_document VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("s_nearby", "f_nearby", "main", "nearby.xml", ".xml", "dart_xml", "utf-8", "utf-8", "d" * 64, 10, "2023-04-03T00:00:00Z", "test", "1", "success", 1, 0, "[]", json.dumps({"image_reference_count": 0})),
+    )
+    connection.execute("INSERT INTO filing_event VALUES(?,?,?,?,?)", ("e_nearby", "00000001", "periodic", "nearby", "test"))
+    connection.execute("INSERT INTO filing_version VALUES(?,?,?,?,?,?,?,?,?,?)", ("f_nearby", "e_nearby", 1, None, "root", "high", "2023-04-03", None, 1, "test"))
+    connection.execute(
+        "INSERT INTO fragment VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("ev_nearby", "f_nearby", "s_nearby", "heading", 0, "[]", None, None, "{}", "공시 제목 계약금액", "공시 제목 계약금액", "1"),
+    )
+    connection.commit()
+    connection.close()
+
+
 class SearchIndexTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -64,6 +86,18 @@ class SearchIndexTests(unittest.TestCase):
         self.assertEqual(result.indexed_rows, 1)
         rows = SafeSearchIndex(self.index, base_sha256=self.attestation.sha256).search("계약금액", company="테스트", as_of=None)
         self.assertEqual([row["evidence_id"] for row in rows], ["ev_safe"])
+
+    def test_search_index_exact_filing_date_excludes_nearby_filing(self) -> None:
+        base = Path(self.temp.name) / "filing_date_base.sqlite"
+        index = Path(self.temp.name) / "filing_date_search.sqlite"
+        _seed_filing_date_base(base)
+        digest = hashlib.sha256(base.read_bytes()).hexdigest()
+        attestation = CorpusAttestation(digest, base.stat().st_size, base.stat().st_mtime_ns, "semantic-v1")
+        build_search_index(base, index, attestation)
+        rows = SafeSearchIndex(index, base_sha256=attestation.sha256).search(
+            "계약금액", company="테스트", as_of=None, filed_at="2023-04-10"
+        )
+        self.assertEqual({row["filed_at"] for row in rows}, {"2023-04-10"})
 
     def test_korean_substring_uses_limited_trigram_fallback(self) -> None:
         build_search_index(self.base, self.index, self.attestation)

@@ -31,6 +31,7 @@ CREATE TABLE search_document(
     rowid INTEGER PRIMARY KEY,
     evidence_id TEXT NOT NULL UNIQUE,
     filing_id TEXT NOT NULL,
+    filed_at TEXT NOT NULL,
     source_id TEXT NOT NULL,
     company TEXT NOT NULL,
     issuer_name TEXT NOT NULL,
@@ -129,7 +130,7 @@ def build_search_index(
             # keep the safe projection schema stable while treating it as NULL.
             reporter_select = "f.reporter_name" if "reporter_name" in filing_columns else "'' AS reporter_name"
             rows = source_connection.execute(
-            f"""SELECT fr.evidence_id,fr.filing_id,fr.source_id,
+            f"""SELECT fr.evidence_id,fr.filing_id,f.filed_at,fr.source_id,
                       f.issuer_name,f.listed_name,{reporter_select},f.stock_code,f.issuer_corp_code,
                       f.doc_group,
                       v.effective_from,v.effective_to,v.is_current,v.lineage_status,
@@ -150,12 +151,12 @@ def build_search_index(
             for row in rows:
                 connection.execute(
                     """INSERT INTO search_document(
-                        evidence_id,filing_id,source_id,company,issuer_name,listed_name,reporter_name,
+                        evidence_id,filing_id,filed_at,source_id,company,issuer_name,listed_name,reporter_name,
                         stock_code,corp_code,doc_group,effective_from,effective_to,is_current,
                         lineage_status,is_correction,fragment_type,locator_json,text_normalized
-                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (
-                        row["evidence_id"], row["filing_id"], row["source_id"], row["issuer_name"],
+                        row["evidence_id"], row["filing_id"], row["filed_at"], row["source_id"], row["issuer_name"],
                         row["issuer_name"], row["listed_name"], row["reporter_name"], row["stock_code"],
                         row["issuer_corp_code"], row["doc_group"], row["effective_from"], row["effective_to"],
                         row["is_current"], row["lineage_status"], row["is_correction"], row["fragment_type"],
@@ -249,12 +250,15 @@ class SafeSearchIndex:
             raise
 
     @staticmethod
-    def _filters(company: str | None, as_of: str | None, correction_policy: str) -> tuple[str, list[object]]:
+    def _filters(company: str | None, as_of: str | None, filed_at: str | None, correction_policy: str) -> tuple[str, list[object]]:
         clauses: list[str] = []
         params: list[object] = []
         if company:
             clauses.append("(d.company=? OR d.issuer_name=? OR d.listed_name=? OR d.reporter_name=? OR d.stock_code=? OR d.corp_code=?)")
             params.extend([company] * 6)
+        if filed_at is not None:
+            clauses.append("d.filed_at=?")
+            params.append(filed_at)
         if correction_policy == "original":
             clauses.append("d.lineage_status='root'")
             if as_of is not None:
@@ -271,12 +275,12 @@ class SafeSearchIndex:
                 params.extend([as_of, as_of])
         return (" AND ".join(clauses) or "1=1"), params
 
-    def _unicode_search(self, token: str, *, company: str | None, as_of: str | None, correction_policy: str, limit: int) -> list[dict[str, object]]:
-        where, params = self._filters(company, as_of, correction_policy)
+    def _unicode_search(self, token: str, *, company: str | None, as_of: str | None, filed_at: str | None, correction_policy: str, limit: int) -> list[dict[str, object]]:
+        where, params = self._filters(company, as_of, filed_at, correction_policy)
         with closing(sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
-                f"""SELECT d.evidence_id,d.filing_id,d.source_id,d.company,d.stock_code,d.doc_group,
+                f"""SELECT d.evidence_id,d.filing_id,d.filed_at,d.source_id,d.company,d.stock_code,d.doc_group,
                            d.effective_from,d.effective_to,d.is_current,d.lineage_status,d.fragment_type,d.locator_json,
                            d.text_normalized,bm25(search_fts) AS score
                     FROM search_fts JOIN search_document d ON d.rowid=search_fts.rowid
@@ -286,12 +290,12 @@ class SafeSearchIndex:
             ).fetchall()
         return [{**dict(row), "matched_index": "unicode"} for row in rows]
 
-    def _trigram_search(self, token: str, *, company: str | None, as_of: str | None, correction_policy: str, limit: int) -> list[dict[str, object]]:
-        where, params = self._filters(company, as_of, correction_policy)
+    def _trigram_search(self, token: str, *, company: str | None, as_of: str | None, filed_at: str | None, correction_policy: str, limit: int) -> list[dict[str, object]]:
+        where, params = self._filters(company, as_of, filed_at, correction_policy)
         with closing(sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
-                f"""SELECT d.evidence_id,d.filing_id,d.source_id,d.company,d.stock_code,d.doc_group,
+                f"""SELECT d.evidence_id,d.filing_id,d.filed_at,d.source_id,d.company,d.stock_code,d.doc_group,
                            d.effective_from,d.effective_to,d.is_current,d.lineage_status,d.fragment_type,d.locator_json,
                            d.text_normalized,bm25(search_trigram) AS score
                     FROM search_trigram JOIN search_document d ON d.evidence_id=search_trigram.evidence_id
@@ -307,6 +311,7 @@ class SafeSearchIndex:
         *,
         company: str | None,
         as_of: str | None,
+        filed_at: str | None = None,
         limit: int = 30,
         correction_policy: str = "current",
     ) -> list[dict[str, object]]:
@@ -322,13 +327,13 @@ class SafeSearchIndex:
         rankings: list[list[dict[str, object]]] = []
         unicode_ids: set[str] = set()
         for token in tokens[:32]:
-            ranking = self._unicode_search(token, company=company, as_of=as_of, correction_policy=correction_policy, limit=per_token_limit)
+            ranking = self._unicode_search(token, company=company, as_of=as_of, filed_at=filed_at, correction_policy=correction_policy, limit=per_token_limit)
             rankings.append(ranking)
             unicode_ids.update(str(row["evidence_id"]) for row in ranking)
         if len(unicode_ids) < limit:
             for token in tokens[:32]:
                 remaining = max(1, limit - len(unicode_ids))
-                ranking = self._trigram_search(token, company=company, as_of=as_of, correction_policy=correction_policy, limit=min(remaining, 100))
+                ranking = self._trigram_search(token, company=company, as_of=as_of, filed_at=filed_at, correction_policy=correction_policy, limit=min(remaining, 100))
                 rankings.append(ranking)
                 unicode_ids.update(str(row["evidence_id"]) for row in ranking)
                 if len(unicode_ids) >= limit:

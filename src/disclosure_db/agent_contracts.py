@@ -36,6 +36,7 @@ class QueryPlan:
     predicate_terms: list[str] = field(default_factory=list)
     target_periods: list[dict[str, str | None]] = field(default_factory=list)
     requires_complete_evidence_set: bool = False
+    filing_date: str | None = None
 
 
 @dataclass(slots=True)

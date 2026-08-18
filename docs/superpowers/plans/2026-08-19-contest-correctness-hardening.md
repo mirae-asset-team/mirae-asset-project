@@ -115,7 +115,7 @@ git commit -m "fix: distinguish financial instant and duration dates"
 - Produces: `QueryPlan.filing_date: str | None = None`
 - Extends: `query_database(..., filed_at=None)` and `SafeSearchIndex.search(..., filed_at=None)`
 
-- [ ] **Step 1: Write failing planning and retrieval tests**
+- [x] **Step 1: Write failing planning and retrieval tests**
 
 ```python
 def test_text_question_exact_date_sets_filing_date_not_accounting_period(self):
@@ -130,13 +130,13 @@ def test_search_index_exact_filing_date_excludes_nearby_filing(self):
 
 Seed two otherwise matching filings on `2023-04-03` and `2023-04-10`.
 
-- [ ] **Step 2: Run and confirm missing field/signature failures**
+- [x] **Step 2: Run and confirm missing field/signature failures**
 
 Run: `python -m unittest tests.test_evidence_service tests.test_search_index tests.test_pipeline -v`
 
 Expected: FAIL on missing `filing_date`/`filed_at`.
 
-- [ ] **Step 3: Add the backward-compatible contract**
+- [x] **Step 3: Add the backward-compatible contract**
 
 ```python
 @dataclass(slots=True)
@@ -148,7 +148,7 @@ class QueryPlan:
 
 For exact dates: financial questions use Task 1 semantics; event/text questions set `filing_date`. API `as_of` remains independent.
 
-- [ ] **Step 4: Add exact filters to both retrieval paths**
+- [x] **Step 4: Add exact filters to both retrieval paths**
 
 In `query_database`, add `f.filed_at=?` to the eligible filing query or global query when `filed_at` is set. Include `filed_at` in `SafeSearchIndex.search_document` if not already stored, rebuild its schema revision, and add `d.filed_at=?` in `_filters`.
 
@@ -161,13 +161,13 @@ def search(self, question: str, *, company: str | None, as_of: str | None,
 
 `EvidenceService.search` passes `plan.filing_date` to index and SSOT paths. It does not convert it into `as_of`.
 
-- [ ] **Step 5: Run focused retrieval tests**
+- [x] **Step 5: Run focused retrieval tests**
 
 Run: `python -m unittest tests.test_evidence_service tests.test_search_index tests.test_pipeline -v`
 
 Expected: PASS; nearby filing fixture is excluded.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add src/disclosure_db/agent_contracts.py src/disclosure_db/query_planner.py src/disclosure_db/evidence_service.py src/disclosure_db/pipeline.py src/disclosure_db/search_index.py tests/test_evidence_service.py tests/test_search_index.py tests/test_pipeline.py

@@ -86,6 +86,7 @@ class EvidenceService:
         version_as_of = plan.as_of if plan.as_of_source == "api" else (
             None if plan.period_start or plan.period_end or plan.instant_date else plan.as_of
         )
+        filing_date = plan.filing_date
         structured_domain = plan.fact_domain in {"financial", "event"}
         if self.overlay_database and self.overlay_database.exists() and structured_domain:
             overlay_attested = overlay_matches_base(self.base_database, self.overlay_database, attestation=self.attestation)
@@ -152,6 +153,7 @@ class EvidenceService:
                             plan.question,
                             company=plan.company,
                             as_of=version_as_of,
+                            filed_at=filing_date,
                             limit=max(1, limit - len(refs)),
                             correction_policy=plan.correction_policy,
                         )
@@ -185,6 +187,7 @@ class EvidenceService:
                         company=plan.company,
                         limit=max(1, limit - len(refs)),
                         as_of=version_as_of,
+                        filed_at=filing_date,
                         correction_policy=plan.correction_policy,
                     )
                     refs.extend(self._fragment_refs(rows))

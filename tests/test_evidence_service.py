@@ -127,7 +127,8 @@ class EvidenceServiceTests(unittest.TestCase):
             "테스트회사 2023년 2023-03-02 계약금액은 얼마인가?",
             company_candidates=["테스트회사"],
         )
-        self.assertEqual(duplicate_year.instant_date, "2023-03-02")
+        self.assertEqual(duplicate_year.filing_date, "2023-03-02")
+        self.assertIsNone(duplicate_year.instant_date)
 
         with_api_cutoff = plan_query("삼성전자 2023년 매출액은?", company_candidates=["삼성전자"], as_of="2026-01-01")
         self.assertEqual(with_api_cutoff.as_of, "2026-01-01")
@@ -159,6 +160,14 @@ class EvidenceServiceTests(unittest.TestCase):
         self.assertEqual(plan.statement_type, "BS")
         self.assertEqual(plan.instant_date, "2024-12-31")
         self.assertIsNone(plan.period_start)
+
+    def test_text_question_exact_date_sets_filing_date_not_accounting_period(self) -> None:
+        plan = plan_query(
+            "테스트가 2023-04-10 공시한 제목은?",
+            company_candidates=["테스트"],
+        )
+        self.assertEqual(plan.filing_date, "2023-04-10")
+        self.assertIsNone(plan.instant_date)
 
     def test_financial_period_does_not_become_knowledge_cutoff(self) -> None:
         plan = plan_query("삼성전자 2023년 매출액은?", company_candidates=["삼성전자"])

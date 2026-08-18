@@ -539,6 +539,7 @@ def query_database(
     company: str | None = None,
     limit: int = 10,
     as_of: str | None = None,
+    filed_at: str | None = None,
     include_unsafe: bool = False,
     filing_ids: list[str] | tuple[str, ...] | None = None,
     correction_policy: str = "current",
@@ -581,6 +582,9 @@ def query_database(
                 unique_filing_ids = list(dict.fromkeys(str(item) for item in filing_ids))
                 eligible_where.append(f"f.filing_id IN ({','.join('?' for _ in unique_filing_ids)})")
                 eligible_params.extend(unique_filing_ids)
+            if filed_at is not None:
+                eligible_where.append("f.filed_at=?")
+                eligible_params.append(filed_at)
             if version_sql:
                 eligible_where.append(version_sql)
                 eligible_params.extend(version_params)
@@ -643,6 +647,9 @@ def query_database(
             if version_sql:
                 where.append(version_sql)
                 params.extend(version_params)
+            if filed_at is not None:
+                where.append("f.filed_at=?")
+                params.append(filed_at)
             params.append(limit)
             rows = connection.execute(
                 f"""SELECT fr.evidence_id,fr.filing_id,fr.source_id,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,

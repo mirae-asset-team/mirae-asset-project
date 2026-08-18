@@ -33,6 +33,7 @@ def plan_query(
     period_end: str | None = None
     instant_date: str | None = None
     parsed_calendar_date: str | None = None
+    filing_date: str | None = None
     reason_codes: list[str] = []
     # Parse the accounting period independently of the point-in-time filing cutoff.
     # An API-provided as_of remains authoritative for version selection.
@@ -107,6 +108,9 @@ def plan_query(
         fact_domain = "event"
     else:
         fact_domain = "text"
+    if parsed_calendar_date and statement_type is None:
+        filing_date = parsed_calendar_date
+        instant_date = None
     target_periods: list[dict[str, str | None]] = []
     if instant_date:
         target_periods.append({"period_type": "instant", "start": None, "end": None, "instant": instant_date})
@@ -123,4 +127,5 @@ def plan_query(
         correction_policy=correction_policy, question_type=question_type,
         reason_codes=reason_codes, fact_domain=fact_domain, predicate_terms=event_terms,
         target_periods=target_periods, requires_complete_evidence_set=requires_complete,
+        filing_date=filing_date,
     )

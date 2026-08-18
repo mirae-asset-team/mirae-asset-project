@@ -80,6 +80,9 @@ class PipelineTests(unittest.TestCase):
             results = query_database(database, "매출액", company="000001", limit=5)
             self.assertGreaterEqual(len(results), 1)
             self.assertTrue(all(result["issuer_name"] == "테스트" for result in results))
+            filed_results = query_database(database, "매출액", filed_at="2024-03-02", limit=5)
+            self.assertTrue(filed_results)
+            self.assertEqual({result["filed_at"] for result in filed_results}, {"2024-03-02"})
             self.assertEqual(query_database(database, "매출액", company="없는회사", limit=5), [])
 
     def test_exchange_td_header_is_derived_from_xforms_input(self) -> None:

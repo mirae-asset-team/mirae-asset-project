@@ -213,3 +213,10 @@
 - Root cause: the planner assigned an exact calendar date to `instant_date` before statement type detection.
 - GREEN: preserved `parsed_calendar_date` and normalized IS/CIS/CF to `YYYY-01-01..YYYY-MM-DD`; BS remains instant. API `as_of` behavior is unchanged.
 - Verification: `python -m unittest tests.test_evidence_service -v` → 14 passed. Gold/gate values were not changed.
+
+## 2026-08-19T03:41:05+09:00 — Plan 2 Task 2: exact filing-date filters
+
+- Intent: keep explicit filing dates separate from accounting periods and enforce them in both sparse-index and SSOT retrieval.
+- RED: planner lacked `filing_date`; `SafeSearchIndex.search(..., filed_at=...)` and `query_database(..., filed_at=...)` had missing contract/signature failures.
+- GREEN: added backward-compatible `QueryPlan.filing_date`, planner routing for non-financial exact dates, `filed_at` in the sparse projection/filter, and exact filing filters in both query paths. Updated the legacy event-date expectation to the new contract.
+- Verification: focused and related suite `tests.test_evidence_service tests.test_search_index tests.test_pipeline` → 41 passed. Adjacent filing fixture returned only `2023-04-10`; no live DB was rebuilt or modified.
