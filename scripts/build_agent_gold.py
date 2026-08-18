@@ -260,9 +260,9 @@ def _chunks(values: Iterable[str], size: int = 800) -> Iterable[list[str]]:
 
 def _build_audit_cache(
     connection: sqlite3.Connection, evidence_ids: Iterable[str], source_ids: Iterable[str]
-) -> dict[str, dict[str, sqlite3.Row]]:
+) -> dict[str, dict[str, Any]]:
     """Hydrate evidence/source metadata in bounded batches to avoid per-row disk seeks."""
-    evidence_cache: dict[str, sqlite3.Row] = {}
+    evidence_cache: dict[str, Any] = {}
     for batch in _chunks(sorted(set(evidence_ids))):
         placeholders = ",".join("?" for _ in batch)
         rows = connection.execute(
@@ -298,21 +298,30 @@ def _build_audit_cache(
         )
         for row in rows:
             evidence_cache[str(row["evidence_id"])] = row
-    source_cache: dict[str, sqlite3.Row] = {}
+    source_cache: dict[str, Any] = {}
     for batch in _chunks(sorted(set(source_ids))):
         placeholders = ",".join("?" for _ in batch)
         rows = connection.execute(
             f"""
-            SELECT s.source_id, s.filing_id, s.sha256, s.detected_format, s.parse_status,
-                   (SELECT count(*) FROM fragment fr WHERE fr.source_id=s.source_id),
-                   (SELECT count(*) FROM table_record tr WHERE tr.source_id=s.source_id),
-                   (SELECT count(*) FROM table_cell tc WHERE tc.source_id=s.source_id)
+            SELECT s.source_id, s.filing_id, s.sha256, s.detected_format, s.parse_status
             FROM source_document AS s WHERE s.source_id IN ({placeholders})
             """,
             batch,
         )
         for row in rows:
-            source_cache[str(row["source_id"])] = row
+            source_cache[str(row["source_id"])] = {
+                "source_id": str(row["source_id"]), "filing_id": str(row["filing_id"]),
+                "sha256": str(row["sha256"]), "detected_format": str(row["detected_format"]),
+                "parse_status": str(row["parse_status"]), "fragment_count": 0,
+                "table_count": 0, "cell_count": 0,
+            }
+        for table_name, count_key in (("fragment", "fragment_count"), ("table_record", "table_count"), ("table_cell", "cell_count")):
+            count_rows = connection.execute(
+                f"SELECT source_id, count(*) AS count_value FROM {table_name} WHERE source_id IN ({placeholders}) GROUP BY source_id",
+                batch,
+            )
+            for count_row in count_rows:
+                source_cache.setdefault(str(count_row["source_id"]), {})[count_key] = int(count_row["count_value"])
     return {"evidence": evidence_cache, "source": source_cache}
 
 
@@ -343,7 +352,7 @@ def _copy_without_internal_keys(record: dict[str, Any]) -> dict[str, Any]:
 
 def audit_candidate(
     candidate: dict[str, Any], base: Path, *, source_sha256: str, connection: sqlite3.Connection | None = None,
-    cache: dict[str, dict[str, sqlite3.Row]] | None = None,
+    cache: dict[str, dict[str, Any]] | None = None,
 ) -> AuditResult:
     """Apply deterministic contract, evidence, lineage, and value gates."""
     record = _copy_without_internal_keys(candidate)
