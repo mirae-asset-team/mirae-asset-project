@@ -242,6 +242,12 @@ class EvidenceServiceTests(unittest.TestCase):
             as_of="2023-07-10",
         )
         self.assertEqual(correction.correction_policy, "both")
+        single_correction = plan_query(
+            "삼성바이오로직스 2023-03-02 최초 공시 계열의 2023-07-04 정정 후 계약금액은 얼마인가?",
+            company_candidates=["삼성바이오로직스"],
+            as_of="2023-07-04",
+        )
+        self.assertEqual(single_correction.correction_policy, "corrected")
         shares = plan_query("레인보우로보틱스 2023-01-03 발행하는 보통주식 수는 몇 주인가?", company_candidates=["레인보우로보틱스"])
         self.assertEqual(shares.fact_domain, "event")
         self.assertIn("issued_shares", shares.predicate_terms)

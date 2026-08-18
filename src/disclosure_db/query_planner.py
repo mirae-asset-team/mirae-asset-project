@@ -65,7 +65,7 @@ def plan_query(
         operation = "lookup"
     scope = "consolidated" if "연결" in text else "separate" if "별도" in text else None
     correction_policy = "original" if "최초" in text or "원문" in text else "current"
-    if "최초" in text and "정정" in text:
+    if "최초" in text and "정정" in text and "각각" in text:
         correction_policy = "both"
     elif "정정" in text:
         correction_policy = "corrected"
