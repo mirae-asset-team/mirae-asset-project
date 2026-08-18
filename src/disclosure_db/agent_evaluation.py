@@ -196,10 +196,16 @@ def _validate_record(record: Any) -> str | None:
     if unknown:
         return "unknown fields: " + ", ".join(unknown)
     if REQUIRED_GOLD_RECORD_FIELDS <= set(record):
-        schema_issues = validate_record_schema(record)
+        canonical_record = dict(record)
+        for generated_field in ("split_group", "split", "holdout_variant", "holdout_provenance"):
+            canonical_record.pop(generated_field, None)
+        audit = canonical_record.get("audit")
+        if isinstance(audit, dict) and "source_question_id" in audit:
+            canonical_record["audit"] = {key: value for key, value in audit.items() if key != "source_question_id"}
+        schema_issues = validate_record_schema(canonical_record)
         if schema_issues:
             return "canonical schema: " + ";".join(str(item.get("message")) for item in schema_issues[:8])
-        canonical_issues = validate_record_contract(record)
+        canonical_issues = validate_record_contract(canonical_record)
         if canonical_issues:
             return "canonical schema: " + ";".join(str(item.get("rule_id")) for item in canonical_issues)
     if not isinstance(record["question_id"], str) or not record["question_id"] or not isinstance(record["question"], str) or not record["question"]:

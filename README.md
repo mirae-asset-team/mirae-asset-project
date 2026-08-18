@@ -159,3 +159,35 @@ python scripts/build_agent_gold.py `
 `--fact-limit 0`은 현재 baseline(기존 Gold 23건 + validated financial overlay 8건)이며, generic
 predicate 후보까지 전수 생성하려면 옵션을 생략합니다. 대형 SQLite 전수 조인은 장시간 실행될 수
 있고, 중단되어도 원자적 출력으로 기존 artifact는 손상되지 않습니다.
+
+## Task 10 — real D-drive vertical slice
+
+실제 attested corpus는 `D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite`에서 읽기 전용으로 사용합니다. 2026-08-18 재검증 결과 SHA-256은 `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563`, 크기는 `38,773,280,768` bytes입니다. `D:\mirae-asset-project\db\agent\financial_overlay.sqlite`는 기존 파일이므로 건드리지 않고, Task 10은 `agent_overlay.sqlite`와 `agent_search.sqlite`만 새로 생성합니다.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path 'src').Path
+python -m disclosure_db.cli build-agent-overlay `
+  --database 'D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite' `
+  --overlay 'D:\mirae-asset-project\db\agent\agent_overlay.sqlite' `
+  --financial-seed 'data\derived\financial_fact_gold_seed.jsonl' `
+  --predicate-config 'config\agent_gold_predicates.json' `
+  --attestation 'data\derived\database_distribution_manifest_semantic_v1.json' `
+  --report 'data\derived\agent_overlay_build.json'
+python -m disclosure_db.cli build-search-index `
+  --database 'D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite' `
+  --output 'D:\mirae-asset-project\db\agent\agent_search.sqlite' `
+  --attestation 'data\derived\database_distribution_manifest_semantic_v1.json' `
+  --report 'data\derived\agent_search_index_build.json'
+python scripts/build_agent_holdout.py --input 'data\derived\gold_qa.agent_audited.jsonl' --output 'data\derived\agent_holdout.jsonl'
+python scripts/benchmark_agent_stages.py `
+  --database 'D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite' `
+  --overlay 'D:\mirae-asset-project\db\agent\agent_overlay.sqlite' `
+  --search-index 'D:\mirae-asset-project\db\agent\agent_search.sqlite' `
+  --attestation 'data\derived\database_distribution_manifest_semantic_v1.json' `
+  --gold 'data\derived\gold_qa.agent_audited.jsonl' `
+  --output 'data\derived\agent_stage_metrics.json'
+```
+
+The safe index is temporary-first and atomically promoted only after attestation and `quick_check`. If it is absent or drifts, serving falls back to the immutable SSOT FTS path. The benchmark writes only the four measured p95 fields consumed by `evaluate_agent.py --stage-metrics`; with no `CLOVASTUDIO_API_KEY`, reranking uses the bounded local-order fallback. API serving remains optional (`pip install -e .[agent]`); this environment has no FastAPI, so HTTP endpoint smoke was recorded as an environment skip while deterministic runtime smoke passed.
+
+Task 10 artifacts and measured results are recorded in [the development log](docs/development-log.md): overlay quick-check `ok` with 651 imported rows, index quick-check `ok` with 329,323 indexed rows, audited Gold quality gate `false`, and holdout quality gate `false` with no unsafe or false numeric claims. PostgreSQL/OpenSearch/dense embeddings remain evaluation-triggered follow-up work.

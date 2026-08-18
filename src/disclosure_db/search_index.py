@@ -122,9 +122,15 @@ def build_search_index(
         connection.executescript(SEARCH_SCHEMA)
         with closing(sqlite3.connect(base_database)) as source_connection:
             source_connection.row_factory = sqlite3.Row
+            filing_columns = {
+                str(row[1]) for row in source_connection.execute("PRAGMA table_info(filing)").fetchall()
+            }
+            # Older attested corpora predate the optional reporter_name field;
+            # keep the safe projection schema stable while treating it as NULL.
+            reporter_select = "f.reporter_name" if "reporter_name" in filing_columns else "'' AS reporter_name"
             rows = source_connection.execute(
-            """SELECT fr.evidence_id,fr.filing_id,fr.source_id,
-                      f.issuer_name,f.listed_name,f.reporter_name,f.stock_code,f.issuer_corp_code,
+            f"""SELECT fr.evidence_id,fr.filing_id,fr.source_id,
+                      f.issuer_name,f.listed_name,{reporter_select},f.stock_code,f.issuer_corp_code,
                       f.doc_group,
                       v.effective_from,v.effective_to,v.is_current,v.lineage_status,
                       f.is_correction,
