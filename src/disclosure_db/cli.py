@@ -71,6 +71,7 @@ def _agent_parser() -> argparse.ArgumentParser:
     query = sub.add_parser("agent-query", help="Answer a question with safe evidence and verification")
     query.add_argument("--database", type=Path, required=True)
     query.add_argument("--overlay", type=Path)
+    query.add_argument("--attestation", type=Path)
     query.add_argument("--question", required=True)
     query.add_argument("--company")
     query.add_argument("--as-of")
@@ -82,6 +83,7 @@ def _agent_parser() -> argparse.ArgumentParser:
     serve = sub.add_parser("serve")
     serve.add_argument("--database", type=Path, required=True)
     serve.add_argument("--overlay", type=Path)
+    serve.add_argument("--attestation", type=Path)
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     return parser
@@ -94,7 +96,8 @@ def agent_main() -> None:
         result = import_seed(args.database, args.overlay, args.seed)
     elif args.command == "agent-query":
         from .agent import AgentSettings, DisclosureAgent
-        result = to_jsonable(DisclosureAgent(AgentSettings(args.database, args.overlay)).answer(args.question, company=args.company, as_of=args.as_of, limit=args.limit))
+        settings = AgentSettings(base_database=args.database, overlay_database=args.overlay, attestation_path=args.attestation)
+        result = to_jsonable(DisclosureAgent(settings).answer(args.question, company=args.company, as_of=args.as_of, limit=args.limit))
     else:
         try:
             import uvicorn
@@ -102,7 +105,8 @@ def agent_main() -> None:
             raise SystemExit("serve requires: pip install 'miraeasset-disclosure-db[agent]'") from exc
         from .agent import AgentSettings, DisclosureAgent
         from .api import create_app
-        uvicorn.run(create_app(DisclosureAgent(AgentSettings(args.database, args.overlay))), host=args.host, port=args.port)
+        settings = AgentSettings(base_database=args.database, overlay_database=args.overlay, attestation_path=args.attestation)
+        uvicorn.run(create_app(DisclosureAgent(settings)), host=args.host, port=args.port)
         return
     print(json.dumps(to_jsonable(result) if args.command == "build-financial-overlay" else result, ensure_ascii=False, indent=2))
 

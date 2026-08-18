@@ -7,6 +7,7 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
+from .attestation import verify_fast_identity
 from .agent import DisclosureAgent
 from .agent_contracts import to_jsonable
 from .calculator import calculate
@@ -54,13 +55,17 @@ def create_app(agent: DisclosureAgent):
         started = perf_counter()
         service = agent.evidence_service
         base_exists = service.base_database.exists()
+        attestation_configured = getattr(service, "attestation", None) is not None
+        base_attested = bool(base_exists)
+        if attestation_configured:
+            base_attested = verify_fast_identity(service.base_database, service.attestation)
         overlay_configured = bool(service.overlay_database)
         overlay_attested = bool(overlay_configured and service.overlay_database and service.overlay_database.exists())
         if overlay_attested:
             from .financial_overlay import overlay_matches_base
-            overlay_attested = overlay_matches_base(service.base_database, service.overlay_database)  # type: ignore[arg-type]
-        ready = base_exists and (not overlay_configured or overlay_attested)
-        return envelope({"status": "ok" if ready else "degraded", "ready": ready, "overlay_configured": overlay_configured, "overlay_attested": overlay_attested}, started)
+            overlay_attested = overlay_matches_base(service.base_database, service.overlay_database, attestation=getattr(service, "attestation", None))  # type: ignore[arg-type]
+        ready = base_exists and base_attested and (not overlay_configured or overlay_attested)
+        return envelope({"status": "ok" if ready else "degraded", "ready": ready, "base_attested": base_attested, "attestation_configured": attestation_configured, "overlay_configured": overlay_configured, "overlay_attested": overlay_attested}, started)
 
     @app.post("/v1/query/plan")
     def query_plan(request: QueryRequest) -> dict[str, Any]:

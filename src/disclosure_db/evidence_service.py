@@ -8,6 +8,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Iterable
 
+from .attestation import CorpusAttestation
 from .agent_contracts import EvidenceBundle, EvidenceRef, QueryPlan
 from .financial_overlay import fetch_overlay_facts, overlay_matches_base
 from .pipeline import query_database
@@ -21,10 +22,20 @@ _PROMPT_INJECTION_MARKERS = (
 
 
 class EvidenceService:
-    def __init__(self, base_database: Path, overlay_database: Path | None = None, *, corpus_revision: str = "semantic-v1"):
+    def __init__(
+        self,
+        base_database: Path,
+        overlay_database: Path | None = None,
+        *,
+        corpus_revision: str = "semantic-v1",
+        attestation: CorpusAttestation | None = None,
+        search_database: Path | None = None,
+    ):
         self.base_database = Path(base_database)
         self.overlay_database = Path(overlay_database) if overlay_database else None
         self.corpus_revision = corpus_revision
+        self.attestation = attestation
+        self.search_database = Path(search_database) if search_database else None
         self._companies: list[str] | None = None
         aliases_path = Path(__file__).resolve().parents[2] / "config" / "financial_account_aliases.json"
         try:
@@ -55,7 +66,7 @@ class EvidenceService:
             None if plan.period_start or plan.period_end or plan.instant_date else plan.as_of
         )
         if self.overlay_database and self.overlay_database.exists() and plan.question_type == "numeric":
-            overlay_attested = overlay_matches_base(self.base_database, self.overlay_database)
+            overlay_attested = overlay_matches_base(self.base_database, self.overlay_database, attestation=self.attestation)
             if not overlay_attested:
                 plan.reason_codes.append("overlay_base_attestation_failed")
         if self.overlay_database and self.overlay_database.exists() and plan.question_type == "numeric" and overlay_attested:
@@ -81,6 +92,7 @@ class EvidenceService:
                 scope=plan.scope,
                 correction_policy=plan.correction_policy,
                 limit=limit,
+                attestation=self.attestation,
             )
             refs.extend(self._financial_refs(financial_facts, as_of=version_as_of, correction_policy=plan.correction_policy))
         if len(refs) < limit:

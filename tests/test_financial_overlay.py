@@ -6,9 +6,11 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from disclosure_db.attestation import load_distribution_attestation
 from disclosure_db.schema import create_schema
-from disclosure_db.financial_overlay import FinancialOverlay, import_seed, fetch_overlay_facts
+from disclosure_db.financial_overlay import FinancialOverlay, import_seed, fetch_overlay_facts, overlay_matches_base
 from disclosure_db.agent import AgentSettings, DisclosureAgent
 
 
@@ -121,6 +123,24 @@ class FinancialOverlayTests(unittest.TestCase):
             result = import_seed(base, overlay, seed)
             self.assertEqual(result.imported, 0)
             self.assertIn("visual evidence is blocked", result.reasons[0])
+
+    def test_attested_overlay_match_never_hashes_request_database(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay, seed, manifest = (root / name for name in ("base.sqlite", "overlay.sqlite", "seed.jsonl", "manifest.json"))
+            seed_base(base)
+            seed.write_text("", encoding="utf-8")
+            import_seed(base, overlay, seed)
+            manifest.write_text(json.dumps({
+                "database_version": "semantic-v1",
+                "database": {
+                    "uncompressed_bytes": base.stat().st_size,
+                    "uncompressed_sha256": hashlib.sha256(base.read_bytes()).hexdigest(),
+                },
+            }), encoding="utf-8")
+            attestation = load_distribution_attestation(manifest, database=base)
+            with patch("disclosure_db.financial_overlay.sha256_file", side_effect=AssertionError("request hash")):
+                self.assertTrue(overlay_matches_base(base, overlay, attestation=attestation))
 
 
 if __name__ == "__main__":

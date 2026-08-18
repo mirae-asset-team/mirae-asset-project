@@ -18,6 +18,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
+from .attestation import CorpusAttestation, verify_fast_identity
 from .serving import version_filter_sql
 
 
@@ -102,17 +103,33 @@ def _overlay_matches_base_cached(base_name: str, overlay_name: str, base_size: i
         return False
 
 
-def overlay_matches_base(base_database: Path, overlay_database: Path) -> bool:
+def overlay_matches_base(
+    base_database: Path,
+    overlay_database: Path,
+    *,
+    attestation: CorpusAttestation | None = None,
+) -> bool:
     """Fail closed if an overlay was built from a different immutable base file."""
     if not Path(overlay_database).exists():
         return False
     try:
         base_stat, overlay_stat = Path(base_database).stat(), Path(overlay_database).stat()
+        if attestation is not None:
+            if not verify_fast_identity(Path(base_database), attestation):
+                return False
+            with closing(sqlite3.connect(str(Path(overlay_database)))) as connection:
+                connection.execute("PRAGMA busy_timeout=5000")
+                connection.execute("PRAGMA query_only=ON")
+                row = connection.execute(
+                    "SELECT source_database_sha256 FROM overlay_revision WHERE overlay_revision=?",
+                    ("semantic-v1-agent-overlay",),
+                ).fetchone()
+            return row is not None and str(row[0]).lower() == attestation.sha256
         return _overlay_matches_base_cached(
             str(Path(base_database).resolve()), str(Path(overlay_database).resolve()),
             int(base_stat.st_size), int(base_stat.st_mtime_ns), int(overlay_stat.st_size), int(overlay_stat.st_mtime_ns),
         )
-    except OSError:
+    except (OSError, sqlite3.Error):
         return False
 
 
@@ -278,10 +295,11 @@ def fetch_overlay_facts(
     period_end_lte: str | None = None,
     instant_date: str | None = None,
     limit: int = 100,
+    attestation: CorpusAttestation | None = None,
 ) -> list[dict[str, object]]:
     if limit <= 0 or not Path(overlay_database).exists():
         return []
-    if not overlay_matches_base(Path(base_database), Path(overlay_database)):
+    if not overlay_matches_base(Path(base_database), Path(overlay_database), attestation=attestation):
         return []
     version_sql, version_params = version_filter_sql(alias="v", as_of=as_of)
     if correction_policy == "original":

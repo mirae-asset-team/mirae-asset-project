@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .attestation import CorpusAttestation, load_distribution_attestation
 from .agent_contracts import VerifiedAnswer
 from .answer_verifier import verify_answer
 from .calculator import calculate
@@ -19,6 +20,8 @@ class AgentSettings:
     overlay_database: Path | None = None
     corpus_revision: str = "semantic-v1"
     use_hcx: bool = True
+    attestation_path: Path | None = None
+    search_database: Path | None = None
 
 
 class DisclosureAgent:
@@ -28,6 +31,8 @@ class DisclosureAgent:
         *,
         base_database: Path | None = None,
         overlay_database: Path | None = None,
+        attestation_path: Path | None = None,
+        search_database: Path | None = None,
         evidence_service: EvidenceService | None = None,
         generator: object | None = None,
     ):
@@ -35,9 +40,19 @@ class DisclosureAgent:
             if settings is not None:
                 base_database = settings.base_database
                 overlay_database = settings.overlay_database
+                attestation_path = settings.attestation_path
+                search_database = settings.search_database
             if base_database is None:
                 raise ValueError("base_database or evidence_service is required")
-            evidence_service = EvidenceService(base_database, overlay_database)
+            attestation: CorpusAttestation | None = None
+            if attestation_path is not None:
+                attestation = load_distribution_attestation(attestation_path, database=base_database)
+            evidence_service = EvidenceService(
+                base_database,
+                overlay_database,
+                attestation=attestation,
+                search_database=search_database,
+            )
         self.evidence_service = evidence_service
         self.generator = generator or (HyperClovaGenerator() if settings is None or settings.use_hcx else DeterministicGenerator())
 
