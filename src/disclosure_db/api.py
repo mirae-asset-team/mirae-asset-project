@@ -38,22 +38,67 @@ def _fetch_financial_facts(
     )
 
 
+def _fetch_event_facts(
+    service: Any,
+    *,
+    company: str | None = None,
+    predicate: str | None = None,
+    as_of: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    """Read only attested, evidence-backed event facts for the API surface."""
+    overlay_database = getattr(service, "overlay_database", None)
+    if not overlay_database:
+        return []
+    from .financial_overlay import fetch_event_facts
+    return fetch_event_facts(
+        service.base_database,
+        overlay_database,
+        company=company,
+        predicate_terms=[predicate] if predicate else [],
+        as_of=as_of,
+        limit=limit,
+        attestation=getattr(service, "attestation", None),
+    )
+
+
 def _health_status(service: Any) -> dict[str, Any]:
-    base_exists = service.base_database.exists()
+    base_database = Path(service.base_database)
+    base_exists = base_database.exists()
     attestation_configured = getattr(service, "attestation", None) is not None
     base_attested = bool(base_exists)
     if attestation_configured:
-        base_attested = verify_fast_identity(service.base_database, service.attestation)
-    overlay_configured = bool(service.overlay_database)
-    overlay_attested = bool(overlay_configured and service.overlay_database and service.overlay_database.exists())
-    if overlay_attested:
+        base_attested = verify_fast_identity(base_database, service.attestation)
+    overlay_database = getattr(service, "overlay_database", None)
+    overlay_configured = bool(overlay_database)
+    # An overlay cannot be attested from presence alone. Without the startup
+    # attestation, fail readiness closed rather than hashing the base on /health.
+    overlay_attested = bool(
+        overlay_configured and Path(overlay_database).exists() and base_attested and attestation_configured
+    )
+    if overlay_attested and attestation_configured:
         from .financial_overlay import overlay_matches_base
         overlay_attested = overlay_matches_base(
-            service.base_database,
-            service.overlay_database,
-            attestation=getattr(service, "attestation", None),
+            base_database,
+            Path(overlay_database),
+            attestation=service.attestation,
         )
-    ready = base_exists and base_attested and (not overlay_configured or overlay_attested)
+    search_database = getattr(service, "search_database", None)
+    search_configured = bool(search_database)
+    search_index_ready = not search_configured
+    if search_configured and base_attested and attestation_configured and Path(search_database).exists():
+        try:
+            from .search_index import SafeSearchIndex
+            SafeSearchIndex(
+                Path(search_database),
+                base_sha256=service.attestation.sha256,
+                expected_base_size=service.attestation.size_bytes,
+            )
+        except (OSError, ValueError, TypeError):
+            search_index_ready = False
+        else:
+            search_index_ready = True
+    ready = base_exists and base_attested and (not overlay_configured or overlay_attested) and search_index_ready
     return {
         "status": "ok" if ready else "degraded",
         "ready": ready,
@@ -61,6 +106,8 @@ def _health_status(service: Any) -> dict[str, Any]:
         "attestation_configured": attestation_configured,
         "overlay_configured": overlay_configured,
         "overlay_attested": overlay_attested,
+        "search_index_configured": search_configured,
+        "search_index_ready": search_index_ready,
     }
 
 
@@ -75,6 +122,7 @@ def create_app(agent: DisclosureAgent):
         question: str = Field(min_length=1)
         company: str | None = None
         as_of: str | None = None
+        limit: int = Field(default=20, ge=1, le=100)
 
     class SearchRequest(QueryRequest):
         limit: int = Field(default=20, ge=1, le=100)
@@ -133,6 +181,20 @@ def create_app(agent: DisclosureAgent):
         )
         return envelope({"facts": facts}, started)
 
+    @app.get("/v1/event-facts")
+    def event_facts(
+        company: str | None = None,
+        predicate: str | None = None,
+        as_of: str | None = None,
+        limit: int = Query(default=100, ge=1, le=100),
+    ) -> dict[str, Any]:
+        started = perf_counter()
+        service = agent.evidence_service
+        if not getattr(service, "overlay_database", None):
+            return envelope({"facts": [], "reason": "overlay_not_configured"}, started)
+        facts = _fetch_event_facts(service, company=company, predicate=predicate, as_of=as_of, limit=limit)
+        return envelope({"facts": facts}, started)
+
     @app.post("/v1/calculate")
     def calculation(request: CalculationRequest) -> dict[str, Any]:
         started = perf_counter()
@@ -144,6 +206,6 @@ def create_app(agent: DisclosureAgent):
     @app.post("/v1/answer")
     def answer(request: QueryRequest) -> dict[str, Any]:
         started = perf_counter()
-        return envelope(agent.answer(request.question, company=request.company, as_of=request.as_of), started)
+        return envelope(agent.answer(request.question, company=request.company, as_of=request.as_of, limit=request.limit), started)
 
     return app

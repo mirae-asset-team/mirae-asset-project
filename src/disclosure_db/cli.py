@@ -92,7 +92,7 @@ def _agent_parser() -> argparse.ArgumentParser:
     query.add_argument("--database", type=Path, required=True)
     query.add_argument("--overlay", type=Path)
     query.add_argument("--attestation", type=Path)
-    query.add_argument("--search-database", type=Path)
+    query.add_argument("--search-index", "--search-database", dest="search_database", type=Path)
     query.add_argument("--question", required=True)
     query.add_argument("--company")
     query.add_argument("--as-of")
@@ -117,7 +117,7 @@ def _agent_parser() -> argparse.ArgumentParser:
     serve.add_argument("--database", type=Path, required=True)
     serve.add_argument("--overlay", type=Path)
     serve.add_argument("--attestation", type=Path)
-    serve.add_argument("--search-database", type=Path)
+    serve.add_argument("--search-index", "--search-database", dest="search_database", type=Path)
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     return parser

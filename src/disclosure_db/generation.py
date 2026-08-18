@@ -8,7 +8,7 @@ import urllib.request
 from dataclasses import replace
 from typing import Any
 
-from .agent_contracts import AnswerDraft, EvidenceBundle
+from .agent_contracts import AnswerDraft, EvidenceBundle, to_jsonable
 
 
 UNANSWERABLE_TEXT = "검증 가능한 근거가 충분하지 않아 답변할 수 없습니다."
@@ -54,6 +54,7 @@ class HyperClovaGenerator:
     def generate(self, bundle: EvidenceBundle) -> AnswerDraft:
         if not self.api_key:
             return self.fallback.generate(bundle)
+        structured = bool(bundle.financial_facts or bundle.event_facts or bundle.calculation is not None)
         payload = {
             "model": self.model,
             "temperature": 0,
@@ -62,6 +63,9 @@ class HyperClovaGenerator:
                 {"role": "user", "content": json.dumps({
                     "question": bundle.question,
                     "evidence": [{"evidence_id": ref.evidence_id, "text": ref.text} for ref in bundle.evidence],
+                    "financial_facts": to_jsonable(bundle.financial_facts),
+                    "event_facts": to_jsonable(bundle.event_facts),
+                    "calculation": to_jsonable(bundle.calculation),
                     "schema": {"answer": "string", "citation_ids": ["string"], "numeric_values": ["string"], "answerable": True},
                 }, ensure_ascii=False)},
             ],
@@ -75,14 +79,39 @@ class HyperClovaGenerator:
                 data = json.loads(response.read().decode("utf-8"))
             content = data["choices"][0]["message"]["content"]
             if isinstance(content, str) and content.strip().startswith("```"):
-                content = content.strip().strip("`").replace("json\n", "", 1)
+                lines = content.strip().splitlines()
+                if lines and lines[0].strip().startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip() == "```":
+                    lines = lines[:-1]
+                content = "\n".join(lines)
             parsed: dict[str, Any] = json.loads(content) if isinstance(content, str) else content
+            required_keys = {"answer", "citation_ids", "numeric_values", "answerable"}
+            if not isinstance(parsed, dict) or set(parsed) != required_keys:
+                raise ValueError("hcx_output_schema_mismatch")
+            if (
+                not isinstance(parsed["answer"], str)
+                or not isinstance(parsed["citation_ids"], list)
+                or not all(isinstance(item, str) for item in parsed["citation_ids"])
+                or not isinstance(parsed["numeric_values"], list)
+                or not all(isinstance(item, str) for item in parsed["numeric_values"])
+                or not isinstance(parsed["answerable"], bool)
+            ):
+                raise ValueError("hcx_output_schema_mismatch")
             return AnswerDraft(
                 answer=str(parsed.get("answer", UNANSWERABLE_TEXT)),
                 citation_ids=[str(item) for item in parsed.get("citation_ids", [])],
                 numeric_values=[str(item) for item in parsed.get("numeric_values", [])],
-                answerable=bool(parsed.get("answerable", True)),
+                answerable=parsed["answerable"],
             )
         except Exception:
-            # A provider timeout or malformed response cannot turn into an answer.
-            return replace(self.fallback.generate(bundle), reason_codes=["hcx_fallback"])
+            # Structured values have a deterministic, evidence-bound fallback. A
+            # generic text response must abstain rather than echoing retrieved text.
+            if structured:
+                fallback = self.fallback.generate(bundle)
+                return replace(fallback, reason_codes=[*fallback.reason_codes, "hcx_fallback"])
+            return AnswerDraft(
+                answer=UNANSWERABLE_TEXT,
+                answerable=False,
+                reason_codes=[*bundle.reason_codes, "hcx_unavailable_for_text"],
+            )

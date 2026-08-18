@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from disclosure_db.attestation import load_distribution_attestation, verify_fast_identity
 from disclosure_db.agent import AgentSettings, DisclosureAgent
@@ -106,6 +107,52 @@ class AttestationTests(unittest.TestCase):
             self.assertTrue(answer.verified)
             self.assertFalse(answer.answerable)
             self.assertIn("base_attestation_failed", answer.reason_codes)
+
+    def test_health_reports_configured_missing_search_index_as_degraded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            database = root / "base.sqlite"
+            database.write_bytes(b"fixture")
+
+            class Service:
+                base_database = database
+                overlay_database = None
+                search_database = root / "missing-search.sqlite"
+                attestation = None
+
+            health = _health_status(Service())
+            self.assertFalse(health["search_index_ready"])
+            self.assertFalse(health["ready"])
+            self.assertEqual(health["status"], "degraded")
+
+    def test_health_reports_attested_overlay_mismatch_without_hashing_base(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            database = root / "base.sqlite"
+            overlay = root / "overlay.sqlite"
+            database.write_bytes(b"fixture")
+            overlay.write_bytes(b"overlay")
+            attestation = load_distribution_attestation(
+                root.joinpath("manifest.json").write_text(
+                    json.dumps({"database_version": "semantic-v1", "database": {"uncompressed_bytes": 7, "uncompressed_sha256": "a" * 64}}),
+                    encoding="utf-8",
+                ) and root / "manifest.json",
+                database=database,
+            )
+
+            class Service:
+                base_database = database
+                overlay_database = overlay
+                search_database = None
+
+            Service.attestation = attestation
+
+            with patch("disclosure_db.api.verify_fast_identity", return_value=True), patch(
+                "disclosure_db.financial_overlay.overlay_matches_base", return_value=False
+            ):
+                health = _health_status(Service())
+            self.assertFalse(health["overlay_attested"])
+            self.assertFalse(health["ready"])
 
 
 if __name__ == "__main__":

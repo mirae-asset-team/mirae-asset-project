@@ -24,6 +24,9 @@ class AgentSettings:
     attestation_path: Path | None = None
     search_database: Path | None = None
     reranker: object | None = None
+    # ``search_index`` is the public serving name; retain ``search_database``
+    # for compatibility with earlier callers.
+    search_index: Path | None = None
 
 
 class DisclosureAgent:
@@ -35,17 +38,21 @@ class DisclosureAgent:
         overlay_database: Path | None = None,
         attestation_path: Path | None = None,
         search_database: Path | None = None,
+        search_index: Path | None = None,
         evidence_service: EvidenceService | None = None,
         generator: object | None = None,
         reranker: object | None = None,
     ):
         configured_reranker = reranker
+        corpus_revision = "semantic-v1"
+        search_database = search_database or search_index
         if evidence_service is None:
             if settings is not None:
                 base_database = settings.base_database
                 overlay_database = settings.overlay_database
+                corpus_revision = settings.corpus_revision
                 attestation_path = settings.attestation_path
-                search_database = settings.search_database
+                search_database = settings.search_database or settings.search_index
                 if configured_reranker is None:
                     configured_reranker = settings.reranker
             if base_database is None:
@@ -56,6 +63,7 @@ class DisclosureAgent:
             evidence_service = EvidenceService(
                 base_database,
                 overlay_database,
+                corpus_revision=corpus_revision,
                 attestation=attestation,
                 search_database=search_database,
                 reranker=configured_reranker if configured_reranker is not None else ClovaReranker(),

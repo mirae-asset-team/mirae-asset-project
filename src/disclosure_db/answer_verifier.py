@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
 
-from .agent_contracts import AnswerDraft, EvidenceBundle, VerifiedAnswer
+from .agent_contracts import AnswerDraft, CitationRef, EvidenceBundle, VerifiedAnswer
 
 
 PROMPT_INJECTION_MARKERS = (
@@ -90,11 +90,37 @@ def verify_answer(bundle: EvidenceBundle, draft: AnswerDraft) -> VerifiedAnswer:
         if not draft.numeric_values:
             valid = False
             reasons.append("numeric_claim_missing")
+    # Citation metadata is corpus-owned.  Provider output can nominate IDs only;
+    # all fields are hydrated from the already-admitted evidence intersection.
+    safe_citation_ids: list[str] = []
+    seen_citations: set[str] = set()
+    for item in draft.citation_ids:
+        item = str(item)
+        if item in allowed and item not in seen_citations:
+            safe_citation_ids.append(item)
+            seen_citations.add(item)
+    evidence_by_id = {ref.evidence_id: ref for ref in bundle.evidence}
+    citations = [
+        CitationRef(
+            evidence_id=evidence_by_id[item].evidence_id,
+            filing_id=evidence_by_id[item].filing_id,
+            report_name=evidence_by_id[item].report_name,
+            filed_at=evidence_by_id[item].filed_at,
+            locator=dict(evidence_by_id[item].locator),
+        )
+        for item in safe_citation_ids
+    ]
+    stable_reasons: list[str] = []
+    for reason in reasons:
+        if reason not in stable_reasons:
+            stable_reasons.append(reason)
     return VerifiedAnswer(
         answer=draft.answer if valid else "검증에 실패하여 답변을 보류합니다.",
-        citation_ids=[item for item in draft.citation_ids if item in allowed],
+        citation_ids=safe_citation_ids,
         verified=valid,
         answerable=draft.answerable and valid,
-        reason_codes=reasons,
+        reason_codes=stable_reasons,
         numeric_values=list(draft.numeric_values),
+        citations=citations,
+        calculation=bundle.calculation,
     )
