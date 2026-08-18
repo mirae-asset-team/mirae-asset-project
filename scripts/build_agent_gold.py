@@ -107,6 +107,8 @@ def extract_fact_candidates(
     base: Path, config: dict[str, Any], limit: int | None = None
 ) -> list[dict[str, Any]]:
     """Extract explicitly allowlisted generic facts through read-only joins."""
+    if limit == 0:
+        return []
     value_to_id, id_to_types = _predicate_maps(config)
     predicates = sorted(value_to_id)
     if not predicates:
