@@ -19,7 +19,7 @@ def _seed_base(path: Path) -> None:
     connection = sqlite3.connect(path)
     create_schema(connection)
     filing_values = [
-        ("f_safe", "doc_safe", "00000001", "000001", "테스트", "테스트", "테스트", "IT", "IT", "periodic", "사업보고서", "사업보고서", "사업보고서", "사업보고서", "2024-01-01", 2023, 12, 0, "xml", 1),
+        ("f_safe", "doc_safe", "00000001", "000001", "테스트", "테스트상장", "테스트보고", "IT", "IT", "periodic", "사업보고서", "사업보고서", "사업보고서", "사업보고서", "2024-01-01", 2023, 12, 0, "xml", 1),
         ("f_unresolved", "doc_unresolved", "00000002", "000002", "테스트", "테스트", "테스트", "IT", "IT", "periodic", "사업보고서", "사업보고서", "사업보고서", "사업보고서", "2024-01-02", 2023, 12, 0, "xml", 1),
         ("f_pdf", "doc_pdf", "00000003", "000003", "테스트", "테스트", "테스트", "IT", "IT", "periodic", "사업보고서", "사업보고서", "사업보고서", "사업보고서", "2024-01-03", 2023, 12, 0, "pdf", 1),
     ]
@@ -74,6 +74,42 @@ class SearchIndexTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "base attestation"):
             SafeSearchIndex(self.index, base_sha256="b" * 64)
 
+    def test_metadata_revision_mismatch_refuses_index(self) -> None:
+        build_search_index(self.base, self.index, self.attestation)
+        connection = sqlite3.connect(self.index)
+        connection.execute("UPDATE index_revision SET revision='unknown-schema'")
+        connection.commit()
+        connection.close()
+        with self.assertRaisesRegex(ValueError, "revision"):
+            SafeSearchIndex(self.index, base_sha256=self.attestation.sha256, expected_base_size=self.attestation.size_bytes)
+
+    def test_metadata_base_size_mismatch_refuses_index(self) -> None:
+        build_search_index(self.base, self.index, self.attestation)
+        connection = sqlite3.connect(self.index)
+        connection.execute("UPDATE index_revision SET base_size_bytes=base_size_bytes+1")
+        connection.commit()
+        connection.close()
+        with self.assertRaisesRegex(ValueError, "size"):
+            SafeSearchIndex(self.index, base_sha256=self.attestation.sha256, expected_base_size=self.attestation.size_bytes)
+
+    def test_metadata_row_count_mismatch_refuses_index(self) -> None:
+        build_search_index(self.base, self.index, self.attestation)
+        connection = sqlite3.connect(self.index)
+        connection.execute("UPDATE index_revision SET row_count=row_count+1")
+        connection.commit()
+        connection.close()
+        with self.assertRaisesRegex(ValueError, "row count"):
+            SafeSearchIndex(self.index, base_sha256=self.attestation.sha256, expected_base_size=self.attestation.size_bytes)
+
+    def test_index_row_deletion_refuses_index(self) -> None:
+        build_search_index(self.base, self.index, self.attestation)
+        connection = sqlite3.connect(self.index)
+        connection.execute("DELETE FROM search_document WHERE evidence_id='ev_safe'")
+        connection.commit()
+        connection.close()
+        with self.assertRaisesRegex(ValueError, "row count"):
+            SafeSearchIndex(self.index, base_sha256=self.attestation.sha256, expected_base_size=self.attestation.size_bytes)
+
     def test_atomic_failure_preserves_existing_index(self) -> None:
         build_search_index(self.base, self.index, self.attestation)
         before = self.index.read_bytes()
@@ -96,12 +132,59 @@ class SearchIndexTests(unittest.TestCase):
         self.assertEqual([row["evidence_id"] for row in index.search("계약금액", company="테스트", as_of="2024-01-01")], ["ev_safe"])
         self.assertEqual([row["evidence_id"] for row in index.search("계약금액", company="테스트", as_of=None)], ["ev_unresolved"])
 
+    def test_correction_policy_original_ignores_current_flag(self) -> None:
+        connection = sqlite3.connect(self.base)
+        connection.execute("UPDATE filing_version SET is_current=0 WHERE filing_id='f_safe'")
+        connection.commit()
+        connection.close()
+        self.attestation = CorpusAttestation(hashlib.sha256(self.base.read_bytes()).hexdigest(), self.base.stat().st_size, self.base.stat().st_mtime_ns, "semantic-v1")
+        build_search_index(self.base, self.index, self.attestation)
+        index = SafeSearchIndex(self.index, base_sha256=self.attestation.sha256, expected_base_size=self.attestation.size_bytes)
+        self.assertEqual(index.search("계약금액", company="테스트", as_of=None), [])
+        self.assertEqual([row["evidence_id"] for row in index.search("계약금액", company="테스트", as_of=None, correction_policy="original")], ["ev_safe"])
+
+    def test_company_aliases_filter_index(self) -> None:
+        build_search_index(self.base, self.index, self.attestation)
+        index = SafeSearchIndex(self.index, base_sha256=self.attestation.sha256, expected_base_size=self.attestation.size_bytes)
+        for alias in ("테스트상장", "테스트보고", "000001", "00000001"):
+            with self.subTest(alias=alias):
+                self.assertEqual([row["evidence_id"] for row in index.search("계약금액", company=alias, as_of=None)], ["ev_safe"])
+
+    def test_empty_query_returns_no_results(self) -> None:
+        build_search_index(self.base, self.index, self.attestation)
+        index = SafeSearchIndex(self.index, base_sha256=self.attestation.sha256, expected_base_size=self.attestation.size_bytes)
+        self.assertEqual(index.search("!!!", company="테스트", as_of=None), [])
+
+    def test_empty_query_does_not_broaden_ssot_fallback(self) -> None:
+        service = EvidenceService(self.base, attestation=self.attestation, search_database=self.index)
+        with patch("disclosure_db.evidence_service.query_database", side_effect=AssertionError("broad fallback")):
+            bundle = service.search(QueryPlan("!!!", company="테스트"))
+        self.assertFalse(bundle.evidence)
+        self.assertIn("empty_search_query", bundle.reason_codes)
+
     def test_evidence_service_uses_valid_index_without_ssot_fallback(self) -> None:
         build_search_index(self.base, self.index, self.attestation)
         service = EvidenceService(self.base, attestation=self.attestation, search_database=self.index)
         with patch("disclosure_db.evidence_service.query_database", side_effect=AssertionError("SSOT fallback")):
             bundle = service.search(QueryPlan("테스트 계약금액", company="테스트"))
         self.assertEqual([ref.evidence_id for ref in bundle.evidence], ["ev_safe"])
+
+    def test_evidence_service_falls_back_when_index_metadata_drifts(self) -> None:
+        build_search_index(self.base, self.index, self.attestation)
+        connection = sqlite3.connect(self.index)
+        connection.execute("UPDATE index_revision SET row_count=row_count+1")
+        connection.commit()
+        connection.close()
+        service = EvidenceService(self.base, attestation=self.attestation, search_database=self.index)
+        with patch("disclosure_db.evidence_service.query_database", return_value=[{
+            "evidence_id": "ev_safe", "filing_id": "f_safe", "source_id": "s_safe",
+            "text_normalized": "계약금액", "locator_json": "{}", "lineage_status": "root",
+            "score": 1.0, "detected_format": "xml", "image_reference_count": 0,
+            "filed_at": "2024-01-01", "report_name_raw": "사업보고서", "is_current": 1,
+        }]) as fallback:
+            bundle = service.search(QueryPlan("테스트 계약금액", company="테스트"))
+        self.assertTrue(fallback.called)
+        self.assertIn("search_index_attestation_mismatch", bundle.reason_codes)
 
     def test_evidence_service_falls_back_when_index_is_corrupt(self) -> None:
         self.index.write_bytes(b"not sqlite")

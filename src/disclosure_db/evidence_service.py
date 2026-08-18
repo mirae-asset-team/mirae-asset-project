@@ -12,7 +12,7 @@ from .attestation import CorpusAttestation, verify_fast_identity
 from .agent_contracts import EvidenceBundle, EvidenceRef, QueryPlan
 from .financial_overlay import fetch_event_facts, fetch_overlay_facts, overlay_matches_base
 from .pipeline import query_database
-from .retrieval_evaluation import compile_retrieval_query
+from .retrieval_evaluation import compile_retrieval_query, retrieval_tokens
 
 
 _PROMPT_INJECTION_MARKERS = (
@@ -138,17 +138,25 @@ class EvidenceService:
                             raise ValueError("search index requires base attestation")
                         from .search_index import SafeSearchIndex
                         rows = SafeSearchIndex(
-                            self.search_database, base_sha256=self.attestation.sha256,
+                            self.search_database,
+                            base_sha256=self.attestation.sha256,
+                            expected_base_size=self.attestation.size_bytes,
                         ).search(
                             plan.question,
                             company=plan.company,
                             as_of=version_as_of,
                             limit=max(1, limit - len(refs)),
+                            correction_policy=plan.correction_policy,
                         )
                         # A valid index is authoritative for this retrieval attempt,
                         # including a valid empty result; never silently mix it with
                         # an unsafe partial corpus result.
-                        refs.extend(self._fragment_refs(rows))
+                        try:
+                            retrieval_tokens(plan.question, company_names=[plan.company] if plan.company else None)
+                        except ValueError:
+                            plan.reason_codes.append("empty_search_query")
+                        else:
+                            refs.extend(self._fragment_refs(rows))
                         index_used = True
                     except ValueError:
                         plan.reason_codes.append("search_index_attestation_mismatch")
@@ -162,15 +170,16 @@ class EvidenceService:
                 try:
                     query = compile_retrieval_query(plan.question, company_names=[plan.company] if plan.company else self.company_candidates())
                 except ValueError:
-                    query = " OR ".join(f'"{term}"' for term in plan.account_terms) or '"공시"'
-                rows = query_database(
-                    self.base_database,
-                    query,
-                    company=plan.company,
-                    limit=max(1, limit - len(refs)),
-                    as_of=version_as_of,
-                )
-                refs.extend(self._fragment_refs(rows))
+                    plan.reason_codes.append("empty_search_query")
+                else:
+                    rows = query_database(
+                        self.base_database,
+                        query,
+                        company=plan.company,
+                        limit=max(1, limit - len(refs)),
+                        as_of=version_as_of,
+                    )
+                    refs.extend(self._fragment_refs(rows))
         unique: list[EvidenceRef] = []
         seen: set[str] = set()
         for ref in refs:
