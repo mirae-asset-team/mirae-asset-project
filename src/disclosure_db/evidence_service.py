@@ -121,6 +121,19 @@ class EvidenceService:
                     expanded.extend(aliases)
         return list(dict.fromkeys(expanded))
 
+    @staticmethod
+    def _select_correction_chain(facts: list[dict[str, object]]) -> list[dict[str, object]]:
+        groups: dict[str, list[dict[str, object]]] = {}
+        for fact in facts:
+            event_id = str(fact.get("event_id") or "")
+            if event_id:
+                groups.setdefault(event_id, []).append(fact)
+        chains = [group for group in groups.values() if len(group) > 1]
+        if not chains:
+            return facts
+        selected = max(chains, key=lambda group: (len(group), str(group[0].get("event_id"))))
+        return sorted(selected, key=lambda fact: (str(fact.get("effective_from") or ""), str(fact.get("filing_id") or "")))
+
     def _reporter_value_refs(
         self,
         plan: QueryPlan,
@@ -235,6 +248,8 @@ class EvidenceService:
                 correction_policy=plan.correction_policy,
                 attestation=self.attestation,
             )
+            if plan.correction_policy == "both":
+                event_facts = self._select_correction_chain(event_facts)
             event_facts, structured_refs = self._hydrate_facts(
                 event_facts, as_of=version_as_of, correction_policy=plan.correction_policy,
             )
@@ -432,6 +447,11 @@ class EvidenceService:
             if as_of is not None:
                 version_sql += " AND v.effective_from<=? AND (v.effective_to IS NULL OR ? < v.effective_to)"
                 version_params = [as_of, as_of]
+        elif correction_policy == "both":
+            version_sql, version_params = "v.lineage_status IN ('root','resolved')", []
+            if as_of is not None:
+                version_sql += " AND v.effective_from<=?"
+                version_params = [as_of]
         elif as_of is None:
             version_sql, version_params = "v.lineage_status IN ('root','resolved') AND v.is_current=1", []
         else:

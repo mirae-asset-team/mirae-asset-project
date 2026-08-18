@@ -25,7 +25,11 @@ def _claim_citation_ids(bundle: EvidenceBundle) -> list[str]:
     if bundle.financial_facts:
         return _known_ids(bundle, bundle.financial_facts[0].get("evidence_ids", []))
     if bundle.event_facts:
-        return _known_ids(bundle, bundle.event_facts[0].get("evidence_ids", []))
+        facts = bundle.event_facts if len(bundle.event_facts) > 1 else bundle.event_facts[:1]
+        return _known_ids(
+            bundle,
+            [evidence_id for fact in facts for evidence_id in fact.get("evidence_ids", [])],
+        )
     return [bundle.evidence[0].evidence_id] if bundle.evidence else []
 
 
@@ -50,10 +54,14 @@ class DeterministicGenerator:
             numeric_values = [str(fact.get("value_numeric", ""))]
             answer = f"{fact.get('account_name_raw', '해당 항목')}은(는) {fact.get('value_numeric')} {fact.get('unit_raw') or fact.get('currency') or ''}입니다.".strip()
         elif bundle.event_facts:
-            fact = bundle.event_facts[0]
+            facts = list(bundle.event_facts)
+            fact = facts[0]
+            values = [str(item.get("value_numeric")) for item in facts if item.get("value_numeric") is not None]
             value = str(fact.get("value_numeric") or fact.get("value_raw") or "")
-            numeric_values = [value] if fact.get("value_numeric") is not None else []
-            if fact.get("answer_kind") == "text":
+            numeric_values = values
+            if len(values) > 1:
+                answer = "확인된 값은 " + ", ".join(values) + "입니다."
+            elif fact.get("answer_kind") == "text":
                 answer = value
             else:
                 answer = f"{fact.get('predicate_raw') or fact.get('predicate_id')}은(는) {value} {fact.get('unit') or ''}입니다.".strip()

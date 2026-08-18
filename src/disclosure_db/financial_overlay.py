@@ -820,6 +820,12 @@ def fetch_event_facts(
         if as_of is not None:
             version_sql += " AND v.effective_from<=? AND (v.effective_to IS NULL OR ? < v.effective_to)"
             version_params = [as_of, as_of]
+    elif correction_policy == "both":
+        version_sql = "v.lineage_status IN ('root','resolved')"
+        version_params = []
+        if as_of is not None:
+            version_sql += " AND v.effective_from<=?"
+            version_params = [as_of]
     elif correction_policy == "corrected":
         version_sql += " AND f.is_correction=1"
     where = [
@@ -848,7 +854,7 @@ def fetch_event_facts(
             connection.execute("ATTACH DATABASE ? AS overlay", (str(Path(overlay_database).resolve()),))
             rows = connection.execute(
                 f"""SELECT ef.*,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,
-                           v.lineage_status,v.is_current,
+                           v.event_id,v.effective_from,v.effective_to,v.lineage_status,v.is_current,
                            group_concat(DISTINCT efe.evidence_id) evidence_ids,
                            json_group_array(DISTINCT c.text_raw) evidence_texts
                       FROM overlay.event_fact ef

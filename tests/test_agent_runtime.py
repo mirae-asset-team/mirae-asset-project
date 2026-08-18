@@ -252,6 +252,23 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(answer.numeric_values, ["2000"])
         self.assertEqual(answer.citation_ids, ["ev1"])
 
+    def test_deterministic_generator_returns_all_numeric_event_facts(self) -> None:
+        bundle = EvidenceBundle(
+            question="최초 공시와 정정 후 각각 얼마인가?",
+            evidence=[
+                EvidenceRef("ev_original", "f1", "s1", "최초 100원"),
+                EvidenceRef("ev_corrected", "f2", "s2", "정정 200원"),
+            ],
+            answerable=True,
+            event_facts=[
+                {"answer_kind": "numeric", "value_numeric": "100", "unit": "원", "evidence_ids": ["ev_original"]},
+                {"answer_kind": "numeric", "value_numeric": "200", "unit": "원", "evidence_ids": ["ev_corrected"]},
+            ],
+        )
+        draft = DeterministicGenerator().generate(bundle)
+        self.assertEqual(draft.numeric_values, ["100", "200"])
+        self.assertEqual(draft.citation_ids, ["ev_original", "ev_corrected"])
+
     def test_numeric_text_claim_without_trusted_fact_fails_closed(self) -> None:
         class Service:
             def company_candidates(self):

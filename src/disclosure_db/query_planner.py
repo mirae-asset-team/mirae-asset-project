@@ -65,7 +65,9 @@ def plan_query(
         operation = "lookup"
     scope = "consolidated" if "연결" in text else "separate" if "별도" in text else None
     correction_policy = "original" if "최초" in text or "원문" in text else "current"
-    if "정정" in text:
+    if "최초" in text and "정정" in text:
+        correction_policy = "both"
+    elif "정정" in text:
         correction_policy = "corrected"
     account_terms = []
     for term in ("매출액", "영업이익", "당기순이익", "자산총계", "부채총계", "자본총계", "현금및현금성자산"):
