@@ -90,16 +90,18 @@ def plan_query(
         reason_codes.append("out_of_scope_question")
     elif question_type == "text" and any(term in text for term in ("얼마", "금액", "몇", "수량", "가격", "증가", "감소")):
         question_type = "numeric"
-    if question_type == "numeric" and any(term in text for term in ("계약금액", "공급계약", "보유주식", "발행주식", "자기주식", "신주", "권리")):
+    if question_type == "numeric" and any(term in text for term in ("계약금액", "공급계약", "보유주식", "발행주식", "보통주식", "자기주식", "신주", "권리")):
         question_type = "event_numeric"
         reason_codes.append("event_fact_required")
     event_terms = [
         term for term in (
             "계약금액", "계약상대", "계약상대방", "발행주식", "발행주식수",
-            "신주", "자기주식", "보유주식",
+            "보통주식", "신주", "자기주식", "보유주식",
         )
         if term in text
     ]
+    if "보통주식" in text and "issued_shares" not in event_terms:
+        event_terms.append("issued_shares")
     if question_type in {"adversarial", "out_of_scope"}:
         fact_domain = "none"
     elif account_terms:
