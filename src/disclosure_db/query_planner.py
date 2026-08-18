@@ -68,7 +68,7 @@ def plan_query(
         "BS" if any(term in text for term in ("자산", "부채", "자본", "현금및현금성자산")) else None
     )
     question_type = "numeric" if operation != "lookup" or account_terms else "text"
-    if any(marker in text.casefold() for marker in ("ignore previous", "system prompt", "이전 지시를 무시", "지시를 무시", "시스템 프롬프트")):
+    if any(marker in text.casefold() for marker in ("ignore previous", "ignore all previous", "system prompt", "developer message", "이전 지시를 무시", "지시를 무시", "시스템 프롬프트")):
         question_type = "adversarial"
         reason_codes.append("prompt_injection_question")
     elif any(term in text for term in ("주가", "목표주가", "내년", "예상", "전망")):
