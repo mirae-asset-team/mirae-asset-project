@@ -269,3 +269,10 @@
 - GREEN: incomplete answerable sources now become explicit abstention cases rather than unsafe numeric/text cases. Added deterministic case generation, group-disjoint holdout splitting, atomic JSONL output, and provenance manifest CLI.
 - Verification: `tests.test_agent_stress` → 6 passed. Two builds from reversed-equivalent input produced identical output SHA-256 `5279beb78b0a2fb05c800e21b6820c976a28f4de2aab33e5d2b6eaf15c453507`; 300 unique cases, exact allocation, 31 groups, zero group leakage in the split test.
 - Actual D-run: `D:\mirae-asset-project\runs\evaluation\agent_stress_300.jsonl` was generated with the same output SHA. Manifest `data/derived/agent_stress_300_manifest.json` records input SHA `04377097c8aa0f159b87c26c787d0d0bf84a1579cf5e07d6f94fd9cfc9e2d681`, generator commit `f185a606`, and no question/answer text.
+
+## 2026-08-19T05:08:00+09:00 — Plan 3 Task 3: deterministic stress scoring
+
+- Intent: score exact numeric/text/multi-numeric, abstention, metamorphic, citation, and safety outcomes without an LLM judge.
+- RED: scorer tests initially failed because `disclosure_db.stress_evaluation` did not exist.
+- GREEN: added `CaseScore`, oracle-specific deterministic scoring, metamorphic consistency checks, failure-cause precedence, and aggregate hard-gate counters. Unknown/cross-filing citations and false numeric claims remain failures.
+- Verification: `python -m unittest tests.test_agent_stress -v` → 9 passed.

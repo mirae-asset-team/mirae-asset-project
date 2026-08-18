@@ -189,7 +189,7 @@ git commit -m "test: generate deterministic disclosure stress cases"
 - Produces: `classify_failure(case, answer, score) -> str`
 - Produces: `aggregate_scores(scores, contract) -> dict`
 
-- [ ] **Step 1: Write failing scorer tests**
+- [x] **Step 1: Write failing scorer tests**
 
 ```python
 def test_exact_numeric_requires_answerability_value_unit_and_required_evidence(self):
@@ -206,13 +206,13 @@ def test_metamorphic_group_requires_same_answerability_value_and_core_evidence(s
     self.assertFalse(score_metamorphic_group([base_result, changed_value_result]).passed)
 ```
 
-- [ ] **Step 2: Run and confirm missing evaluator module**
+- [x] **Step 2: Run and confirm missing evaluator module**
 
 Run: `python -m unittest tests.test_agent_stress -v`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement oracle-specific deterministic rules**
+- [x] **Step 3: Implement oracle-specific deterministic rules**
 
 `exact` compares normalized Decimal strings, unit, answerability, verified flag, and required evidence inclusion. `abstention` requires false answerability with empty numeric/citations. `lineage` compares filing IDs against required version/as-of set. `fault` requires unavailable/not-ready with no answer claim. `metamorphic` is scored after all group members finish.
 
@@ -228,11 +228,11 @@ CAUSE_ORDER = (
 
 Never convert `unclassified` into pass.
 
-- [ ] **Step 4: Implement aggregate hard/quality gates**
+- [x] **Step 4: Implement aggregate hard/quality gates**
 
 Aggregate exact counts and denominators. Missing metrics are failures, not zero or pass. Provider-only metrics are `not_measured` when unconfigured and make final provider readiness false.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `python -m unittest tests.test_agent_stress tests.test_agent_evaluation tests.test_retrieval_evaluation -v`
 

@@ -11,6 +11,7 @@ from disclosure_db.stress_generation import (
     validate_stress_case,
     validate_stress_cases,
 )
+from disclosure_db.stress_evaluation import score_case, score_metamorphic_group
 
 
 def valid_case() -> dict[str, object]:
@@ -104,6 +105,29 @@ class AgentStressContractTests(unittest.TestCase):
                 {case["stress"]["group_id"] for case in holdout}
             )
         )
+
+    def test_exact_numeric_requires_answerability_value_unit_and_required_evidence(self) -> None:
+        case = valid_case()
+        verified = {"answerable": True, "verified": True, "answer": case["answer"], "citations": ["ev1"]}
+        self.assertTrue(score_case(case, verified).passed)
+        wrong = copy.deepcopy(verified)
+        wrong["answer"]["value"] = "11"  # type: ignore[index]
+        self.assertFalse(score_case(case, wrong).passed)
+
+    def test_abstention_rejects_numeric_or_citations(self) -> None:
+        case = valid_case()
+        case["answerability"] = "unanswerable"
+        case["answer"] = {"kind": "unanswerable", "reason": "없음"}
+        case["evidence"] = []
+        bad = {"answerable": True, "verified": True, "answer": {"kind": "numeric", "value": "1"}, "citations": ["ev1"]}
+        score = score_case(case, bad)
+        self.assertFalse(score.passed)
+        self.assertIn("false_numeric_claim", score.failures)
+
+    def test_metamorphic_group_requires_same_answerability_value_and_core_evidence(self) -> None:
+        base = {"answerable": True, "value": "10", "unit": "원", "evidence_ids": ["ev1"]}
+        changed_value = {"answerable": True, "value": "11", "unit": "원", "evidence_ids": ["ev1"]}
+        self.assertFalse(score_metamorphic_group([base, changed_value]).passed)
 
 
 if __name__ == "__main__":
