@@ -14,6 +14,56 @@ from .calculator import calculate
 from .query_planner import plan_query
 
 
+def _fetch_financial_facts(
+    service: Any,
+    *,
+    filing_id: str | None = None,
+    company: str | None = None,
+    account_id: str | None = None,
+    as_of: str | None = None,
+    limit: int = 100,
+) -> list[dict[str, object]]:
+    if not getattr(service, "overlay_database", None):
+        return []
+    from .financial_overlay import fetch_overlay_facts
+    return fetch_overlay_facts(
+        service.base_database,
+        service.overlay_database,
+        filing_id=filing_id,
+        company=company,
+        account_id=account_id,
+        as_of=as_of,
+        limit=limit,
+        attestation=getattr(service, "attestation", None),
+    )
+
+
+def _health_status(service: Any) -> dict[str, Any]:
+    base_exists = service.base_database.exists()
+    attestation_configured = getattr(service, "attestation", None) is not None
+    base_attested = bool(base_exists)
+    if attestation_configured:
+        base_attested = verify_fast_identity(service.base_database, service.attestation)
+    overlay_configured = bool(service.overlay_database)
+    overlay_attested = bool(overlay_configured and service.overlay_database and service.overlay_database.exists())
+    if overlay_attested:
+        from .financial_overlay import overlay_matches_base
+        overlay_attested = overlay_matches_base(
+            service.base_database,
+            service.overlay_database,
+            attestation=getattr(service, "attestation", None),
+        )
+    ready = base_exists and base_attested and (not overlay_configured or overlay_attested)
+    return {
+        "status": "ok" if ready else "degraded",
+        "ready": ready,
+        "base_attested": base_attested,
+        "attestation_configured": attestation_configured,
+        "overlay_configured": overlay_configured,
+        "overlay_attested": overlay_attested,
+    }
+
+
 def create_app(agent: DisclosureAgent):
     try:
         from fastapi import FastAPI, HTTPException, Query
@@ -53,19 +103,7 @@ def create_app(agent: DisclosureAgent):
     @app.get("/health")
     def health() -> dict[str, Any]:
         started = perf_counter()
-        service = agent.evidence_service
-        base_exists = service.base_database.exists()
-        attestation_configured = getattr(service, "attestation", None) is not None
-        base_attested = bool(base_exists)
-        if attestation_configured:
-            base_attested = verify_fast_identity(service.base_database, service.attestation)
-        overlay_configured = bool(service.overlay_database)
-        overlay_attested = bool(overlay_configured and service.overlay_database and service.overlay_database.exists())
-        if overlay_attested:
-            from .financial_overlay import overlay_matches_base
-            overlay_attested = overlay_matches_base(service.base_database, service.overlay_database, attestation=getattr(service, "attestation", None))  # type: ignore[arg-type]
-        ready = base_exists and base_attested and (not overlay_configured or overlay_attested)
-        return envelope({"status": "ok" if ready else "degraded", "ready": ready, "base_attested": base_attested, "attestation_configured": attestation_configured, "overlay_configured": overlay_configured, "overlay_attested": overlay_attested}, started)
+        return envelope(_health_status(agent.evidence_service), started)
 
     @app.post("/v1/query/plan")
     def query_plan(request: QueryRequest) -> dict[str, Any]:
@@ -85,8 +123,14 @@ def create_app(agent: DisclosureAgent):
         service = agent.evidence_service
         if not getattr(service, "overlay_database", None):
             return envelope({"facts": [], "reason": "overlay_not_configured"}, started)
-        from .financial_overlay import fetch_overlay_facts
-        facts = fetch_overlay_facts(service.base_database, service.overlay_database, filing_id=filing_id, company=company, account_id=account_id, as_of=as_of, limit=limit)
+        facts = _fetch_financial_facts(
+            service,
+            filing_id=filing_id,
+            company=company,
+            account_id=account_id,
+            as_of=as_of,
+            limit=limit,
+        )
         return envelope({"facts": facts}, started)
 
     @app.post("/v1/calculate")

@@ -12,6 +12,7 @@ from disclosure_db.attestation import load_distribution_attestation
 from disclosure_db.schema import create_schema
 from disclosure_db.financial_overlay import FinancialOverlay, import_seed, fetch_overlay_facts, overlay_matches_base
 from disclosure_db.agent import AgentSettings, DisclosureAgent
+from disclosure_db.api import _fetch_financial_facts
 
 
 def seed_base(path: Path) -> None:
@@ -141,6 +142,30 @@ class FinancialOverlayTests(unittest.TestCase):
             attestation = load_distribution_attestation(manifest, database=base)
             with patch("disclosure_db.financial_overlay.sha256_file", side_effect=AssertionError("request hash")):
                 self.assertTrue(overlay_matches_base(base, overlay, attestation=attestation))
+
+    def test_api_attested_financial_facts_never_hashes_request_database(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay, seed, manifest = (root / name for name in ("base.sqlite", "overlay.sqlite", "seed.jsonl", "manifest.json"))
+            seed_base(base)
+            seed.write_text("", encoding="utf-8")
+            import_seed(base, overlay, seed)
+            manifest.write_text(json.dumps({
+                "database_version": "semantic-v1",
+                "database": {
+                    "uncompressed_bytes": base.stat().st_size,
+                    "uncompressed_sha256": hashlib.sha256(base.read_bytes()).hexdigest(),
+                },
+            }), encoding="utf-8")
+            agent = DisclosureAgent(AgentSettings(
+                base_database=base,
+                overlay_database=overlay,
+                attestation_path=manifest,
+                use_hcx=False,
+            ))
+            with patch("disclosure_db.financial_overlay.sha256_file", side_effect=AssertionError("request hash")):
+                facts = _fetch_financial_facts(agent.evidence_service, limit=1)
+            self.assertEqual(facts, [])
 
 
 if __name__ == "__main__":

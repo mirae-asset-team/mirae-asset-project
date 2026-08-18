@@ -28,11 +28,16 @@ def load_distribution_attestation(path: Path, *, database: Path) -> CorpusAttest
     size_bytes = int(section["uncompressed_bytes"])
     if size_bytes < 0:
         raise ValueError("distribution attestation requires a non-negative database size")
-    stat = Path(database).stat()
+    try:
+        mtime_ns: int | None = int(Path(database).stat().st_mtime_ns)
+    except OSError:
+        # Keep the manifest validated and let the readiness check fail closed until
+        # the distributed database is present.
+        mtime_ns = None
     return CorpusAttestation(
         sha256=sha256,
         size_bytes=size_bytes,
-        mtime_ns=int(stat.st_mtime_ns),
+        mtime_ns=mtime_ns,
         revision=str(payload.get("database_version") or "unknown"),
     )
 

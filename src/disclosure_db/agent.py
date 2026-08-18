@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .attestation import CorpusAttestation, load_distribution_attestation
-from .agent_contracts import VerifiedAnswer
+from .attestation import CorpusAttestation, load_distribution_attestation, verify_fast_identity
+from .agent_contracts import EvidenceBundle, VerifiedAnswer
 from .answer_verifier import verify_answer
 from .calculator import calculate
 from .evidence_service import EvidenceService
@@ -57,6 +57,14 @@ class DisclosureAgent:
         self.generator = generator or (HyperClovaGenerator() if settings is None or settings.use_hcx else DeterministicGenerator())
 
     def answer(self, question: str, *, company: str | None = None, as_of: str | None = None, limit: int = 20) -> VerifiedAnswer:
+        attestation = getattr(self.evidence_service, "attestation", None)
+        if attestation is not None and not verify_fast_identity(self.evidence_service.base_database, attestation):
+            bundle = EvidenceBundle(
+                question=question,
+                answerable=False,
+                reason_codes=["base_attestation_failed"],
+            )
+            return verify_answer(bundle, self.generator.generate(bundle))  # type: ignore[union-attr]
         candidates = self.evidence_service.company_candidates()
         query_plan = plan_query(question, company_candidates=candidates, company_hint=company, as_of=as_of)
         bundle = self.evidence_service.search(query_plan, limit=limit)
