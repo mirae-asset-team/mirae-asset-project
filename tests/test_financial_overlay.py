@@ -5,12 +5,20 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
 from disclosure_db.attestation import load_distribution_attestation
 from disclosure_db.schema import create_schema
-from disclosure_db.financial_overlay import FinancialOverlay, import_seed, fetch_overlay_facts, overlay_matches_base
+from disclosure_db.financial_overlay import (
+    FinancialOverlay,
+    build_agent_overlay,
+    fetch_event_facts,
+    import_seed,
+    fetch_overlay_facts,
+    overlay_matches_base,
+)
 from disclosure_db.agent import AgentSettings, DisclosureAgent
 from disclosure_db.api import _fetch_financial_facts
 
@@ -44,11 +52,122 @@ def seed_base(path: Path) -> None:
         """INSERT INTO table_cell VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         ("c1", "t1", "s1", "f1", 0, 0, 1, 1, "data", "[]", "[]", "{}", "매출액 1,000", "매출액 1,000", "1"),
     )
+    connection.execute(
+        "INSERT INTO table_cell VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("c2", "t1", "s1", "f1", 1, 0, 1, 1, "data", "[]", "[]", "{}", "계약금액 2,000원", "계약금액 2,000원", "1"),
+    )
+    connection.execute(
+        "INSERT INTO fact VALUES(?,?,?,?,?,?,?,?,?)",
+        ("fact1", "f1", "event_kv_candidate", "테스트", "계약금액", "2000", "원", "parser", "candidate"),
+    )
+    connection.execute("INSERT INTO fact_evidence VALUES('fact1','c2')")
     connection.commit()
     connection.close()
 
 
 class FinancialOverlayTests(unittest.TestCase):
+    def test_agent_overlay_imports_allowlisted_event_fact_with_trust_tier(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base = root / "base.sqlite"
+            overlay = root / "agent.sqlite"
+            seed = root / "financial.jsonl"
+            predicates = root / "predicates.json"
+            seed_base(base)
+            seed.write_text("", encoding="utf-8")
+            predicates.write_text(json.dumps({
+                "predicates": [{
+                    "id": "contract_amount",
+                    "answer_kind": "numeric",
+                    "allowed_fact_types": ["event_kv_candidate"],
+                    "predicate_values": ["계약금액"],
+                }],
+            }, ensure_ascii=False), encoding="utf-8")
+            result = build_agent_overlay(base, overlay, seed, predicates)
+            self.assertEqual(result.event_imported, 1)
+            rows = fetch_event_facts(base, overlay, company="테스트", predicate_terms=["계약금액"])
+            self.assertEqual(rows[0]["value_numeric"], "2000")
+            self.assertEqual(rows[0]["trust_tier"], "agent_audited")
+            self.assertEqual(rows[0]["evidence_ids"], ["c2"])
+
+    def test_agent_overlay_audits_numeric_and_evidence_rejections(self) -> None:
+        cases = (
+            ("not-a-number", "원", "event_numeric_not_decimal"),
+            ("NaN", "원", "event_numeric_not_finite"),
+            ("2000", None, "event_numeric_unit_missing"),
+            ("2000", "원/달러", "event_numeric_unit_ambiguous"),
+        )
+        for value_raw, unit, reason in cases:
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                base, overlay = root / "base.sqlite", root / "agent.sqlite"
+                seed, predicates = root / "financial.jsonl", root / "predicates.json"
+                seed_base(base)
+                with closing(sqlite3.connect(base)) as connection:
+                    connection.execute("UPDATE fact SET value_raw=?,unit=? WHERE fact_id='fact1'", (value_raw, unit))
+                    connection.commit()
+                seed.write_text("", encoding="utf-8")
+                predicates.write_text(json.dumps({"predicates": [{
+                    "id": "contract_amount", "answer_kind": "numeric",
+                    "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약금액"],
+                }]}, ensure_ascii=False), encoding="utf-8")
+                result = build_agent_overlay(base, overlay, seed, predicates)
+                self.assertEqual(result.event_imported, 0)
+                self.assertTrue(any(reason in item for item in result.reasons))
+                with closing(sqlite3.connect(overlay)) as connection:
+                    self.assertEqual(connection.execute("SELECT reason_code FROM build_reject").fetchone()[0], reason)
+                self.assertEqual(fetch_event_facts(base, overlay), [])
+
+    def test_agent_overlay_audits_pdf_parse_and_lineage_rejections(self) -> None:
+        cases = (("source_document", "parse_status", "failed", "event_parse_failure"),
+                 ("source_document", "detected_format", "pdf", "event_pdf_evidence"),
+                 ("filing_version", "lineage_status", "unresolved", "event_unsafe_lineage"))
+        for table, column, value, reason in cases:
+            with self.subTest(reason=reason), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                base, overlay = root / "base.sqlite", root / "agent.sqlite"
+                seed, predicates = root / "financial.jsonl", root / "predicates.json"
+                seed_base(base)
+                with closing(sqlite3.connect(base)) as connection:
+                    connection.execute(f"UPDATE {table} SET {column}=?", (value,))
+                    connection.commit()
+                seed.write_text("", encoding="utf-8")
+                predicates.write_text(json.dumps({"predicates": [{
+                    "id": "contract_amount", "answer_kind": "numeric",
+                    "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약금액"],
+                }]}, ensure_ascii=False), encoding="utf-8")
+                result = build_agent_overlay(base, overlay, seed, predicates)
+                self.assertEqual(result.event_imported, 0)
+                with closing(sqlite3.connect(overlay)) as connection:
+                    self.assertEqual(connection.execute("SELECT reason_code FROM build_reject").fetchone()[0], reason)
+
+    def test_agent_overlay_conflict_rejects_all_values_and_keeps_live_file_on_config_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates = root / "financial.jsonl", root / "predicates.json"
+            seed_base(base)
+            with closing(sqlite3.connect(base)) as connection:
+                connection.execute(
+                    "INSERT INTO fact VALUES(?,?,?,?,?,?,?,?,?)",
+                    ("fact2", "f1", "event_kv_candidate", "테스트", "계약금액", "3000", "원", "parser", "candidate"),
+                )
+                connection.execute("INSERT INTO fact_evidence VALUES('fact2','c1')")
+                connection.commit()
+            seed.write_text("", encoding="utf-8")
+            predicates.write_text(json.dumps({"predicates": [{
+                "id": "contract_amount", "answer_kind": "numeric",
+                "allowed_fact_types": ["event_kv_candidate"], "predicate_values": ["계약금액"],
+            }]}, ensure_ascii=False), encoding="utf-8")
+            result = build_agent_overlay(base, overlay, seed, predicates)
+            self.assertEqual(result.event_imported, 0)
+            with closing(sqlite3.connect(overlay)) as connection:
+                self.assertEqual(connection.execute("SELECT count(*) FROM build_reject WHERE reason_code='event_fact_conflict'").fetchone()[0], 2)
+            before = overlay.read_bytes()
+            with self.assertRaises(FileNotFoundError):
+                build_agent_overlay(base, overlay, seed, root / "missing-predicates.json")
+            self.assertEqual(overlay.read_bytes(), before)
+
     def test_import_validates_against_read_only_base_and_fetches_fact(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

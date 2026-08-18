@@ -12,7 +12,7 @@ from disclosure_db.pipeline import query_database
 from disclosure_db.model_review import compare_reviews
 from scripts.review_gold_with_models import parse_json_output
 from disclosure_db.schema import create_indexes, create_schema
-from disclosure_db.serving import fetch_validated_facts, fetch_validated_financial_facts
+from disclosure_db.serving import fetch_event_facts, fetch_validated_facts, fetch_validated_financial_facts
 from disclosure_db.evaluation import load_evaluation_contract
 from disclosure_db.gold_validation import validate_record_contract
 from disclosure_db.migration import apply_semantic_migration
@@ -100,6 +100,11 @@ def insert_version(connection: sqlite3.Connection, filing_id: str, status: str) 
 
 
 class SafetyContractTests(unittest.TestCase):
+    def test_event_overlay_read_surface_fails_closed_without_an_attested_overlay(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.assertEqual(fetch_event_facts(root / "base.sqlite", root / "missing.sqlite"), [])
+
     def test_retrieval_query_is_fts_safe_and_keeps_domain_terms(self) -> None:
         query = compile_retrieval_query(
             "삼성바이오로직스가 2023-03-02에 최초 공시한 계약금액(원)은 얼마인가?",

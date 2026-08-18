@@ -80,6 +80,13 @@ def _agent_parser() -> argparse.ArgumentParser:
     overlay.add_argument("--database", type=Path, required=True)
     overlay.add_argument("--overlay", type=Path, required=True)
     overlay.add_argument("--seed", type=Path, required=True)
+    agent_overlay = sub.add_parser("build-agent-overlay")
+    agent_overlay.add_argument("--database", type=Path, required=True)
+    agent_overlay.add_argument("--overlay", type=Path, required=True)
+    agent_overlay.add_argument("--financial-seed", type=Path, required=True)
+    agent_overlay.add_argument("--predicate-config", type=Path, required=True)
+    agent_overlay.add_argument("--attestation", type=Path)
+    agent_overlay.add_argument("--report", type=Path, required=True)
     serve = sub.add_parser("serve")
     serve.add_argument("--database", type=Path, required=True)
     serve.add_argument("--overlay", type=Path)
@@ -94,6 +101,21 @@ def agent_main() -> None:
     if args.command == "build-financial-overlay":
         from .financial_overlay import import_seed
         result = import_seed(args.database, args.overlay, args.seed)
+    elif args.command == "build-agent-overlay":
+        from .attestation import load_distribution_attestation
+        from .financial_overlay import build_agent_overlay
+        attestation = load_distribution_attestation(args.attestation, database=args.database) if args.attestation else None
+        result = build_agent_overlay(
+            args.database,
+            args.overlay,
+            args.financial_seed,
+            args.predicate_config,
+            attestation=attestation,
+        )
+        args.report.write_text(
+            json.dumps(to_jsonable(result), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
     elif args.command == "agent-query":
         from .agent import AgentSettings, DisclosureAgent
         settings = AgentSettings(base_database=args.database, overlay_database=args.overlay, attestation_path=args.attestation)
@@ -108,11 +130,11 @@ def agent_main() -> None:
         settings = AgentSettings(base_database=args.database, overlay_database=args.overlay, attestation_path=args.attestation)
         uvicorn.run(create_app(DisclosureAgent(settings)), host=args.host, port=args.port)
         return
-    print(json.dumps(to_jsonable(result) if args.command == "build-financial-overlay" else result, ensure_ascii=False, indent=2))
+    print(json.dumps(to_jsonable(result) if args.command in {"build-financial-overlay", "build-agent-overlay"} else result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] in {"agent-query", "build-financial-overlay", "serve"}:
+    if len(sys.argv) > 1 and sys.argv[1] in {"agent-query", "build-financial-overlay", "build-agent-overlay", "serve"}:
         agent_main()
     else:
         main()

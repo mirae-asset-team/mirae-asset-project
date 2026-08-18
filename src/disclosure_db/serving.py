@@ -3,9 +3,36 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 from pathlib import Path
+from typing import Iterable
+
+from .attestation import CorpusAttestation
 
 
 SAFE_LINEAGE_STATUSES = ("root", "resolved")
+
+
+def fetch_event_facts(
+    base_database: Path,
+    overlay_database: Path,
+    *,
+    company: str | None = None,
+    predicate_terms: Iterable[str] = (),
+    as_of: str | None = None,
+    limit: int = 100,
+    attestation: CorpusAttestation | None = None,
+) -> list[dict[str, object]]:
+    """Read audited event facts while keeping the overlay implementation private."""
+    from .financial_overlay import fetch_event_facts as _fetch_event_facts
+
+    return _fetch_event_facts(
+        base_database,
+        overlay_database,
+        company=company,
+        predicate_terms=predicate_terms,
+        as_of=as_of,
+        limit=limit,
+        attestation=attestation,
+    )
 
 
 def _readonly_connection(database: Path) -> sqlite3.Connection:

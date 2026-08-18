@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
+import tempfile
 from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import date
@@ -17,6 +19,7 @@ from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
+from uuid import uuid4
 
 from .attestation import CorpusAttestation, verify_fast_identity
 from .serving import version_filter_sql
@@ -24,13 +27,13 @@ from .serving import version_filter_sql
 
 OVERLAY_SCHEMA = """
 PRAGMA foreign_keys=ON;
-CREATE TABLE IF NOT EXISTS overlay_revision(
+CREATE TABLE overlay_revision(
     overlay_revision TEXT PRIMARY KEY,
     source_database_sha256 TEXT NOT NULL,
     created_at TEXT NOT NULL,
     seed_sha256 TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS financial_fact(
+CREATE TABLE financial_fact(
     financial_fact_id TEXT PRIMARY KEY,
     filing_id TEXT NOT NULL,
     account_id TEXT,
@@ -46,24 +49,54 @@ CREATE TABLE IF NOT EXISTS financial_fact(
     scale INTEGER NOT NULL CHECK(scale > 0),
     unit_raw TEXT,
     extraction_method TEXT NOT NULL,
-    validation_status TEXT NOT NULL CHECK(validation_status='validated')
+    validation_status TEXT NOT NULL CHECK(validation_status='validated'),
+    trust_tier TEXT NOT NULL CHECK(trust_tier IN ('human_verified','agent_audited'))
 );
-CREATE TABLE IF NOT EXISTS financial_fact_evidence(
+CREATE TABLE financial_fact_evidence(
     financial_fact_id TEXT NOT NULL REFERENCES financial_fact(financial_fact_id),
     evidence_id TEXT NOT NULL,
     PRIMARY KEY(financial_fact_id,evidence_id)
 );
-CREATE INDEX IF NOT EXISTS overlay_fact_filing_account ON financial_fact(filing_id,account_id,account_name_raw);
+CREATE INDEX overlay_fact_filing_account ON financial_fact(filing_id,account_id,account_name_raw);
+CREATE TABLE event_fact(
+    event_fact_id TEXT PRIMARY KEY,
+    filing_id TEXT NOT NULL,
+    predicate_id TEXT NOT NULL,
+    predicate_raw TEXT NOT NULL,
+    answer_kind TEXT NOT NULL CHECK(answer_kind IN ('numeric','text')),
+    value_raw TEXT NOT NULL,
+    value_numeric TEXT,
+    unit TEXT,
+    scale INTEGER,
+    extraction_method TEXT NOT NULL,
+    trust_tier TEXT NOT NULL CHECK(trust_tier IN ('human_verified','agent_audited'))
+);
+CREATE TABLE event_fact_evidence(
+    event_fact_id TEXT NOT NULL REFERENCES event_fact(event_fact_id),
+    evidence_id TEXT NOT NULL,
+    PRIMARY KEY(event_fact_id,evidence_id)
+);
+CREATE TABLE build_reject(
+    build_id TEXT NOT NULL,
+    candidate_id TEXT NOT NULL,
+    reason_code TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    PRIMARY KEY(build_id,candidate_id,reason_code)
+);
+CREATE INDEX overlay_event_predicate ON event_fact(predicate_id,filing_id);
 """
 
 
 @dataclass(slots=True)
 class OverlayImportResult:
     imported: int = 0
+    financial_imported: int = 0
+    event_imported: int = 0
     rejected: int = 0
     reasons: list[str] = field(default_factory=list)
     source_database_sha256: str = ""
     seed_sha256: str = ""
+    quick_check: str = ""
 
 
 class FinancialOverlay:
@@ -173,64 +206,277 @@ def _base_evidence(connection: sqlite3.Connection, filing_id: str, evidence_id: 
     ).fetchone()
 
 
-def import_seed(base_database: Path, overlay_database: Path, seed_path: Path) -> OverlayImportResult:
-    base_database, overlay_database, seed_path = map(Path, (base_database, overlay_database, seed_path))
-    source_sha = sha256_file(base_database)
-    seed_sha = sha256_file(seed_path)
-    result = OverlayImportResult(source_database_sha256=source_sha, seed_sha256=seed_sha)
-    validated_rows: list[dict[str, Any]] = []
-    with closing(_read_base(base_database)) as base:
-        for line_no, line in enumerate(seed_path.read_text(encoding="utf-8").splitlines(), 1):
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-                if not isinstance(row, dict):
-                    raise ValueError("row is not an object")
-                _validate_seed_row(base, row)
-                validated_rows.append(row)
-            except (ValueError, KeyError, TypeError, InvalidOperation, sqlite3.Error) as exc:
-                result.rejected += 1
-                result.reasons.append(f"line {line_no}: {exc}")
-    overlay_database.parent.mkdir(parents=True, exist_ok=True)
-    with closing(sqlite3.connect(overlay_database)) as overlay:
-        overlay.execute("PRAGMA foreign_keys=ON")
-        overlay.executescript(OVERLAY_SCHEMA)
-        try:
-            overlay.execute("BEGIN IMMEDIATE")
-            existing = overlay.execute(
-                "SELECT source_database_sha256,seed_sha256 FROM overlay_revision WHERE overlay_revision=?",
+def _existing_overlay_source(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    try:
+        with closing(sqlite3.connect(path)) as connection:
+            row = connection.execute(
+                "SELECT source_database_sha256 FROM overlay_revision WHERE overlay_revision=?",
                 ("semantic-v1-agent-overlay",),
             ).fetchone()
-            if existing is not None and str(existing[0]) != source_sha:
-                raise ValueError("overlay source_database_sha256 does not match immutable base")
-            if existing is not None and str(existing[1]) != seed_sha:
-                overlay.execute("DELETE FROM financial_fact_evidence")
-                overlay.execute("DELETE FROM financial_fact")
+            return str(row[0]) if row else None
+    except sqlite3.Error:
+        return None
+
+
+def _write_overlay_atomically(
+    base_database: Path,
+    overlay_database: Path,
+    source_sha: str,
+    seed_sha: str,
+    financial_rows: list[dict[str, Any]],
+    event_rows: list[dict[str, Any]],
+    rejects: list[tuple[str, str, dict[str, Any]]],
+) -> tuple[int, str]:
+    overlay_database.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{overlay_database.name}.", suffix=".tmp", dir=str(overlay_database.parent)
+    )
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    build_id = uuid4().hex
+    try:
+        with closing(sqlite3.connect(temporary)) as overlay:
+            overlay.execute("PRAGMA foreign_keys=ON")
+            overlay.executescript(OVERLAY_SCHEMA)
             columns = (
                 "financial_fact_id", "filing_id", "account_id", "account_name_raw", "statement_type",
                 "scope", "period_type", "period_start", "period_end", "instant_date", "value_numeric",
-                "currency", "scale", "unit_raw", "extraction_method", "validation_status",
+                "currency", "scale", "unit_raw", "extraction_method", "validation_status", "trust_tier",
             )
-            for row in validated_rows:
-                overlay.execute(
-                    f"INSERT OR REPLACE INTO financial_fact({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
-                    tuple(row.get(column) for column in columns),
-                )
-                overlay.execute("DELETE FROM financial_fact_evidence WHERE financial_fact_id=?", (row["financial_fact_id"],))
+            overlay.executemany(
+                f"INSERT INTO financial_fact({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+                [tuple(row.get(column) for column in columns) for row in financial_rows],
+            )
+            for row in financial_rows:
                 overlay.executemany(
                     "INSERT INTO financial_fact_evidence(financial_fact_id,evidence_id) VALUES(?,?)",
                     [(row["financial_fact_id"], evidence_id) for evidence_id in row["evidence_ids"]],
                 )
+            overlay.executemany(
+                """INSERT INTO event_fact(
+                    event_fact_id,filing_id,predicate_id,predicate_raw,answer_kind,value_raw,
+                    value_numeric,unit,scale,extraction_method,trust_tier
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                [(
+                    row["event_fact_id"], row["filing_id"], row["predicate_id"], row["predicate_raw"],
+                    row["answer_kind"], row["value_raw"], row.get("value_numeric"), row.get("unit"),
+                    row.get("scale"), row["extraction_method"], "agent_audited",
+                ) for row in event_rows],
+            )
+            for row in event_rows:
+                overlay.executemany(
+                    "INSERT INTO event_fact_evidence(event_fact_id,evidence_id) VALUES(?,?)",
+                    [(row["event_fact_id"], evidence_id) for evidence_id in row["evidence_ids"]],
+                )
+            overlay.executemany(
+                "INSERT INTO build_reject(build_id,candidate_id,reason_code,details_json) VALUES(?,?,?,?)",
+                [(build_id, candidate_id, reason, json.dumps(details, ensure_ascii=False, sort_keys=True))
+                 for candidate_id, reason, details in rejects],
+            )
             overlay.execute(
-                "INSERT OR REPLACE INTO overlay_revision VALUES(?,?,datetime('now'),?)",
+                "INSERT INTO overlay_revision VALUES(?,?,datetime('now'),?)",
                 ("semantic-v1-agent-overlay", source_sha, seed_sha),
             )
             overlay.commit()
-            result.imported = len(validated_rows)
-        except Exception:
-            overlay.rollback()
-            raise
+            quick_check = str(overlay.execute("PRAGMA quick_check").fetchone()[0])
+        if quick_check != "ok":
+            raise ValueError(f"overlay quick_check failed: {quick_check}")
+        os.replace(temporary, overlay_database)
+        return len(financial_rows) + len(event_rows), quick_check
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _load_financial_seed(base: sqlite3.Connection, seed_path: Path, result: OverlayImportResult) -> list[dict[str, Any]]:
+    validated_rows: list[dict[str, Any]] = []
+    for line_no, line in enumerate(seed_path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError("row is not an object")
+            _validate_seed_row(base, row)
+            row["trust_tier"] = "human_verified"
+            validated_rows.append(row)
+        except (ValueError, KeyError, TypeError, InvalidOperation, sqlite3.Error) as exc:
+            result.rejected += 1
+            result.reasons.append(f"line {line_no}: {exc}")
+    return validated_rows
+
+
+def import_seed(base_database: Path, overlay_database: Path, seed_path: Path) -> OverlayImportResult:
+    base_database, overlay_database, seed_path = map(Path, (base_database, overlay_database, seed_path))
+    source_sha = sha256_file(base_database)
+    seed_sha = sha256_file(seed_path)
+    existing_source = _existing_overlay_source(overlay_database)
+    if existing_source is not None and existing_source != source_sha:
+        raise ValueError("overlay source_database_sha256 does not match immutable base")
+    result = OverlayImportResult(source_database_sha256=source_sha, seed_sha256=seed_sha)
+    with closing(_read_base(base_database)) as base:
+        financial_rows = _load_financial_seed(base, seed_path, result)
+    _, result.quick_check = _write_overlay_atomically(
+        base_database, overlay_database, source_sha, seed_sha, financial_rows, [], []
+    )
+    result.financial_imported = len(financial_rows)
+    result.imported = result.financial_imported
+    return result
+
+
+def _load_predicate_allowlist(path: Path) -> dict[tuple[str, str], tuple[str, str]]:
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    allowlist: dict[tuple[str, str], tuple[str, str]] = {}
+    for predicate in payload.get("predicates", []):
+        predicate_id = str(predicate["id"])
+        answer_kind = str(predicate["answer_kind"])
+        if answer_kind not in {"numeric", "text"}:
+            continue
+        for fact_type in predicate.get("allowed_fact_types", []):
+            for predicate_raw in predicate.get("predicate_values", []):
+                allowlist[(str(fact_type), str(predicate_raw))] = (predicate_id, answer_kind)
+    return allowlist
+
+
+def _event_candidates(base: sqlite3.Connection, allowlist: dict[tuple[str, str], tuple[str, str]]) -> list[sqlite3.Row]:
+    if not allowlist:
+        return []
+    clauses = " OR ".join("(f.fact_type=? AND f.predicate=?)" for _ in allowlist)
+    params = [value for pair in allowlist for value in pair]
+    base.row_factory = sqlite3.Row
+    return base.execute(
+        f"""SELECT f.fact_id,f.filing_id,f.fact_type,f.subject,f.predicate,f.value_raw,f.unit,
+                   f.extraction_method,f.validation_status,
+                   MIN(CASE WHEN fe.evidence_id IS NULL THEN 0 ELSE 1 END) evidence_present,
+                   MIN(CASE WHEN c.evidence_id IS NOT NULL AND c.filing_id=f.filing_id
+                            AND tr.filing_id=c.filing_id AND s.filing_id=c.filing_id THEN 1 ELSE 0 END) same_filing,
+                   MIN(CASE WHEN c.evidence_id IS NOT NULL AND s.parse_status='success'
+                            AND tr.parse_status='success' THEN 1 ELSE 0 END) parse_success,
+                   MAX(CASE WHEN s.detected_format='pdf' THEN 1 ELSE 0 END) has_pdf,
+                   MIN(CASE WHEN v.lineage_status IN ('root','resolved') THEN 1 ELSE 0 END) lineage_safe,
+                   GROUP_CONCAT(DISTINCT fe.evidence_id) evidence_ids
+              FROM fact f
+              LEFT JOIN fact_evidence fe ON fe.fact_id=f.fact_id
+              LEFT JOIN table_cell c ON c.evidence_id=fe.evidence_id
+              LEFT JOIN table_record tr ON tr.table_id=c.table_id
+              LEFT JOIN source_document s ON s.source_id=c.source_id
+              LEFT JOIN filing_version v ON v.filing_id=f.filing_id AND v.is_current=1
+             WHERE {clauses}
+             GROUP BY f.fact_id
+             ORDER BY f.fact_id""",
+        params,
+    ).fetchall()
+
+
+def _clear_unit(unit: object) -> bool:
+    normalized = str(unit or "").strip().casefold()
+    return bool(normalized) and normalized not in {"unknown", "ambiguous", "n/a", "na", "none", "null", "-"} and not any(
+        marker in normalized for marker in ("/", "|", ",", ";", "·", " 또는 ", " or ")
+    )
+
+
+def _validate_event_candidate(row: sqlite3.Row, predicate_id: str, answer_kind: str) -> dict[str, Any]:
+    candidate_id = str(row["fact_id"])
+    if not row["evidence_present"]:
+        raise ValueError("event_evidence_missing")
+    if not row["same_filing"]:
+        raise ValueError("event_cross_filing_evidence")
+    if not row["lineage_safe"]:
+        raise ValueError("event_unsafe_lineage")
+    if not row["parse_success"]:
+        raise ValueError("event_parse_failure")
+    if row["has_pdf"]:
+        raise ValueError("event_pdf_evidence")
+    value_raw = str(row["value_raw"] or "").strip()
+    if not value_raw:
+        raise ValueError("event_value_missing")
+    unit = str(row["unit"]).strip() if row["unit"] is not None else None
+    value_numeric: str | None = None
+    scale: int | None = None
+    if answer_kind == "numeric":
+        try:
+            numeric = Decimal(value_raw.replace(",", ""))
+        except InvalidOperation as exc:
+            raise ValueError("event_numeric_not_decimal") from exc
+        if not numeric.is_finite():
+            raise ValueError("event_numeric_not_finite")
+        if not _clear_unit(unit):
+            raise ValueError("event_numeric_unit_missing" if not str(unit or "").strip() else "event_numeric_unit_ambiguous")
+        value_numeric = format(numeric, "f")
+        scale = 1
+    evidence_ids = [value for value in str(row["evidence_ids"] or "").split(",") if value]
+    return {
+        "event_fact_id": candidate_id,
+        "filing_id": str(row["filing_id"]),
+        "predicate_id": predicate_id,
+        "predicate_raw": str(row["predicate"]),
+        "answer_kind": answer_kind,
+        "value_raw": value_raw,
+        "value_numeric": value_numeric,
+        "unit": unit,
+        "scale": scale,
+        "extraction_method": str(row["extraction_method"] or "unknown"),
+        "evidence_ids": evidence_ids,
+    }
+
+
+def build_agent_overlay(
+    base_database: Path,
+    overlay_database: Path,
+    financial_seed: Path,
+    predicate_config: Path,
+    *,
+    attestation: CorpusAttestation | None = None,
+) -> OverlayImportResult:
+    base_database, overlay_database = Path(base_database), Path(overlay_database)
+    financial_seed, predicate_config = Path(financial_seed), Path(predicate_config)
+    if attestation is not None:
+        if not verify_fast_identity(base_database, attestation):
+            raise ValueError("database does not match corpus attestation")
+        source_sha = attestation.sha256
+    else:
+        source_sha = sha256_file(base_database)
+    seed_sha = sha256_file(financial_seed)
+    existing_source = _existing_overlay_source(overlay_database)
+    if existing_source is not None and existing_source != source_sha:
+        raise ValueError("overlay source_database_sha256 does not match immutable base")
+    result = OverlayImportResult(source_database_sha256=source_sha, seed_sha256=seed_sha)
+    rejects: list[tuple[str, str, dict[str, Any]]] = []
+    with closing(_read_base(base_database)) as base:
+        financial_rows = _load_financial_seed(base, financial_seed, result)
+        allowlist = _load_predicate_allowlist(predicate_config)
+        candidates: list[dict[str, Any]] = []
+        for row in _event_candidates(base, allowlist):
+            predicate_id, answer_kind = allowlist[(str(row["fact_type"]), str(row["predicate"]))]
+            try:
+                candidates.append(_validate_event_candidate(row, predicate_id, answer_kind))
+            except ValueError as exc:
+                reason = str(exc)
+                rejects.append((str(row["fact_id"]), reason, {"predicate": row["predicate"], "value_raw": row["value_raw"], "unit": row["unit"]}))
+                result.reasons.append(f"{row['fact_id']}: {reason}")
+                result.rejected += 1
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for row in candidates:
+            grouped.setdefault((row["filing_id"], row["predicate_id"]), []).append(row)
+        event_rows: list[dict[str, Any]] = []
+        for key, group in grouped.items():
+            if len({(row["value_raw"], row.get("unit")) for row in group}) > 1:
+                for row in group:
+                    rejects.append((row["event_fact_id"], "event_fact_conflict", {"filing_id": key[0], "predicate_id": key[1]}))
+                    result.reasons.append(f"{row['event_fact_id']}: event_fact_conflict")
+                    result.rejected += 1
+                continue
+            event_rows.extend(group)
+    _, result.quick_check = _write_overlay_atomically(
+        base_database, overlay_database, source_sha, seed_sha, financial_rows, event_rows, rejects
+    )
+    result.financial_imported = len(financial_rows)
+    result.event_imported = len(event_rows)
+    result.imported = result.financial_imported + result.event_imported
     return result
 
 
@@ -375,6 +621,75 @@ def fetch_overlay_facts(
         item = dict(row)
         if str(item.get("detected_format") or "") == "pdf":
             continue
+        item["evidence_ids"] = str(item.get("evidence_ids") or "").split(",") if item.get("evidence_ids") else []
+        try:
+            item["evidence_texts"] = json.loads(str(item.get("evidence_texts") or "[]"))
+        except json.JSONDecodeError:
+            item["evidence_texts"] = []
+        result.append(item)
+    return result
+
+
+def fetch_event_facts(
+    base_database: Path,
+    overlay_database: Path,
+    *,
+    company: str | None = None,
+    predicate_terms: Iterable[str] = (),
+    as_of: str | None = None,
+    limit: int = 100,
+    attestation: CorpusAttestation | None = None,
+) -> list[dict[str, object]]:
+    if limit <= 0 or not Path(overlay_database).exists():
+        return []
+    if not overlay_matches_base(Path(base_database), Path(overlay_database), attestation=attestation):
+        return []
+    version_sql, version_params = version_filter_sql(alias="v", as_of=as_of)
+    where = [
+        "c.filing_id=ef.filing_id", "s.filing_id=c.filing_id",
+        "s.parse_status='success'", "s.detected_format<>'pdf'", version_sql,
+    ]
+    params: list[object] = list(version_params)
+    with closing(_read_base(Path(base_database))) as schema_connection:
+        filing_columns = {str(row[1]) for row in schema_connection.execute("PRAGMA table_info(filing)")}
+    reporter_select = "f.reporter_name" if "reporter_name" in filing_columns else "NULL AS reporter_name"
+    if company is not None:
+        company_fields = ["f.issuer_name=?", "f.listed_name=?", "f.stock_code=?", "f.issuer_corp_code=?"]
+        if "reporter_name" in filing_columns:
+            company_fields.insert(2, "f.reporter_name=?")
+        where.append(f"({' OR '.join(company_fields)})")
+        params.extend([company] * len(company_fields))
+    terms = [str(term) for term in predicate_terms if str(term)]
+    if terms:
+        where.append("(" + " OR ".join(["ef.predicate_id LIKE ? OR ef.predicate_raw LIKE ?"] * len(terms)) + ")")
+        for term in terms:
+            params.extend([f"%{term}%", f"%{term}%"])
+    params.append(limit)
+    with closing(_read_base(Path(base_database))) as connection:
+        connection.execute("PRAGMA query_only=ON")
+        try:
+            connection.execute("ATTACH DATABASE ? AS overlay", (str(Path(overlay_database).resolve()),))
+            rows = connection.execute(
+                f"""SELECT ef.*,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,
+                           v.lineage_status,v.is_current,
+                           group_concat(DISTINCT efe.evidence_id) evidence_ids,
+                           json_group_array(DISTINCT c.text_raw) evidence_texts
+                      FROM overlay.event_fact ef
+                      JOIN main.filing f ON f.filing_id=ef.filing_id
+                      JOIN main.filing_version v ON v.filing_id=ef.filing_id
+                      JOIN overlay.event_fact_evidence efe ON efe.event_fact_id=ef.event_fact_id
+                      JOIN main.table_cell c ON c.evidence_id=efe.evidence_id
+                      JOIN main.source_document s ON s.source_id=c.source_id
+                     WHERE {' AND '.join(where)}
+                     GROUP BY ef.event_fact_id ORDER BY ef.event_fact_id LIMIT ?""",
+                params,
+            ).fetchall()
+        except sqlite3.Error:
+            # Old or partially written overlays fail closed for the new event surface.
+            return []
+    result: list[dict[str, object]] = []
+    for row in rows:
+        item = dict(row)
         item["evidence_ids"] = str(item.get("evidence_ids") or "").split(",") if item.get("evidence_ids") else []
         try:
             item["evidence_texts"] = json.loads(str(item.get("evidence_texts") or "[]"))
