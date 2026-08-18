@@ -6,7 +6,7 @@ import json
 import os
 import urllib.request
 from dataclasses import replace
-from typing import Any
+from typing import Any, Iterable
 
 from .agent_contracts import AnswerDraft, EvidenceBundle, to_jsonable
 
@@ -14,11 +14,33 @@ from .agent_contracts import AnswerDraft, EvidenceBundle, to_jsonable
 UNANSWERABLE_TEXT = "검증 가능한 근거가 충분하지 않아 답변할 수 없습니다."
 
 
+def _known_ids(bundle: EvidenceBundle, requested: Iterable[str]) -> list[str]:
+    requested_ids = set(requested)
+    return list(dict.fromkeys(ref.evidence_id for ref in bundle.evidence if ref.evidence_id in requested_ids))
+
+
+def _claim_citation_ids(bundle: EvidenceBundle) -> list[str]:
+    if bundle.calculation is not None:
+        return _known_ids(bundle, bundle.calculation.evidence_ids)
+    if bundle.financial_facts:
+        return _known_ids(bundle, bundle.financial_facts[0].get("evidence_ids", []))
+    if bundle.event_facts:
+        return _known_ids(bundle, bundle.event_facts[0].get("evidence_ids", []))
+    return [bundle.evidence[0].evidence_id] if bundle.evidence else []
+
+
 class DeterministicGenerator:
     def generate(self, bundle: EvidenceBundle) -> AnswerDraft:
         if not bundle.answerable or not bundle.evidence:
             return AnswerDraft(answer=UNANSWERABLE_TEXT, answerable=False, reason_codes=list(bundle.reason_codes) + ["insufficient_evidence"])
-        citations = [ref.evidence_id for ref in bundle.evidence]
+        citations = _claim_citation_ids(bundle)
+        if (bundle.calculation is not None or bundle.financial_facts or bundle.event_facts) and not citations:
+            return AnswerDraft(
+                answer=UNANSWERABLE_TEXT,
+                citation_ids=[],
+                answerable=False,
+                reason_codes=list(bundle.reason_codes) + ["claim_evidence_missing"],
+            )
         numeric_values: list[str] = []
         if bundle.calculation and bundle.calculation.value is not None:
             numeric_values = [str(bundle.calculation.value)]

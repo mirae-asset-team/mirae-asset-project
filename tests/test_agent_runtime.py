@@ -117,6 +117,24 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertTrue(body["provider_configured"])
         self.assertNotIn("secret", json.dumps(body))
 
+    def test_deterministic_financial_answer_cites_only_selected_fact(self):
+        bundle = EvidenceBundle(
+            question="매출액?",
+            evidence=[
+                EvidenceRef("ev_selected", "f1", "s1", "매출액 10"),
+                EvidenceRef("ev_extra", "f1", "s1", "부가 설명"),
+            ],
+            answerable=True,
+            financial_facts=[{"value_numeric": "10", "evidence_ids": ["ev_selected"]}],
+        )
+        self.assertEqual(DeterministicGenerator().generate(bundle).citation_ids, ["ev_selected"])
+
+    def test_deterministic_text_answer_cites_only_rendered_first_evidence(self):
+        ev1 = EvidenceRef("ev1", "f1", "s1", "첫 번째 근거")
+        ev2 = EvidenceRef("ev2", "f1", "s1", "두 번째 근거")
+        bundle = EvidenceBundle(question="제목?", evidence=[ev1, ev2], answerable=True)
+        self.assertEqual(DeterministicGenerator().generate(bundle).citation_ids, [ev1.evidence_id])
+
     def test_serializable_contracts_have_backward_compatible_routing_defaults(self) -> None:
         plan = QueryPlan("질문")
         bundle = EvidenceBundle(question="질문")

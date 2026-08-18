@@ -220,3 +220,10 @@
 - RED: planner lacked `filing_date`; `SafeSearchIndex.search(..., filed_at=...)` and `query_database(..., filed_at=...)` had missing contract/signature failures.
 - GREEN: added backward-compatible `QueryPlan.filing_date`, planner routing for non-financial exact dates, `filed_at` in the sparse projection/filter, and exact filing filters in both query paths. Updated the legacy event-date expectation to the new contract.
 - Verification: focused and related suite `tests.test_evidence_service tests.test_search_index tests.test_pipeline` → 41 passed. Adjacent filing fixture returned only `2023-04-10`; no live DB was rebuilt or modified.
+
+## 2026-08-19T03:42:53+09:00 — Plan 2 Task 3: claim-specific citations
+
+- Intent: prevent deterministic answers from citing all retrieved candidates when only one claim supports the answer.
+- RED: financial and text citation tests observed `['ev_selected', 'ev_extra']` and `['ev1', 'ev2']` instead of one citation.
+- GREEN: added bundle-bounded known-ID selection: calculation uses only calculation evidence, structured facts use the first selected fact/event evidence, and text uses the first rendered evidence. Unknown structured evidence produces an abstention draft.
+- Verification: `python -m unittest tests.test_agent_runtime tests.test_safety_contracts -q` → 47 passed, 1 optional skip. Existing calculation citation order remains stable in bundle order.

@@ -184,7 +184,7 @@ git commit -m "fix: enforce exact disclosure filing dates"
 - Produces: `_claim_citation_ids(bundle) -> list[str]`
 - Structured fact: first selected fact evidence only; calculation: calculation evidence only; text: first evidence only
 
-- [ ] **Step 1: Write failing minimal-citation tests**
+- [x] **Step 1: Write failing minimal-citation tests**
 
 ```python
 def test_deterministic_financial_answer_cites_only_selected_fact(self):
@@ -201,13 +201,13 @@ def test_deterministic_text_answer_cites_only_rendered_first_evidence(self):
     self.assertEqual(DeterministicGenerator().generate(bundle).citation_ids, [ev1.evidence_id])
 ```
 
-- [ ] **Step 2: Run and confirm both currently cite all evidence**
+- [x] **Step 2: Run and confirm both currently cite all evidence**
 
 Run: `python -m unittest tests.test_agent_runtime.AgentRuntimeTests.test_deterministic_financial_answer_cites_only_selected_fact tests.test_agent_runtime.AgentRuntimeTests.test_deterministic_text_answer_cites_only_rendered_first_evidence -v`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement ordered, bundle-bounded citation selection**
+- [x] **Step 3: Implement ordered, bundle-bounded citation selection**
 
 ```python
 def _known_ids(bundle: EvidenceBundle, requested: Iterable[str]) -> list[str]:
@@ -226,13 +226,13 @@ def _claim_citation_ids(bundle: EvidenceBundle) -> list[str]:
 
 If a structured claim resolves to zero known IDs, return unanswerable rather than falling back to all evidence.
 
-- [ ] **Step 4: Run generator/verifier tests**
+- [x] **Step 4: Run generator/verifier tests**
 
 Run: `python -m unittest tests.test_agent_runtime tests.test_safety_contracts -v`
 
 Expected: PASS, including unknown citation and numeric mismatch tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/disclosure_db/generation.py tests/test_agent_runtime.py
