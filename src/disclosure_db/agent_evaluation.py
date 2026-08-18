@@ -20,10 +20,11 @@ def _ratio(numerator: int | float, denominator: int | float) -> float | None:
 
 
 def quality_gate_passed(summary: dict[str, Any], acceptance: dict[str, Any]) -> bool:
-    """Apply configured thresholds, treating null metrics as not applicable.
-
-    Safety counts are hard gates even when the quality metric denominator is zero.
-    """
+    """Apply every configured threshold; missing/null required metrics fail closed."""
+    if any(key not in summary for key in ("error_count", "false_numeric_claim_count", "unsafe_answer_count")):
+        return False
+    if int(summary["error_count"] or 0) != 0:
+        return False
     if int(summary.get("false_numeric_claim_count", 0) or 0) > int(acceptance.get("false_numeric_claims", 0) or 0):
         return False
     if int(summary.get("unsafe_answer_count", 0) or 0) > int(acceptance.get("unsafe_answers", 0) or 0):
@@ -36,6 +37,10 @@ def quality_gate_passed(summary: dict[str, Any], acceptance: dict[str, Any]) -> 
         "holdout_answerability_agreement": ("answerability_agreement", "ge"),
         "retrieval_recall_at_20": ("target_recall_at_20", "ge"),
         "post_rerank_recall_at_8": ("post_rerank_recall_at_8", "ge"),
+        "planner_p95_ms": ("planner_p95_ms", "le"),
+        "fact_lookup_p95_ms": ("fact_lookup_p95_ms", "le"),
+        "local_retrieval_p95_ms": ("local_retrieval_p95_ms", "le"),
+        "reranked_retrieval_p95_ms": ("reranked_retrieval_p95_ms", "le"),
         "end_to_end_p95_ms": ("latency_ms_p95", "le"),
     }
     for threshold_name, (metric_name, operator) in mapping.items():
@@ -43,14 +48,17 @@ def quality_gate_passed(summary: dict[str, Any], acceptance: dict[str, Any]) -> 
             continue
         threshold = acceptance[threshold_name]
         metric = summary.get(metric_name)
-        if metric is None and threshold_name == "retrieval_recall_at_20":
-            metric = summary.get("target_recall_at_k", summary.get("retrieval_recall_at_20"))
+        if threshold_name == "end_to_end_p95_ms" and metric is None:
+            metric = summary.get("end_to_end_p95_ms")
         if metric is None:
-            continue
+            return False
         if operator == "ge" and float(metric) < float(threshold):
             return False
         if operator == "le" and float(metric) > float(threshold):
             return False
+    handled = set(mapping) | {"false_numeric_claims", "unsafe_answers"}
+    if any(key not in handled for key in acceptance):
+        return False
     return True
 
 
@@ -96,14 +104,50 @@ def percentile(values: Sequence[float], quantile: float) -> float | None:
     return round(value, 2)
 
 
-def _numeric_match(expected_value: Any, numeric_values: Sequence[Any]) -> bool | None:
-    if expected_value is None:
+def _numeric_match(expected_answer: Any, numeric_values: Sequence[Any]) -> bool | None:
+    if not isinstance(expected_answer, dict):
+        return None
+    kind = expected_answer.get("kind")
+    if kind == "numeric":
+        expected_values = [expected_answer.get("value")]
+    elif kind == "multi_numeric":
+        values = expected_answer.get("values")
+        if not isinstance(values, list):
+            return False
+        expected_values = [item.get("value") for item in values if isinstance(item, dict)]
+    else:
         return None
     try:
-        expected = Decimal(str(expected_value))
-        return any(expected == Decimal(str(value)) for value in numeric_values)
+        expected = sorted(Decimal(str(value)) for value in expected_values)
+        actual = sorted(Decimal(str(value)) for value in numeric_values)
+        return len(expected) == len(actual) and expected == actual
     except (InvalidOperation, TypeError, ValueError):
         return False
+
+
+def _validate_record(record: Any) -> str | None:
+    if not isinstance(record, dict):
+        return "gold record must be a JSON object"
+    required = {"question_id", "question", "answerability", "answer", "evidence"}
+    missing = sorted(required - set(record))
+    if missing:
+        return "required fields missing: " + ", ".join(missing)
+    if not isinstance(record["question_id"], str) or not record["question_id"] or not isinstance(record["question"], str) or not record["question"]:
+        return "question identity must be a non-empty string"
+    if record["answerability"] not in {"answerable", "unanswerable", "ambiguous"}:
+        return "answerability is invalid"
+    answer = record["answer"]
+    if not isinstance(answer, dict) or answer.get("kind") not in {"text", "numeric", "multi_numeric", "unanswerable"}:
+        return "answer shape is invalid"
+    if (record["answerability"] == "answerable") == (answer.get("kind") == "unanswerable"):
+        return "answerability and answer kind disagree"
+    if not isinstance(record["evidence"], list) or any(not isinstance(item, dict) or not item.get("evidence_id") for item in record["evidence"]):
+        return "evidence must be a list of objects with evidence_id"
+    if answer.get("kind") == "multi_numeric":
+        values = answer.get("values")
+        if not isinstance(values, list) or len(values) < 2 or any(not isinstance(item, dict) or "value" not in item for item in values):
+            return "multi_numeric answer shape is invalid"
+    return None
 
 
 def _text_match(expected_text: Any, answer: str) -> bool | None:
@@ -131,6 +175,10 @@ def evaluate_agent(
             if not isinstance(record, dict):
                 raise TypeError("gold record must be a JSON object")
             question_id = record.get("question_id", question_id)
+            validation_error = _validate_record(record)
+            if validation_error:
+                evaluations.append({"question_id": question_id, "status": "error", "error": validation_error})
+                continue
         except Exception as exc:  # keep malformed rows auditable and continue evaluating
             evaluations.append({"question_id": question_id, "status": "error", "error": str(exc)})
             continue
@@ -157,10 +205,9 @@ def evaluate_agent(
                 else None
             )
             expected_answer = record.get("answer")
-            expected_value = expected_answer.get("value") if isinstance(expected_answer, dict) else None
             expected_text = expected_answer.get("text") if isinstance(expected_answer, dict) else None
             numeric_values = list(getattr(answer, "numeric_values", []))
-            numeric_match = _numeric_match(expected_value, numeric_values)
+            numeric_match = _numeric_match(expected_answer, numeric_values)
             text_match = _text_match(expected_text, str(getattr(answer, "answer", "")))
             answerable = bool(getattr(answer, "answerable", False))
             verified = bool(getattr(answer, "verified", False))
@@ -214,15 +261,25 @@ def evaluate_agent(
         "pass_count": sum(item.get("status") == "pass" for item in answered),
         "verified_count": sum(bool(item.get("verified")) for item in answered),
         "answerability_match_count": answerability_matches,
+        "scored_count": len(answered),
+        "answerability_denominator": len(answered),
         "answerability_agreement": _ratio(answerability_matches, len(answered)),
+        "numeric_denominator": len(numeric_rows),
         "numeric_exactness": _ratio(sum(item.get("numeric_match") is True for item in numeric_rows), len(numeric_rows)),
+        "citation_precision_denominator": len(citation_rows),
         "citation_precision": _ratio(sum(float(item["citation_precision"]) for item in citation_rows), len(citation_rows)),
+        "citation_recall_denominator": len(recall_rows),
         "citation_recall": _ratio(sum(float(item["citation_recall"]) for item in recall_rows), len(recall_rows)),
         "false_numeric_claim_count": false_numeric_claim_count,
         "unsafe_answer_count": unsafe_answer_count,
         "error_count": sum(item.get("status") == "error" for item in evaluations),
         "latency_ms_p50": percentile(latencies, 0.50),
         "latency_ms_p95": percentile(latencies, 0.95),
+        "planner_p95_ms": None,
+        "fact_lookup_p95_ms": None,
+        "local_retrieval_p95_ms": None,
+        "reranked_retrieval_p95_ms": None,
+        "end_to_end_p95_ms": percentile(latencies, 0.95),
         "evaluations": evaluations,
     }
     if acceptance is None and contract_path is not None:

@@ -113,6 +113,7 @@ def evaluate_retrieval(
     database: Path,
     gold_path: Path,
     limit: int = 20,
+    reranker: object | None = None,
 ) -> dict[str, Any]:
     records = load_jsonl(gold_path)
     database_uri = f"file:{database.resolve().as_posix()}?mode=ro"
@@ -141,16 +142,55 @@ def evaluate_retrieval(
             )
             ranks = {str(item["evidence_id"]): rank for rank, item in enumerate(results, start=1)}
             targets: list[dict[str, Any]] = []
+            seen_evidence: set[str] = set()
             for evidence in record["evidence"]:
-                fragment_ids = _target_fragments(connection, str(evidence["evidence_id"]))
+                evidence_id = str(evidence["evidence_id"])
+                if evidence_id in seen_evidence:
+                    continue
+                seen_evidence.add(evidence_id)
+                fragment_ids = sorted(set(_target_fragments(connection, evidence_id)))
                 found_ranks = [ranks[item] for item in fragment_ids if item in ranks]
                 targets.append(
                     {
-                        "evidence_id": evidence["evidence_id"],
+                    "evidence_id": evidence_id,
                         "target_fragment_ids": fragment_ids,
                         "rank": min(found_ranks) if found_ranks else None,
                     }
                 )
+            post_rank_map: dict[str, int] | None = None
+            post_reason = "reranker_not_configured"
+            if reranker is not None:
+                try:
+                    if hasattr(reranker, "rerank"):
+                        rerank_result = reranker.rerank(str(record["question"]), results, limit=min(8, len(results)))
+                    else:
+                        rerank_result = reranker(str(record["question"]), results, limit=min(8, len(results)))
+                    if isinstance(rerank_result, dict):
+                        used_provider = rerank_result.get("used_provider", True)
+                        reason_codes = list(rerank_result.get("reason_codes", []))
+                        ordered_ids = rerank_result.get("evidence_ids", rerank_result.get("ids", []))
+                    else:
+                        used_provider = getattr(rerank_result, "used_provider", True)
+                        reason_codes = list(getattr(rerank_result, "reason_codes", []))
+                        ordered_ids = getattr(rerank_result, "evidence_ids", rerank_result)
+                    if not used_provider:
+                        post_reason = reason_codes[0] if reason_codes else "reranker_unavailable"
+                    elif not isinstance(ordered_ids, (list, tuple)):
+                        post_reason = "reranker_invalid_response"
+                    else:
+                        safe_ids = {str(item["evidence_id"]) for item in results}
+                        filtered_ids = [str(item) for item in ordered_ids if str(item) in safe_ids]
+                        if not filtered_ids:
+                            post_reason = "reranker_empty_response"
+                        else:
+                            post_rank_map = {item: rank for rank, item in enumerate(filtered_ids, start=1)}
+                            post_reason = "ok"
+                except Exception:
+                    post_reason = "reranker_error"
+            post_targets = [
+                {"evidence_id": target["evidence_id"], "rank": min((post_rank_map[item] for item in target["target_fragment_ids"] if post_rank_map and item in post_rank_map), default=None)}
+                for target in targets
+            ]
             evaluations.append(
                 {
                     "question_id": record["question_id"],
@@ -162,6 +202,8 @@ def evaluate_retrieval(
                     "mode": "historical_version_expanded" if historical else "safe_as_of",
                     "result_count": len(results),
                     "targets": targets,
+                    "post_rerank_targets": post_targets,
+                    "post_rerank_reason": post_reason,
                 }
             )
     target_rows = [target for item in evaluations for target in item["targets"]]
@@ -174,8 +216,10 @@ def evaluate_retrieval(
         for item in evaluations
         if any(target["rank"] is not None for target in item["targets"])
     ]
-    post_rerank_found = [target for target in target_rows if target["rank"] is not None and int(target["rank"]) <= 8]
     target_recall = (len(found) / len(target_rows)) if target_rows else None
+    post_rows = [target for item in evaluations if item["post_rerank_reason"] == "ok" for target in item["post_rerank_targets"]]
+    post_rerank_found = [target for target in post_rows if target["rank"] is not None and int(target["rank"]) <= 8]
+    post_rerank_available = any(item["post_rerank_reason"] == "ok" for item in evaluations)
     return {
         "database": portable_path(database),
         "gold": portable_path(gold_path),
@@ -187,6 +231,7 @@ def evaluate_retrieval(
         "target_recall_at_20": target_recall if limit == 20 else None,
         "question_complete_recall_at_k": (fully_covered / len(evaluations)) if evaluations else None,
         "mrr_at_k": (sum(1 / rank for rank in first_relevant_ranks) / len(evaluations)) if evaluations else None,
-        "post_rerank_recall_at_8": (len(post_rerank_found) / len(target_rows)) if target_rows else None,
+        "post_rerank_recall_at_8": (len(post_rerank_found) / len(post_rows)) if post_rerank_available and post_rows else None,
+        "post_rerank_reason": "ok" if post_rerank_available else (evaluations[0]["post_rerank_reason"] if evaluations else "no_eligible_questions"),
         "evaluations": evaluations,
     }

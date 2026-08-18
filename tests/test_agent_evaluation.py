@@ -9,6 +9,16 @@ from disclosure_db.agent_evaluation import evaluate_agent, evaluation_pass, perc
 
 
 class AgentEvaluationTests(unittest.TestCase):
+    @staticmethod
+    def _record(*, answerability: str = "unanswerable", answer: dict[str, object] | None = None, evidence: list[dict[str, str]] | None = None) -> dict[str, object]:
+        return {
+            "question_id": "q1",
+            "question": "테스트 질문",
+            "answerability": answerability,
+            "answer": answer or {"kind": "unanswerable", "reason": "없음"},
+            "evidence": evidence or [],
+        }
+
     def test_verified_abstention_is_not_a_pass_for_answerable_gold(self) -> None:
         self.assertFalse(evaluation_pass(
             expected_answerable=True,
@@ -67,7 +77,7 @@ class AgentEvaluationTests(unittest.TestCase):
 
         with TemporaryDirectory() as directory:
             gold = Path(directory) / "gold.jsonl"
-            gold.write_text('{"question": "broken"\n{"question": "safe", "answerability": "unanswerable"}\n', encoding="utf-8")
+            gold.write_text('{"question": "broken"\n{"question_id":"safe", "question": "safe", "answerability": "unanswerable", "answer":{"kind":"unanswerable","reason":"none"}, "evidence":[]}\n', encoding="utf-8")
             result = evaluate_agent(FakeAgent(), gold)
 
         self.assertEqual(result["count"], 2)
@@ -83,7 +93,7 @@ class AgentEvaluationTests(unittest.TestCase):
 
         with TemporaryDirectory() as directory:
             gold = Path(directory) / "gold.jsonl"
-            gold.write_text('[]\n{"question": "safe", "answerability": "unanswerable"}\n', encoding="utf-8")
+            gold.write_text('[]\n{"question_id":"safe", "question": "safe", "answerability": "unanswerable", "answer":{"kind":"unanswerable","reason":"none"}, "evidence":[]}\n', encoding="utf-8")
             result = evaluate_agent(FakeAgent(), gold)
 
         self.assertEqual(result["count"], 2)
@@ -111,6 +121,9 @@ class AgentEvaluationTests(unittest.TestCase):
 
     def test_quality_gate_boundary_passes_and_fails(self) -> None:
         summary = {
+            "error_count": 0,
+            "false_numeric_claim_count": 0,
+            "unsafe_answer_count": 0,
             "answerability_match_count": 31,
             "answerability_agreement": 1.0,
             "numeric_exactness": 1.0,
@@ -119,6 +132,7 @@ class AgentEvaluationTests(unittest.TestCase):
             "false_numeric_claim_count": 0,
             "unsafe_answer_count": 0,
             "latency_ms_p95": 20.0,
+            "planner_p95_ms": 20.0,
         }
         acceptance = {
             "regression_answerability_matches": 31,
@@ -132,6 +146,82 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertTrue(quality_gate_passed(summary, acceptance))
         summary["numeric_exactness"] = 0.99
         self.assertFalse(quality_gate_passed(summary, acceptance))
+
+    def test_quality_gate_fails_when_any_configured_metric_is_missing_or_null(self) -> None:
+        acceptance = {
+            "regression_answerability_matches": 1,
+            "numeric_exactness": 1.0,
+            "citation_precision": 1.0,
+            "retrieval_recall_at_20": 1.0,
+            "post_rerank_recall_at_8": 0.9,
+            "citation_recall": 0.9,
+            "holdout_answerability_agreement": 0.9,
+            "false_numeric_claims": 0,
+            "unsafe_answers": 0,
+            "planner_p95_ms": 20,
+            "fact_lookup_p95_ms": 200,
+            "local_retrieval_p95_ms": 800,
+            "reranked_retrieval_p95_ms": 5000,
+            "end_to_end_p95_ms": 10000,
+        }
+        summary = {"error_count": 0, "false_numeric_claim_count": 0, "unsafe_answer_count": 0}
+        for key in acceptance:
+            if key in {"false_numeric_claims", "unsafe_answers"}:
+                continue
+            summary[key] = 1.0 if not key.endswith("_ms") else 1.0
+        self.assertFalse(quality_gate_passed(summary, acceptance))
+        summary["planner_p95_ms"] = None
+        self.assertFalse(quality_gate_passed(summary, acceptance))
+
+    def test_quality_gate_requires_zero_errors_and_exact_threshold(self) -> None:
+        acceptance = {"numeric_exactness": 1.0}
+        self.assertTrue(quality_gate_passed({"numeric_exactness": 1.0, "error_count": 0, "false_numeric_claim_count": 0, "unsafe_answer_count": 0}, acceptance))
+        self.assertFalse(quality_gate_passed({"numeric_exactness": 1.0, "error_count": 1, "false_numeric_claim_count": 0, "unsafe_answer_count": 0}, acceptance))
+        self.assertFalse(quality_gate_passed({"numeric_exactness": 0.999, "error_count": 0, "false_numeric_claim_count": 0, "unsafe_answer_count": 0}, acceptance))
+
+    def test_numeric_exactness_rejects_extra_duplicate_and_unanswerable_values(self) -> None:
+        class FakeAgent:
+            def __init__(self, values: list[str]):
+                self.values = values
+            def answer(self, question: str, *, as_of: str | None, limit: int) -> VerifiedAnswer:
+                return VerifiedAnswer("답", ["ev1"], True, True, numeric_values=self.values)
+
+        records = [self._record(answerability="answerable", answer={"kind": "numeric", "value": "1", "unit": "원", "scale": 1}, evidence=[{"evidence_id": "ev1"}])]
+        with TemporaryDirectory() as directory:
+            gold = Path(directory) / "gold.jsonl"
+            gold.write_text("\n".join(__import__("json").dumps(row) for row in records) + "\n", encoding="utf-8")
+            equivalent = evaluate_agent(FakeAgent(["1.0"]), gold)
+            extra = evaluate_agent(FakeAgent(["1", "2"]), gold)
+            duplicate = evaluate_agent(FakeAgent(["1", "1"]), gold)
+        self.assertEqual(equivalent["numeric_exactness"], 1.0)
+        self.assertEqual(extra["numeric_exactness"], 0.0)
+        self.assertEqual(extra["false_numeric_claim_count"], 1)
+        self.assertEqual(duplicate["numeric_exactness"], 0.0)
+
+    def test_multi_numeric_requires_exact_decimal_multiset(self) -> None:
+        class FakeAgent:
+            def answer(self, question: str, *, as_of: str | None, limit: int) -> VerifiedAnswer:
+                return VerifiedAnswer("답", ["ev1", "ev2"], True, True, numeric_values=["1.0", "2"])
+
+        record = self._record(answerability="answerable", answer={"kind": "multi_numeric", "values": [{"label": "a", "value": "1", "unit": "원", "scale": 1, "evidence_ids": ["ev1"]}, {"label": "b", "value": "2", "unit": "원", "scale": 1, "evidence_ids": ["ev2"]}]}, evidence=[{"evidence_id": "ev1"}, {"evidence_id": "ev2"}])
+        with TemporaryDirectory() as directory:
+            gold = Path(directory) / "gold.jsonl"
+            gold.write_text(__import__("json").dumps(record) + "\n", encoding="utf-8")
+            result = evaluate_agent(FakeAgent(), gold)
+        self.assertEqual(result["numeric_exactness"], 1.0)
+
+    def test_invalid_evaluation_record_is_error_and_blocks_gate(self) -> None:
+        class FailingAgent:
+            def answer(self, question: str, *, as_of: str | None, limit: int) -> VerifiedAnswer:
+                raise AssertionError("agent must not receive malformed row")
+
+        with TemporaryDirectory() as directory:
+            gold = Path(directory) / "gold.jsonl"
+            gold.write_text('{"question":"missing answerability","evidence":[]}\n', encoding="utf-8")
+            result = evaluate_agent(FailingAgent(), gold, acceptance={"numeric_exactness": 0.0})
+        self.assertEqual(result["error_count"], 1)
+        self.assertEqual(result["evaluations"][0]["status"], "error")
+        self.assertFalse(result["quality_gate_passed"])
 
 
 if __name__ == "__main__":
