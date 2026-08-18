@@ -315,13 +315,9 @@ def _build_audit_cache(
                 "parse_status": str(row["parse_status"]), "fragment_count": 0,
                 "table_count": 0, "cell_count": 0,
             }
-        for table_name, count_key in (("fragment", "fragment_count"), ("table_record", "table_count"), ("table_cell", "cell_count")):
-            count_rows = connection.execute(
-                f"SELECT source_id, count(*) AS count_value FROM {table_name} WHERE source_id IN ({placeholders}) GROUP BY source_id",
-                batch,
-            )
-            for count_row in count_rows:
-                source_cache.setdefault(str(count_row["source_id"]), {})[count_key] = int(count_row["count_value"])
+        # Counts are needed only in emitted source metadata and are already selected by
+        # the fact extractor; the audit gate itself needs no count and must not rescan
+        # the large fragment/table-cell tables here.
     return {"evidence": evidence_cache, "source": source_cache}
 
 
@@ -689,9 +685,17 @@ def _reject_row(candidate: dict[str, Any], reasons: list[str], *, base_sha256: s
 def generate_gold(
     *, database: Path, gold_path: Path, overlay_seed: Path, output: Path, summary: Path, rejects: Path,
     predicate_config: Path = Path("config/agent_gold_predicates.json"), expected_base_sha256: str = EXPECTED_BASE_SHA256,
+    precomputed_base_sha256: str | None = None,
 ) -> dict[str, Any]:
     config = load_predicate_config(predicate_config)
-    base_hash = _sha256(database)
+    if precomputed_base_sha256 is not None:
+        if not re.fullmatch(r"[0-9a-f]{64}", precomputed_base_sha256.casefold()):
+            raise ValueError("precomputed base SHA-256 must be 64 lowercase hexadecimal characters")
+        base_hash = precomputed_base_sha256.casefold()
+        base_hash_mode = "precomputed_external_attestation"
+    else:
+        base_hash = _sha256(database)
+        base_hash_mode = "computed_by_generator"
     gold_hash = _sha256(gold_path)
     seed_hash = _sha256(overlay_seed)
     existing = extract_existing_gold(gold_path)
@@ -753,6 +757,8 @@ def generate_gold(
         "status": "ok" if base_valid else "blocked",
         "expected_base_sha256": expected_base_sha256,
         "base_sha256": base_hash,
+        "base_size_bytes": database.stat().st_size,
+        "base_hash_mode": base_hash_mode,
         "gold_input_sha256": gold_hash,
         "seed_input_sha256": seed_hash,
         "candidate_count": len(existing) + len(generated_candidates),
@@ -780,11 +786,13 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--rejects", type=Path, required=True)
     parser.add_argument("--predicate-config", type=Path, default=Path("config/agent_gold_predicates.json"))
     parser.add_argument("--expected-base-sha256", default=EXPECTED_BASE_SHA256)
+    parser.add_argument("--precomputed-base-sha256", help="Use an independently verified SHA-256 and skip rereading a very large immutable file")
     args = parser.parse_args(argv)
     result = generate_gold(
         database=args.database, gold_path=args.gold, overlay_seed=args.overlay_seed,
         output=args.output, summary=args.summary, rejects=args.rejects,
         predicate_config=args.predicate_config, expected_base_sha256=args.expected_base_sha256,
+        precomputed_base_sha256=args.precomputed_base_sha256,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
