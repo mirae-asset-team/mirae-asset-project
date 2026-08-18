@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
+import hashlib
+import shutil
+from pathlib import Path
 from typing import Iterable
 
 
@@ -148,6 +151,30 @@ def score_metamorphic_group(results: Iterable[dict[str, object]]) -> CaseScore:
     return CaseScore(str(first.get("question_id", "metamorphic")), not failures, failures, classify_failure(failures))
 
 
+def should_skip(case: dict[str, object], git_commit: str, completed: dict[str, object]) -> bool:
+    return (
+        str(case.get("question_id")) == str(completed.get("case_id"))
+        and str(case.get("input_hash")) == str(completed.get("input_hash"))
+        and str(git_commit) == str(completed.get("git_commit"))
+    )
+
+
+def run_fault_case(source: Path, temporary_root: Path) -> dict[str, object]:
+    source = Path(source)
+    temporary_root = Path(temporary_root)
+    temporary_root.mkdir(parents=True, exist_ok=True)
+    before = hashlib.sha256(source.read_bytes()).hexdigest()
+    copied = temporary_root / source.name
+    shutil.copy2(source, copied)
+    copied.write_bytes(b"fault-fixture")
+    after = hashlib.sha256(source.read_bytes()).hexdigest()
+    return {
+        "fault_isolated": before == after and hashlib.sha256(copied.read_bytes()).hexdigest() != before,
+        "source_sha256": before,
+        "copy_sha256": hashlib.sha256(copied.read_bytes()).hexdigest(),
+    }
+
+
 def classify_failure(failures: Iterable[str]) -> str:
     names = set(failures)
     mapping = {
@@ -194,4 +221,7 @@ def aggregate_scores(scores: Iterable[CaseScore], contract: dict[str, object]) -
     return summary
 
 
-__all__ = ["CAUSE_ORDER", "CaseScore", "aggregate_scores", "classify_failure", "score_case", "score_metamorphic_group"]
+__all__ = [
+    "CAUSE_ORDER", "CaseScore", "aggregate_scores", "classify_failure", "run_fault_case",
+    "score_case", "score_metamorphic_group", "should_skip",
+]

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 from disclosure_db.stress_generation import (
@@ -11,7 +14,7 @@ from disclosure_db.stress_generation import (
     validate_stress_case,
     validate_stress_cases,
 )
-from disclosure_db.stress_evaluation import score_case, score_metamorphic_group
+from disclosure_db.stress_evaluation import run_fault_case, score_case, score_metamorphic_group, should_skip
 
 
 def valid_case() -> dict[str, object]:
@@ -128,6 +131,23 @@ class AgentStressContractTests(unittest.TestCase):
         base = {"answerable": True, "value": "10", "unit": "원", "evidence_ids": ["ev1"]}
         changed_value = {"answerable": True, "value": "11", "unit": "원", "evidence_ids": ["ev1"]}
         self.assertFalse(score_metamorphic_group([base, changed_value]).passed)
+
+    def test_resume_skips_only_matching_case_hash_and_commit(self) -> None:
+        completed = {"case_id": "c1", "input_hash": "a", "git_commit": "g1"}
+        matching = {"question_id": "c1", "input_hash": "a"}
+        changed = {"question_id": "c1", "input_hash": "b"}
+        self.assertTrue(should_skip(matching, "g1", completed))
+        self.assertFalse(should_skip(changed, "g1", completed))
+        self.assertFalse(should_skip(matching, "g2", completed))
+
+    def test_fault_fixture_never_mutates_source_database(self) -> None:
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "source.sqlite"
+            source.write_bytes(b"fixture-source")
+            before = hashlib.sha256(source.read_bytes()).hexdigest()
+            result = run_fault_case(source, Path(directory) / "fault")
+            self.assertTrue(result["fault_isolated"])
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
 
 
 if __name__ == "__main__":

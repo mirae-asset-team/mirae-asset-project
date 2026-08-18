@@ -254,7 +254,7 @@ git commit -m "test: score and classify disclosure stress failures"
 - Checkpoint key: `case_id + input_hash + git_commit`
 - Run ID: UTC start timestamp + first 12 chars of manifest hash
 
-- [ ] **Step 1: Write failing resume and fault tests**
+- [x] **Step 1: Write failing resume and fault tests**
 
 ```python
 def test_resume_skips_only_matching_case_hash_and_commit(self):
@@ -270,21 +270,21 @@ def test_fault_fixture_never_mutates_source_database(self):
     self.assertEqual(sha256_file(source), before)
 ```
 
-- [ ] **Step 2: Run and confirm failures**
+- [x] **Step 2: Run and confirm failures**
 
 Run: `python -m unittest tests.test_agent_stress -v`
 
 Expected: FAIL on missing checkpoint/fault functions.
 
-- [ ] **Step 3: Implement atomic checkpoint records**
+- [x] **Step 3: Implement atomic checkpoint records**
 
 Write each completed case as canonical JSON to a temp file and `Path.replace` into `D:\...\runs\evaluation\{run_id}\checkpoints\{question_id}.json`. Resume only when question ID, canonical input hash, git commit, base attestation, overlay revision, and search revision all match.
 
-- [ ] **Step 4: Implement fault tests only on copied miniature fixtures**
+- [x] **Step 4: Implement fault tests only on copied miniature fixtures**
 
 Cover missing base, fast-identity drift, overlay mismatch, absent index, invalid index revision, SQLite quick-check failure, provider timeout, and malformed provider JSON. Full 38.8GB DB is never copied or corrupted; use test fixture DBs from existing unit-test seed helpers.
 
-- [ ] **Step 5: Implement the runner CLI**
+- [x] **Step 5: Implement the runner CLI**
 
 ```powershell
 python scripts/evaluate_agent_stress.py --database D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite --overlay D:\mirae-asset-project\db\agent\agent_overlay.sqlite --search-index D:\mirae-asset-project\db\agent\agent_search.sqlite --attestation data\derived\database_distribution_manifest_semantic_v1.json --cases D:\mirae-asset-project\runs\evaluation\agent_stress_300.jsonl --contract config\stress_evaluation_contract.json --run-root D:\mirae-asset-project\runs\evaluation --summary data\derived\agent_stress_300_summary.json --failures data\derived\agent_stress_failures.jsonl --workers 1 --resume
@@ -292,7 +292,7 @@ python scripts/evaluate_agent_stress.py --database D:\mirae-asset-project\db\sem
 
 The runner traps per-case exceptions as evaluator errors, records them, and stops the run on the first hard-gate violation. It never prints raw answer text or secrets.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 Run: `python -m unittest tests.test_agent_stress -v`
 

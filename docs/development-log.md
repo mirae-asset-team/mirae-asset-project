@@ -276,3 +276,10 @@
 - RED: scorer tests initially failed because `disclosure_db.stress_evaluation` did not exist.
 - GREEN: added `CaseScore`, oracle-specific deterministic scoring, metamorphic consistency checks, failure-cause precedence, and aggregate hard-gate counters. Unknown/cross-filing citations and false numeric claims remain failures.
 - Verification: `python -m unittest tests.test_agent_stress -v` → 9 passed.
+
+## 2026-08-19T05:18:00+09:00 — Plan 3 Task 4: resumable runner and fault isolation
+
+- Intent: add hash/commit-bound checkpoints, deterministic per-case execution, hard-stop failure handling, and copied-fixture-only fault tests.
+- RED: resume/fault tests initially failed because `run_fault_case` and `should_skip` were absent.
+- GREEN: added atomic checkpoint JSON records keyed by case/input/git identity, attestation/index validation before execution, provider-disabled deterministic runner mode, and fault fixtures that never copy or mutate the 38GB corpus.
+- Verification: `python -m unittest tests.test_agent_stress -v` → 11 passed; runner compiles successfully. No D-drive stress run was started before the runner implementation was committed.
