@@ -199,3 +199,9 @@
 - RED/GREEN: script contract initially failed on missing files; after implementation and the local command-path regression, `tests.test_deployment_artifacts` → 3 passed. The startup script now falls back to the workspace virtualenv Python module when `disclosure-agent` is not on PATH.
 - Local smoke: server startup succeeded and `/health` plus `/query` returned HTTP 200. The known financial answerable fixture safely abstained with `answerable=false`, `verified=false`, no evidence, and reason codes including `validated_financial_fact_required`; therefore the answerable smoke assertion remains open pending Plan 2 correctness hardening. No unsafe answer was observed.
 - Blocked verification: Docker CLI is unavailable, so Docker smoke was not run. The server process was stopped after diagnostics.
+
+## 2026-08-19T03:34:14+09:00 — Plan 1 Task 7: serving runbook
+
+- Intent: document exact local, Docker, NCP, stop/restart, diagnosis, and recoverable rollback flows.
+- Added `docs/operations/contest-server.md` and linked it from README. The runbook states that base/overlay/index are read-only, secrets are process-scoped, and public submission readiness requires external checks.
+- Sanitized status: local server start and health route worked; Docker CLI is unavailable; the answerable smoke fixture remains blocked by the known correctness issue; no provider credential or public NCP endpoint is available.

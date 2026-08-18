@@ -137,6 +137,10 @@ uvicorn은 선택 의존성으로 지연 로딩되며, 핵심 CLI·테스트에�
 `request_id`, `corpus_revision`, `latency_ms`가 공통으로 붙고, overlay가 설정됐지만 base attestation에
 실패하면 `/health`가 `ready=false`를 반환합니다.
 
+공모전 호환 `/query`의 로컬·Docker·NCP 시작, 중지, 재시작, rollback 절차는
+[contest server runbook](docs/operations/contest-server.md)을 따릅니다. `/health.ready=true`는
+서버 readiness만 의미하며, 정확도·provider·외부 endpoint gate 통과를 의미하지 않습니다.
+
 Runtime `agent-query`/`serve` requires `--attestation` whenever `--overlay` or `--search-index` is
 configured. The distribution manifest records the offline-verified SHA-256, byte size, and trusted
 `mtime_ns`; a missing or mismatched trusted mtime fails closed. Copying or re-extracting the database

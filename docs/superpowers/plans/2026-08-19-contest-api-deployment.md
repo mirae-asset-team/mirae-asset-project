@@ -568,7 +568,7 @@ git commit -m "ops: add Windows agent startup smoke"
 **Interfaces:**
 - Produces exact local, Docker, NCP, stop, restart, and diagnosis commands.
 
-- [ ] **Step 1: Write the operations guide**
+- [x] **Step 1: Write the operations guide**
 
 The guide starts with prerequisites and warnings, then includes these executable flows:
 
@@ -582,11 +582,11 @@ docker compose down
 
 For NCP, map `/srv/mirae/data/base`, `/srv/mirae/data/agent`, `/srv/mirae/runtime`; document ACG restriction, public-IP smoke from a second network, and restart verification. State that NCP completion cannot be claimed until those external checks pass.
 
-- [ ] **Step 2: Add a short README quick start and development-log entry**
+- [x] **Step 2: Add a short README quick start and development-log entry**
 
 Link the operations guide from README. Record DB identity, commands executed, whether provider was configured, smoke request IDs, and observed latency without recording questions, answers, credentials, or private URLs.
 
-- [ ] **Step 3: Run the complete local verification**
+- [x] **Step 3: Run the complete local verification**
 
 Run: `python -m unittest discover -s tests -v`
 
@@ -606,7 +606,7 @@ Run: `docker compose down`
 
 Expected: container becomes healthy, smoke exits 0, container stops cleanly.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add README.md docs/operations/contest-server.md docs/development-log.md
