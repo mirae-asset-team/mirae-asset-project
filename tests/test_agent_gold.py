@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from scripts.build_agent_gold import load_predicate_config
-from scripts.build_agent_gold import AuditResult, audit_candidate, extract_fact_candidates, write_jsonl_atomic
+from scripts.build_agent_gold import AuditResult, audit_candidate, extract_fact_candidates, main as build_agent_gold_main, write_jsonl_atomic
 from disclosure_db.schema import create_schema
 from disclosure_db.gold_validation import validate_record_contract
 
@@ -195,6 +195,34 @@ class AgentGoldTests(unittest.TestCase):
             output = Path(temp) / "nested" / "rows.jsonl"
             write_jsonl_atomic(output, [{"b": 2, "a": 1}])
             self.assertEqual(json.loads(output.read_text(encoding="utf-8")), {"a": 1, "b": 2})
+
+    def test_cli_outputs_jsonl_summary_and_rejects_with_input_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base = build_fixture_database(root / "base.sqlite")
+            gold = root / "gold.jsonl"
+            human = valid_text_record()
+            human["answer_origin"] = "human_verified"
+            human["review"] = {"status": "approved", "annotator": "fixture", "reviewer": "reviewer", "reviewed_at": "2024-01-02T00:00:00+00:00", "notes": "fixture"}
+            gold.write_text(json.dumps(human, ensure_ascii=False) + "\n", encoding="utf-8")
+            seed = root / "seed.jsonl"
+            seed.write_text("", encoding="utf-8")
+            output, summary, rejects = root / "out.jsonl", root / "summary.json", root / "rejects.jsonl"
+            base_hash = hashlib.sha256(base.read_bytes()).hexdigest()
+            build_agent_gold_main([
+                "--database", str(base), "--gold", str(gold), "--overlay-seed", str(seed),
+                "--output", str(output), "--summary", str(summary), "--rejects", str(rejects),
+                "--expected-base-sha256", base_hash,
+            ])
+            rows = [json.loads(line) for line in output.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertGreaterEqual(len(rows), 1)
+            self.assertTrue(all(row["audit"]["base_sha256"] == base_hash for row in rows))
+            summary_row = json.loads(summary.read_text(encoding="utf-8"))
+            self.assertEqual(summary_row["status"], "ok")
+            self.assertEqual(summary_row["audited_count"], sum(row["review"]["status"] == "agent_audited" for row in rows))
+            for line in rejects.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    self.assertTrue(json.loads(line)["reason_codes"])
 
 
 if __name__ == "__main__":
