@@ -129,6 +129,20 @@ class AgentRuntimeTests(unittest.TestCase):
         )
         self.assertEqual(DeterministicGenerator().generate(bundle).citation_ids, ["ev_selected"])
 
+    def test_deterministic_text_event_answer_returns_value_only(self):
+        bundle = EvidenceBundle(
+            question="계약상대는 누구인가?",
+            evidence=[EvidenceRef("ev_value", "f1", "s1", "상대회사")],
+            answerable=True,
+            event_facts=[{
+                "predicate_id": "counterparty",
+                "answer_kind": "text",
+                "value_raw": "상대회사",
+                "evidence_ids": ["ev_value"],
+            }],
+        )
+        self.assertEqual(DeterministicGenerator().generate(bundle).answer, "상대회사")
+
     def test_deterministic_text_answer_cites_only_rendered_first_evidence(self):
         ev1 = EvidenceRef("ev1", "f1", "s1", "첫 번째 근거")
         ev2 = EvidenceRef("ev2", "f1", "s1", "두 번째 근거")

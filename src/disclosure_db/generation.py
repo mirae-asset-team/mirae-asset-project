@@ -53,7 +53,10 @@ class DeterministicGenerator:
             fact = bundle.event_facts[0]
             value = str(fact.get("value_numeric") or fact.get("value_raw") or "")
             numeric_values = [value] if fact.get("value_numeric") is not None else []
-            answer = f"{fact.get('predicate_raw') or fact.get('predicate_id')}은(는) {value} {fact.get('unit') or ''}입니다.".strip()
+            if fact.get("answer_kind") == "text":
+                answer = value
+            else:
+                answer = f"{fact.get('predicate_raw') or fact.get('predicate_id')}은(는) {value} {fact.get('unit') or ''}입니다.".strip()
         else:
             answer = bundle.evidence[0].text.strip() or UNANSWERABLE_TEXT
         return AnswerDraft(answer=answer, citation_ids=citations, numeric_values=numeric_values, answerable=True)
