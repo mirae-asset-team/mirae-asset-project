@@ -154,3 +154,11 @@
   `base_attested=true`, `overlay_attested=true`, `search_index_ready=true`, `ready=true`. A live
   deterministic answer probe ran with `disclosure_db.financial_overlay.sha256_file` patched to
   raise; no hash was called. The probe safely returned `answerable=false` for its question.
+
+## 2026-08-19T03:08:35+09:00 — Plan 1 Task 1: runtime configuration
+
+- Intent: add an environment-backed runtime factory without exposing provider secrets.
+- RED: `$env:PYTHONPATH='src'; .venv\Scripts\python.exe -m unittest tests.test_runtime_config -v` failed with the expected `ModuleNotFoundError: disclosure_db.runtime`.
+- GREEN: created `src/disclosure_db/runtime.py` with required database/attestation environment validation, file validation, agent settings conversion, and boolean-only provider status.
+- Verification: `$env:PYTHONPATH='src'; .venv\Scripts\python.exe -m unittest tests.test_runtime_config tests.test_attestation -v` → 13 passed; baseline remains 175 passed, 2 optional skips; compileall and `git diff --check` passed.
+- External status: provider key not configured; no provider call was attempted.

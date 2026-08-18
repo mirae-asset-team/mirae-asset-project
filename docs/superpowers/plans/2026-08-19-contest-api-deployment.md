@@ -47,7 +47,7 @@
 - Consumes: `AgentSettings`, `DisclosureAgent`, `Path`, `Mapping[str, str]`
 - Produces: `RuntimeConfig.from_env(env=None)`, `RuntimeConfig.validate()`, `RuntimeConfig.provider_configured`, `RuntimeConfig.to_agent_settings()`, `build_agent(config)`
 
-- [ ] **Step 1: Write failing config tests**
+- [x] **Step 1: Write failing config tests**
 
 ```python
 class RuntimeConfigTests(unittest.TestCase):
@@ -72,13 +72,13 @@ class RuntimeConfigTests(unittest.TestCase):
             config.validate()
 ```
 
-- [ ] **Step 2: Run the tests and confirm the missing module failure**
+- [x] **Step 2: Run the tests and confirm the missing module failure**
 
 Run: `python -m unittest tests.test_runtime_config -v`
 
 Expected: `ModuleNotFoundError: disclosure_db.runtime`.
 
-- [ ] **Step 3: Implement the minimal runtime contract**
+- [x] **Step 3: Implement the minimal runtime contract**
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -134,13 +134,13 @@ def build_agent(config: RuntimeConfig) -> DisclosureAgent:
 
 Do not read or expose the API key after constructing provider adapters; `provider_configured` is the only public status.
 
-- [ ] **Step 4: Run focused and baseline tests**
+- [x] **Step 4: Run focused and baseline tests**
 
 Run: `python -m unittest tests.test_runtime_config tests.test_attestation -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/disclosure_db/runtime.py tests/test_runtime_config.py
