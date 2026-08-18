@@ -171,7 +171,7 @@ Run: `python -m unittest tests.test_agent_stress -v`
 
 Build twice to distinct temp paths and compare SHA-256. Expected: hashes identical, 300 valid unique question IDs, zero group leakage.
 
-- [ ] **Step 6: Commit generator and manifest**
+- [x] **Step 6: Commit generator and manifest**
 
 ```powershell
 git add src/disclosure_db/stress_generation.py scripts/build_agent_stress.py tests/test_agent_stress.py data/derived/agent_stress_300_manifest.json
