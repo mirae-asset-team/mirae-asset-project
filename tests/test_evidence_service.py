@@ -4,6 +4,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -110,6 +111,29 @@ class EvidenceServiceTests(unittest.TestCase):
             bundle = service.search(plan)
             self.assertFalse(bundle.answerable)
             self.assertIn("validated_event_fact_required", bundle.reason_codes)
+
+    def test_title_question_prioritizes_value_cell_in_labeled_row(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp) / "base.sqlite"
+            seed_search_db(base)
+            with closing(sqlite3.connect(base)) as connection:
+                connection.execute(
+                    "INSERT INTO table_record VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                    ("t1", "f1", "s1", 0, "[]", "공시", None, 1, 2, "success", "{}"),
+                )
+                connection.execute(
+                    "INSERT INTO table_cell VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("title_label", "t1", "s1", "f1", 0, 0, 1, 1, "header", "[]", "[]", "{}", "1. 제목", "1. 제목", "1"),
+                )
+                connection.execute(
+                    "INSERT INTO table_cell VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    ("title_value", "t1", "s1", "f1", 0, 1, 1, 1, "data", "[]", "[]", "{}", "제목 값", "제목 값", "1"),
+                )
+                connection.commit()
+            service = EvidenceService(base)
+            plan = QueryPlan("삼성전자 2024-03-01 공시 제목은 무엇인가?", company="삼성전자", fact_domain="text", filing_date="2024-03-01")
+            bundle = service.search(plan)
+            self.assertEqual(bundle.evidence[0].evidence_id, "title_value")
 
     def test_query_plan_resolves_company_and_operation_without_model(self) -> None:
         plan = plan_query("삼성전자 2023년 매출액 증가율은?", company_candidates=["삼성전자"])

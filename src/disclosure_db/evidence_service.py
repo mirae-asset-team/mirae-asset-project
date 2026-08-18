@@ -67,6 +67,42 @@ class EvidenceService:
             self._companies = sorted({str(row[0]) for row in values}, key=lambda value: (-len(value), value))
         return list(self._companies)
 
+    def _title_value_refs(
+        self,
+        plan: QueryPlan,
+        *,
+        as_of: str | None = None,
+        correction_policy: str = "current",
+    ) -> list[EvidenceRef]:
+        if not plan.company or not plan.filing_date or "제목" not in plan.question:
+            return []
+        company_fields = ["f.issuer_name=?", "f.listed_name=?", "f.stock_code=?", "f.issuer_corp_code=?"]
+        params: list[object] = [plan.company] * len(company_fields)
+        params.append(plan.filing_date)
+        with closing(sqlite3.connect(f"file:{self.base_database.resolve().as_posix()}?mode=ro", uri=True)) as connection:
+            rows = connection.execute(
+                f"""SELECT DISTINCT value.evidence_id
+                       FROM table_cell label
+                       JOIN table_cell value
+                         ON value.table_id=label.table_id
+                        AND value.filing_id=label.filing_id
+                        AND value.row_index=label.row_index
+                        AND value.column_index>label.column_index
+                       JOIN filing f ON f.filing_id=value.filing_id
+                      WHERE label.cell_kind='header'
+                        AND label.text_normalized LIKE '%제목%'
+                        AND value.cell_kind='data'
+                        AND ({' OR '.join(company_fields)})
+                        AND f.filed_at=?
+                      ORDER BY value.table_id,value.row_index,value.column_index,value.evidence_id""",
+                params,
+            ).fetchall()
+        return self._hydrate_ids(
+            [str(row[0]) for row in rows],
+            as_of=as_of,
+            correction_policy=correction_policy,
+        )
+
     def search(self, plan: QueryPlan, *, limit: int = 20) -> EvidenceBundle:
         if not self._base_identity_valid():
             plan.reason_codes.append("base_attestation_failed")
@@ -191,6 +227,10 @@ class EvidenceService:
                         correction_policy=plan.correction_policy,
                     )
                     refs.extend(self._fragment_refs(rows))
+        refs = [
+            *self._title_value_refs(plan, as_of=version_as_of, correction_policy=plan.correction_policy),
+            *refs,
+        ]
         unique: list[EvidenceRef] = []
         seen: set[str] = set()
         for ref in refs:
