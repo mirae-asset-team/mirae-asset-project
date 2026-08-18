@@ -558,6 +558,20 @@ def _validate_event_candidate(
             str(cell[0]) for cell in linked_cells
             if str(cell[1]) == "data" and str(cell[2] or "").strip() == value_raw
         ]
+        if not value_evidence_ids:
+            value_cells = [
+                cell for cell in linked_cells
+                if str(cell[1]) == "data"
+                and not _header_matches_predicate(str(cell[2] or "").strip(), predicate_values)
+            ]
+            if len(value_cells) == 1:
+                value_evidence_ids = [str(value_cells[0][0])]
+        if value_evidence_ids:
+            value_raw = next(
+                str(cell[2] or "").strip()
+                for cell in linked_cells
+                if str(cell[0]) == value_evidence_ids[0]
+            )
         evidence_ids = value_evidence_ids or sorted({value for value in str(row["evidence_ids"] or "").split(",") if value})
     return {
         "event_fact_id": candidate_id,

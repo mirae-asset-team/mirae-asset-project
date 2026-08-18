@@ -171,7 +171,7 @@ class FinancialOverlayTests(unittest.TestCase):
                     "INSERT INTO table_cell VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     ("value", "t1", "s1", "f1", 2, 1, 1, 1, "data", "[]", "[]", "{}", "상대회사", "상대회사", "1"),
                 )
-                connection.execute("UPDATE fact SET predicate='계약상대', value_raw='상대회사' WHERE fact_id='fact1'")
+                connection.execute("UPDATE fact SET predicate='계약상대', value_raw='3. 계약상대(인) | 상대회사' WHERE fact_id='fact1'")
                 connection.execute("DELETE FROM fact_evidence WHERE fact_id='fact1'")
                 connection.executemany("INSERT INTO fact_evidence VALUES('fact1',?)", [("label",), ("value",)])
                 connection.commit()
@@ -183,6 +183,7 @@ class FinancialOverlayTests(unittest.TestCase):
             result = build_agent_overlay(base, overlay, seed, predicates)
             self.assertEqual(result.event_imported, 1)
             rows = fetch_event_facts(base, overlay, company="테스트", predicate_terms=["계약상대"])
+            self.assertEqual(rows[0]["value_raw"], "상대회사")
             self.assertEqual(rows[0]["evidence_ids"], ["value"])
 
     def test_event_fact_respects_original_correction_policy(self) -> None:
