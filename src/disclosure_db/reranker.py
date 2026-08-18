@@ -38,7 +38,9 @@ class ClovaReranker:
         limit: int = 8,
     ) -> RerankResult:
         final_limit = max(0, min(int(limit), 8))
-        fallback = [item.evidence_id for item in evidence[:final_limit]]
+        fallback = self._fallback_ids(evidence, final_limit)
+        if final_limit == 0 or not evidence or not question.strip():
+            return RerankResult(fallback, False, ["reranker_empty_input"])
         if not self.api_key:
             return RerankResult(fallback, False, ["reranker_not_configured"])
 
@@ -127,6 +129,21 @@ class ClovaReranker:
                 return None
             return status if isinstance(status, int) else None
         return None
+
+    @staticmethod
+    def _fallback_ids(evidence: Sequence[EvidenceRef], limit: int) -> list[str]:
+        if limit <= 0:
+            return []
+        selected: list[str] = []
+        seen: set[str] = set()
+        for item in evidence:
+            if item.evidence_id in seen:
+                continue
+            selected.append(item.evidence_id)
+            seen.add(item.evidence_id)
+            if len(selected) >= limit:
+                break
+        return selected
 
     @staticmethod
     def _cited_ids(payload: object) -> list[str] | None:

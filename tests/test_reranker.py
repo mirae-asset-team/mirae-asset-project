@@ -33,6 +33,41 @@ class RerankerTests(unittest.TestCase):
         self.assertEqual(result.evidence_ids, ["ev2"])
         self.assertTrue(result.used_provider)
 
+    def test_nonpositive_limit_returns_no_ids_without_provider_call(self) -> None:
+        with patch("urllib.request.urlopen") as opened:
+            zero = ClovaReranker(api_key="key").rerank("q", self.evidence, limit=0)
+            negative = ClovaReranker(api_key="key").rerank("q", self.evidence, limit=-1)
+        self.assertEqual(zero.evidence_ids, [])
+        self.assertEqual(negative.evidence_ids, [])
+        self.assertFalse(zero.used_provider)
+        self.assertFalse(negative.used_provider)
+        self.assertEqual(zero.reason_codes, ["reranker_empty_input"])
+        self.assertEqual(negative.reason_codes, ["reranker_empty_input"])
+        opened.assert_not_called()
+
+    def test_empty_question_returns_local_fallback_without_provider_call(self) -> None:
+        with patch("urllib.request.urlopen") as opened:
+            result = ClovaReranker(api_key="key").rerank("  \n", self.evidence, limit=1)
+        self.assertEqual(result.evidence_ids, ["ev1"])
+        self.assertFalse(result.used_provider)
+        self.assertEqual(result.reason_codes, ["reranker_empty_input"])
+        opened.assert_not_called()
+
+    def test_empty_evidence_returns_empty_without_provider_call(self) -> None:
+        with patch("urllib.request.urlopen") as opened:
+            result = ClovaReranker(api_key="key").rerank("q", [], limit=8)
+        self.assertEqual(result.evidence_ids, [])
+        self.assertFalse(result.used_provider)
+        self.assertEqual(result.reason_codes, ["reranker_empty_input"])
+        opened.assert_not_called()
+
+    def test_fallback_deduplicates_input_ids_in_local_order(self) -> None:
+        evidence = [self.evidence[0], self.evidence[0], self.evidence[1]]
+        with patch.dict("os.environ", {}, clear=True):
+            result = ClovaReranker(api_key=None).rerank("q", evidence, limit=8)
+        self.assertEqual(result.evidence_ids, ["ev1", "ev2"])
+        self.assertFalse(result.used_provider)
+
     def test_request_is_bounded_and_uses_clova_headers(self) -> None:
         evidence = [EvidenceRef(f"ev{i}", "f", "s", "x" * 1300) for i in range(35)]
         captured = {}
