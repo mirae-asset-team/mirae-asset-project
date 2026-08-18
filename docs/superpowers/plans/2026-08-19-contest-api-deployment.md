@@ -501,7 +501,7 @@ git commit -m "build: package disclosure agent server"
 - `start-agent.ps1 -Mode Local|Docker -DataRoot D:\mirae-asset-project`
 - `smoke-agent.ps1 -BaseUrl http://127.0.0.1:8000`
 
-- [ ] **Step 1: Add failing script-contract tests**
+- [x] **Step 1: Add failing script-contract tests**
 
 ```python
 def test_windows_scripts_validate_read_only_inputs_and_smoke_query(self):
@@ -513,13 +513,13 @@ def test_windows_scripts_validate_read_only_inputs_and_smoke_query(self):
     self.assertIn("/query", smoke)
 ```
 
-- [ ] **Step 2: Run and confirm missing-script failures**
+- [x] **Step 2: Run and confirm missing-script failures**
 
 Run: `python -m unittest tests.test_deployment_artifacts -v`
 
 Expected: FAIL.
 
-- [ ] **Step 3: Implement `start-agent.ps1`**
+- [x] **Step 3: Implement `start-agent.ps1`**
 
 The script resolves these exact inputs, validates all with `Test-Path -LiteralPath -PathType Leaf`, sets process-scoped `DISCLOSURE_*`, and invokes either `disclosure-agent serve` in the current console or `docker compose up -d --build`. It must not print environment values or accept credentials as command-line parameters.
 
@@ -537,7 +537,7 @@ foreach ($path in $required) {
 }
 ```
 
-- [ ] **Step 4: Implement deterministic smoke assertions**
+- [x] **Step 4: Implement deterministic smoke assertions**
 
 `smoke-agent.ps1` waits at most 60 seconds for `ready=true`, posts one answerable fixture and one out-of-scope fixture, asserts `request_id`, `answerable`, `verified`, `evidence`, and exits non-zero on any mismatch. Use `Invoke-RestMethod`; do not log the API key.
 
@@ -551,7 +551,7 @@ Run in terminal B: `powershell -ExecutionPolicy Bypass -File scripts/smoke-agent
 
 Expected: test PASS and smoke exits 0. Stop terminal A with Ctrl+C.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git add scripts/start-agent.ps1 scripts/smoke-agent.ps1 tests/test_deployment_artifacts.py

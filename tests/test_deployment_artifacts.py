@@ -14,6 +14,17 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn("data/", Path(".dockerignore").read_text(encoding="utf-8"))
         self.assertNotIn("D:\\", Path("Dockerfile").read_text(encoding="utf-8"))
 
+    def test_windows_scripts_validate_read_only_inputs_and_smoke_query(self):
+        start = Path("scripts/start-agent.ps1").read_text(encoding="utf-8")
+        smoke = Path("scripts/smoke-agent.ps1").read_text(encoding="utf-8")
+        self.assertIn("Test-Path -LiteralPath", start)
+        self.assertIn("disclosure-agent", start)
+        self.assertIn("Get-Command disclosure-agent", start)
+        self.assertIn("-m disclosure_db.cli", start)
+        self.assertIn("/health", smoke)
+        self.assertIn("/query", smoke)
+        self.assertIn("연결 XI.", smoke)
+
 
 if __name__ == "__main__":
     unittest.main()

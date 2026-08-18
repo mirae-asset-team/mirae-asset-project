@@ -192,3 +192,10 @@
 - RED/GREEN: static artifact tests initially failed with missing `compose.yaml`/`.dockerignore`; after adding the Dockerfile, Compose, ignore rules, and `.env.example`, `python -m unittest tests.test_deployment_artifacts -v` → 2 passed.
 - Blocked verification: `docker compose config` could not run because the Docker CLI is not installed in this environment. No Docker build or container smoke result is claimed; the Task 5 Docker verification checkbox remains open.
 - Hygiene: a temporary secret-free `.env` was created only for the attempted config check and removed immediately. No credential, DB, raw response, or runtime log was created or committed.
+
+## 2026-08-19T03:32:18+09:00 — Plan 1 Task 6: Windows startup and smoke scripts
+
+- Intent: add read-only D-drive validation, local/Docker startup selection, and bounded `/health` + `/query` smoke assertions.
+- RED/GREEN: script contract initially failed on missing files; after implementation and the local command-path regression, `tests.test_deployment_artifacts` → 3 passed. The startup script now falls back to the workspace virtualenv Python module when `disclosure-agent` is not on PATH.
+- Local smoke: server startup succeeded and `/health` plus `/query` returned HTTP 200. The known financial answerable fixture safely abstained with `answerable=false`, `verified=false`, no evidence, and reason codes including `validated_financial_fact_required`; therefore the answerable smoke assertion remains open pending Plan 2 correctness hardening. No unsafe answer was observed.
+- Blocked verification: Docker CLI is unavailable, so Docker smoke was not run. The server process was stopped after diagnostics.
