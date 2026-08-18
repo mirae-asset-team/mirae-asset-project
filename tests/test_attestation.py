@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from disclosure_db.attestation import load_distribution_attestation, verify_fast_identity
+from disclosure_db.attestation import CorpusAttestation, load_distribution_attestation, verify_fast_identity
 from disclosure_db.agent import AgentSettings, DisclosureAgent
 from disclosure_db.api import _health_status
 from disclosure_db.generation import DeterministicGenerator
@@ -104,7 +104,7 @@ class AttestationTests(unittest.TestCase):
             agent = DisclosureAgent(evidence_service=service, generator=DeterministicGenerator())
             database.write_bytes(b"changed-size")
             answer = agent.answer("테스트 설명")
-            self.assertTrue(answer.verified)
+            self.assertFalse(answer.verified)
             self.assertFalse(answer.answerable)
             self.assertIn("base_attestation_failed", answer.reason_codes)
 
@@ -119,6 +119,32 @@ class AttestationTests(unittest.TestCase):
                 overlay_database = None
                 search_database = root / "missing-search.sqlite"
                 attestation = None
+
+            health = _health_status(Service())
+            self.assertFalse(health["search_index_ready"])
+            self.assertFalse(health["ready"])
+            self.assertEqual(health["status"], "degraded")
+
+    def test_health_reports_corrupt_search_index_as_degraded(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            database = root / "base.sqlite"
+            search = root / "search.sqlite"
+            database.write_bytes(b"fixture")
+            search.write_bytes(b"not sqlite")
+            attestation = CorpusAttestation(
+                sha256="a" * 64,
+                size_bytes=database.stat().st_size,
+                mtime_ns=database.stat().st_mtime_ns,
+                revision="semantic-v1",
+            )
+
+            class Service:
+                base_database = database
+                overlay_database = None
+                search_database = search
+
+            Service.attestation = attestation
 
             health = _health_status(Service())
             self.assertFalse(health["search_index_ready"])

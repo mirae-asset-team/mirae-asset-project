@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -94,7 +95,7 @@ def _health_status(service: Any) -> dict[str, Any]:
                 base_sha256=service.attestation.sha256,
                 expected_base_size=service.attestation.size_bytes,
             )
-        except (OSError, ValueError, TypeError):
+        except (OSError, ValueError, TypeError, sqlite3.Error):
             search_index_ready = False
         else:
             search_index_ready = True

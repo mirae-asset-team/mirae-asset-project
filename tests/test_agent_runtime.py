@@ -216,6 +216,48 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertEqual(answer.citation_ids, ["ev2", "ev1"])
         self.assertEqual([item.evidence_id for item in answer.citations], ["ev2", "ev1"])
 
+    def test_nonanswerable_provider_text_is_canonicalized_to_unverified_abstention(self) -> None:
+        evidence = EvidenceRef("ev1", "f1", "s1", "근거")
+        bundle = EvidenceBundle(question="계약 상대방은 누구인가?", evidence=[evidence], answerable=True)
+        draft = AnswerDraft(answer="unverified claim", answerable=False)
+        answer = verify_answer(bundle, draft)
+        self.assertFalse(answer.verified)
+        self.assertFalse(answer.answerable)
+        self.assertEqual(answer.answer, "검증에 실패하여 답변을 보류합니다.")
+        self.assertEqual(answer.numeric_values, [])
+        self.assertEqual(answer.citation_ids, [])
+        self.assertEqual(answer.citations, [])
+
+    def test_failed_numeric_verification_clears_untrusted_numeric_values(self) -> None:
+        evidence = EvidenceRef("ev1", "f1", "s1", "계약금액 2000원")
+        bundle = EvidenceBundle(
+            question="계약금액은 얼마인가?",
+            evidence=[evidence],
+            answerable=True,
+            event_facts=[{"value_numeric": "2000", "evidence_ids": ["ev1"]}],
+        )
+        draft = AnswerDraft(answer="계약금액은 3000원입니다.", citation_ids=["ev1"], numeric_values=["3000"])
+        answer = verify_answer(bundle, draft)
+        self.assertFalse(answer.verified)
+        self.assertFalse(answer.answerable)
+        self.assertEqual(answer.numeric_values, [])
+        self.assertEqual(answer.citation_ids, ["ev1"])
+        self.assertEqual([item.evidence_id for item in answer.citations], ["ev1"])
+
+    def test_verified_numeric_answer_retains_audited_numeric_value(self) -> None:
+        evidence = EvidenceRef("ev1", "f1", "s1", "계약금액 2000원")
+        bundle = EvidenceBundle(
+            question="계약금액은 얼마인가?",
+            evidence=[evidence],
+            answerable=True,
+            event_facts=[{"value_numeric": "2000", "evidence_ids": ["ev1"]}],
+        )
+        draft = AnswerDraft(answer="계약금액은 2000원입니다.", citation_ids=["ev1"], numeric_values=["2000"])
+        answer = verify_answer(bundle, draft)
+        self.assertTrue(answer.verified)
+        self.assertTrue(answer.answerable)
+        self.assertEqual(answer.numeric_values, ["2000"])
+
     @staticmethod
     def _hcx_response(payload: object) -> Mock:
         response = Mock()
