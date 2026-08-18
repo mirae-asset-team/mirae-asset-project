@@ -104,7 +104,7 @@ class AgentStressContractTests(unittest.TestCase):
         record["evidence"] = []
         cases = build_stress_cases([record], {"case_count": 1, "allocation": {"calculation": 1}})
         self.assertEqual(cases[0]["answerability"], "unanswerable")
-        self.assertIn("확인할 수 없는 미래 사실", cases[0]["question"])
+        self.assertIn("확인할 수 없다고 답하라", cases[0]["question"])
 
     def test_invalid_answerable_source_is_mutated_to_safe_abstention_prompt(self) -> None:
         record = valid_case()
@@ -113,7 +113,7 @@ class AgentStressContractTests(unittest.TestCase):
         cases = build_stress_cases([record], {"case_count": 1, "allocation": {"calculation": 1}})
         self.assertEqual(cases[0]["answerability"], "unanswerable")
         self.assertEqual(cases[0]["answer"]["kind"], "unanswerable")
-        self.assertIn("확인할 수 없는 미래 사실", cases[0]["question"])
+        self.assertIn("확인할 수 없다고 답하라", cases[0]["question"])
 
     def test_group_split_never_separates_base_and_mutations(self) -> None:
         cases = []
