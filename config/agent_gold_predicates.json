@@ -6,7 +6,11 @@
       "question_type": "table_cell",
       "answer_kind": "numeric",
       "allowed_fact_types": ["event_kv_candidate"],
-      "predicate_values": ["계약금액"],
+      "predicate_values": [
+        "계약금액",
+        "2. 계약내역",
+        "2. 계약내역 - 계약금액(원)"
+      ],
       "required_evidence_fields": ["evidence_id", "filing_id", "source_sha256", "unit", "scale"],
       "question_template": "{company}의 {as_of} 공시 계약금액은 얼마인가?"
     },
@@ -31,7 +35,8 @@
         "발행주식수",
         "발행주식 총수(주)",
         "발행주식 총수",
-        "2. 발행주식 총수"
+        "2. 발행주식 총수",
+        "1. 신주의 종류와 수"
       ],
       "required_evidence_fields": ["evidence_id", "filing_id", "source_sha256", "unit", "scale"],
       "question_template": "{company}의 {as_of} 공시 발행주식수는 얼마인가?"
@@ -45,7 +50,9 @@
         "보통주식 처분예정주식 수",
         "처분예정주식(주)",
         "자기주식 처분예정주식수",
-        "처분예정주식수"
+        "처분예정주식수",
+        "1. 처분예정주식(주)",
+        "장외처분(주)"
       ],
       "required_evidence_fields": ["evidence_id", "filing_id", "source_sha256", "unit", "scale"],
       "question_template": "{company}의 {as_of} 공시 자기주식 처분예정주식수는 얼마인가?"

@@ -455,9 +455,10 @@ def _resolve_numeric_event_cell(
                    ORDER BY c.table_id,c.row_index,c.column_index,c.evidence_id""",
         table_ids,
     ).fetchall()
-    headers = [str(cell["text_normalized"] or "").strip() for cell in cells if str(cell["cell_kind"]) == "header"]
     predicate_values = list(predicate_values)
-    header_match = any(_header_matches_predicate(header, predicate_values) for header in headers)
+    labels = [str(cell["text_normalized"] or "").strip() for cell in cells]
+    matching_labels = [label for label in labels if _header_matches_predicate(label, predicate_values)]
+    header_match = bool(matching_labels)
     row_keys = {(str(row["table_id"]), int(row["row_index"])) for row in linked}
     numeric_cells: list[tuple[sqlite3.Row, Decimal]] = []
     for cell in cells:
@@ -483,7 +484,7 @@ def _resolve_numeric_event_cell(
             raise ValueError("event_numeric_unit_ambiguous")
         unit = next(iter(candidate_units))
     else:
-        suffix_units = _predicate_suffix_units(headers, predicate_values)
+        suffix_units = _predicate_suffix_units(matching_labels, predicate_values)
         table_units = {str(cell["unit_text"]).strip() for cell in cells if cell["unit_text"] is not None and str(cell["unit_text"]).strip()}
         unit_candidates = suffix_units or table_units
         if len(unit_candidates) != 1 or not all(_clear_unit(item) for item in unit_candidates):
