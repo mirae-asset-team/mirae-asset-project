@@ -53,7 +53,7 @@
 **Interfaces:**
 - Produces: `canonical_json(value) -> bytes`, `source_sha256(record) -> str`, `validate_stress_case(case) -> None`, `validate_stress_cases(cases) -> None`, `StressCase` JSON mapping
 
-- [ ] **Step 1: Write failing schema and canonical-hash tests**
+- [x] **Step 1: Write failing schema and canonical-hash tests**
 
 ```python
 def test_canonical_hash_is_key_order_independent(self):
@@ -75,13 +75,13 @@ def test_numeric_exact_requires_decimal_unit_and_evidence(self):
         validate_stress_case(case)
 ```
 
-- [ ] **Step 2: Run and confirm the missing module failure**
+- [x] **Step 2: Run and confirm the missing module failure**
 
 Run: `python -m unittest tests.test_agent_stress -v`
 
 Expected: `ModuleNotFoundError`.
 
-- [ ] **Step 3: Implement canonical serialization and validation**
+- [x] **Step 3: Implement canonical serialization and validation**
 
 ```python
 ALLOWED_ORACLES = {"exact", "abstention", "metamorphic", "lineage", "fault"}
@@ -96,11 +96,11 @@ def source_sha256(record: object) -> str:
 
 Add `valid_case()` and `valid_numeric_case()` test helpers that return complete literal dictionaries conforming to the case contract. Single-case validation requires non-empty question, known oracle/category, base/group/mutation IDs, generator `deterministic_stress_v1`, seed `20260819`, 64-char source hash, and trust tier `human_verified|agent_audited`. Collection validation enforces unique `question_id`. Exact numeric answers require finite Decimal, unit, positive scale, filing ID, and evidence ID. Abstention cases require empty evidence and `answerability=unanswerable`.
 
-- [ ] **Step 4: Create the exact contract values**
+- [x] **Step 4: Create the exact contract values**
 
 `stress_evaluation_contract.json` stores schema `0.1.0`, seed, the 300 allocation above, allowed oracles, hard gates all equal to zero except fault/reproducibility equal to 1.0, and quality gates: answerability 0.95, numeric exactness 1.0, citation precision 1.0, citation recall 0.9, metamorphic consistency 0.98, Recall@20 1.0, configured-provider Recall@8 0.9.
 
-- [ ] **Step 5: Run tests and commit**
+- [x] **Step 5: Run tests and commit**
 
 Run: `python -m unittest tests.test_agent_stress -v`
 

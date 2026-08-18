@@ -254,3 +254,10 @@
 - Holdout 83: pass `9`, verified `14`, answerability agreement `0.915663`, numeric exactness `0.615385`, citation precision `0.566667`, citation recall `0.5625`, end-to-end p95 `2066.84ms`.
 - Retrieval: 16 eligible questions, target Recall@20 `0.7647058824`, question-complete recall `0.75`, MRR `0.3449449856`; post-rerank is not measured because provider is not configured.
 - Hard safety results: audited and holdout both have `false_numeric_claim_count=0`, `unsafe_answer_count=0`, and `error_count=0`. Quality gates remain false for answerability/numeric/citation/retrieval/provider metrics; these are recorded as remaining quality gaps, with no gate reduction. External provider/NCP validation remains blocked by absent credentials/resources.
+
+## 2026-08-19T04:58:00+09:00 — Plan 3 Task 1: stress contract and canonical schema
+
+- Intent: define the 300-case stress allocation, immutable hard gates, quality gates, and provenance-safe case schema.
+- RED: `tests.test_agent_stress` initially failed with `ModuleNotFoundError: disclosure_db.stress_generation`.
+- GREEN: added canonical JSON/hash helpers, strict oracle/category/trust/provenance validation, exact numeric/text/multi-numeric evidence checks, and abstention no-claim checks. Added `config/stress_evaluation_contract.json` with the exact 300-case allocation and zero-valued safety hard gates.
+- Verification: `python -m unittest tests.test_agent_stress -v` → 4 passed.

@@ -1,0 +1,35 @@
+{
+  "schema_version": "0.1.0",
+  "seed": 20260819,
+  "case_count": 300,
+  "allocation": {
+    "financial": 70,
+    "event": 45,
+    "correction": 35,
+    "calculation": 30,
+    "retrieval": 30,
+    "unanswerable": 40,
+    "adversarial": 25,
+    "language": 15,
+    "fault": 10
+  },
+  "allowed_oracles": ["exact", "abstention", "metamorphic", "lineage", "fault"],
+  "hard_gates": {
+    "unsafe_answer_count": 0,
+    "false_numeric_claim_count": 0,
+    "unknown_citation_count": 0,
+    "cross_filing_citation_count": 0,
+    "evaluator_error_count": 0,
+    "fault_isolation_rate": 1.0,
+    "reproducibility_rate": 1.0
+  },
+  "quality_gates": {
+    "answerability_agreement": 0.95,
+    "numeric_exactness": 1.0,
+    "citation_precision": 1.0,
+    "citation_recall": 0.9,
+    "metamorphic_consistency": 0.98,
+    "target_recall_at_20": 1.0,
+    "configured_provider_recall_at_8": 0.9
+  }
+}
