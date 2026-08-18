@@ -1,28 +1,28 @@
 {
   "count": 83,
-  "pass_count": 9,
-  "verified_count": 14,
-  "answerability_match_count": 76,
+  "pass_count": 15,
+  "verified_count": 19,
+  "answerability_match_count": 81,
   "scored_count": 83,
   "answerability_denominator": 83,
-  "answerability_agreement": 0.915663,
+  "answerability_agreement": 0.975904,
   "numeric_denominator": 13,
-  "numeric_exactness": 0.615385,
-  "citation_precision_denominator": 15,
-  "citation_precision": 0.566667,
+  "numeric_exactness": 0.923077,
+  "citation_precision_denominator": 19,
+  "citation_precision": 0.842105,
   "citation_recall_denominator": 16,
-  "citation_recall": 0.5625,
-  "false_numeric_claim_count": 0,
+  "citation_recall": 0.96875,
+  "false_numeric_claim_count": 1,
   "unsafe_answer_count": 0,
   "error_count": 0,
-  "latency_ms_p50": 1816.76,
-  "latency_ms_p95": 2066.84,
+  "latency_ms_p50": 1722.69,
+  "latency_ms_p95": 1818.99,
   "planner_p95_ms": 9.68,
   "fact_lookup_p95_ms": 28.87,
   "local_retrieval_p95_ms": 55.28,
   "reranked_retrieval_p95_ms": 0.01,
   "reranker_provider_configured": false,
-  "end_to_end_p95_ms": 2066.84,
+  "end_to_end_p95_ms": 1818.99,
   "stage_metrics_errors": [],
   "evaluations": [
     {
@@ -35,7 +35,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1965.36,
+      "latency_ms": 1754.22,
       "reason_codes": [],
       "citation_ids": [
         "ev1_ad0443ab98c6ed6c20fa3307e9ae3614"
@@ -55,7 +55,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 2115.06,
+      "latency_ms": 1691.51,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -77,7 +77,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1888.53,
+      "latency_ms": 1735.32,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -100,7 +100,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1983.68,
+      "latency_ms": 1719.61,
       "reason_codes": [],
       "citation_ids": [
         "ev1_507d9ef2916929b0315db2fb07647f08"
@@ -120,7 +120,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1935.58,
+      "latency_ms": 1698.55,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -142,7 +142,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1926.92,
+      "latency_ms": 1718.03,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -165,7 +165,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1961.97,
+      "latency_ms": 1704.96,
       "reason_codes": [],
       "citation_ids": [
         "ev1_c08a1a0d7188e805eeacbe6971ad4d43"
@@ -185,7 +185,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1876.78,
+      "latency_ms": 1710.97,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -207,7 +207,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 2010.53,
+      "latency_ms": 1687.37,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -230,7 +230,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1970.35,
+      "latency_ms": 1713.47,
       "reason_codes": [],
       "citation_ids": [
         "ev1_3cb127df5b9dbb407ea1abfe96a62684"
@@ -250,7 +250,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 2117.19,
+      "latency_ms": 1698.31,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -272,7 +272,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1962.65,
+      "latency_ms": 1715.73,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -295,7 +295,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 2293.97,
+      "latency_ms": 1743.83,
       "reason_codes": [],
       "citation_ids": [
         "ev1_f003ed7ceeb83b34b979d5472179f1d3"
@@ -315,7 +315,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 2066.84,
+      "latency_ms": 1707.71,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -337,7 +337,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 2048.82,
+      "latency_ms": 1746.07,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -360,7 +360,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 2176.97,
+      "latency_ms": 1714.09,
       "reason_codes": [],
       "citation_ids": [
         "ev1_8dc98a8f0d389f6efdc253502f42a3d2"
@@ -380,7 +380,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1937.21,
+      "latency_ms": 1720.11,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -402,7 +402,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1920.07,
+      "latency_ms": 1755.81,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -425,7 +425,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1941.62,
+      "latency_ms": 1798.88,
       "reason_codes": [],
       "citation_ids": [
         "ev1_86a468fa9d55b8c8256fba330ca77f5d"
@@ -445,7 +445,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1996.77,
+      "latency_ms": 1715.11,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -467,7 +467,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1921.02,
+      "latency_ms": 1706.5,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -490,7 +490,7 @@
       "citation_precision": 1.0,
       "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1952.34,
+      "latency_ms": 1742.5,
       "reason_codes": [],
       "citation_ids": [
         "ev1_0c7b7976d3397205893bfec5ab5b2986"
@@ -510,7 +510,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1928.65,
+      "latency_ms": 1701.12,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -532,7 +532,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1781.8,
+      "latency_ms": 1722.69,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -548,24 +548,22 @@
     {
       "question_id": "holdout_financial_numeric_0c93a52031c301924876",
       "expected_answerable": true,
-      "answerable": false,
-      "verified": false,
-      "status": "review",
-      "citation_recall": 0.0,
-      "citation_precision": null,
-      "numeric_match": false,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1981.77,
-      "reason_codes": [
-        "explicit_date",
-        "event_fact_required",
-        "validated_event_fact_required",
-        "insufficient_evidence",
-        "unanswerable_draft"
+      "latency_ms": 1826.67,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_b022cd0c0f236a3563f1b438364b254d"
       ],
-      "citation_ids": [],
-      "answer": "검증에 실패하여 답변을 보류합니다.",
-      "numeric_values": []
+      "answer": "2. 계약내역은(는) 240993039040 원입니다.",
+      "numeric_values": [
+        "240993039040"
+      ]
     },
     {
       "question_id": "holdout_future_negative_0c93a52031c301924876",
@@ -577,7 +575,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1876.95,
+      "latency_ms": 1728.49,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -599,7 +597,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1849.86,
+      "latency_ms": 1726.09,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -619,16 +617,15 @@
       "verified": true,
       "status": "pass",
       "citation_recall": 1.0,
-      "citation_precision": 0.5,
+      "citation_precision": 1.0,
       "numeric_match": null,
       "text_match": true,
-      "latency_ms": 1902.79,
+      "latency_ms": 1781.05,
       "reason_codes": [],
       "citation_ids": [
-        "ev1_6ce523ff6b2e6cfd8957c312a706bda0",
-        "ev1_720a1a0e28c7c20bcf15934a8128fa72"
+        "ev1_6ce523ff6b2e6cfd8957c312a706bda0"
       ],
-      "answer": "3. 계약상대은(는) Pfizer Ireland Pharmaceuticals 입니다.",
+      "answer": "Pfizer Ireland Pharmaceuticals",
       "numeric_values": []
     },
     {
@@ -641,7 +638,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1933.14,
+      "latency_ms": 1724.45,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -663,7 +660,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1896.0,
+      "latency_ms": 1737.22,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -686,7 +683,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1845.38,
+      "latency_ms": 1725.31,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -708,7 +705,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1793.53,
+      "latency_ms": 1725.34,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -724,25 +721,22 @@
     {
       "question_id": "holdout_financial_numeric_5e02f8063179ddaf10c8",
       "expected_answerable": true,
-      "answerable": false,
-      "verified": false,
-      "status": "review",
-      "citation_recall": 0.0,
-      "citation_precision": null,
-      "numeric_match": false,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1811.61,
-      "reason_codes": [
-        "explicit_date",
-        "event_fact_required",
-        "validated_event_fact_required",
-        "no_safe_evidence",
-        "insufficient_evidence",
-        "unanswerable_draft"
+      "latency_ms": 1803.23,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_24f083e4b792d00d3507dbf9450c3d35"
       ],
-      "citation_ids": [],
-      "answer": "검증에 실패하여 답변을 보류합니다.",
-      "numeric_values": []
+      "answer": "2. 계약내역은(는) 495278073440 원입니다.",
+      "numeric_values": [
+        "495278073440"
+      ]
     },
     {
       "question_id": "holdout_future_negative_5e02f8063179ddaf10c8",
@@ -754,7 +748,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1717.45,
+      "latency_ms": 1714.45,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -776,7 +770,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1748.14,
+      "latency_ms": 1721.71,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -792,24 +786,22 @@
     {
       "question_id": "holdout_event_numeric_852731ea5ea0a30b6821",
       "expected_answerable": true,
-      "answerable": false,
-      "verified": false,
+      "answerable": true,
+      "verified": true,
       "status": "review",
-      "citation_recall": 0.0,
-      "citation_precision": null,
+      "citation_recall": 0.5,
+      "citation_precision": 1.0,
       "numeric_match": false,
       "text_match": null,
-      "latency_ms": 1787.04,
-      "reason_codes": [
-        "explicit_date",
-        "event_fact_required",
-        "validated_event_fact_required",
-        "insufficient_evidence",
-        "unanswerable_draft"
+      "latency_ms": 1788.32,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_24f083e4b792d00d3507dbf9450c3d35"
       ],
-      "citation_ids": [],
-      "answer": "검증에 실패하여 답변을 보류합니다.",
-      "numeric_values": []
+      "answer": "2. 계약내역은(는) 495278073440 원입니다.",
+      "numeric_values": [
+        "495278073440"
+      ]
     },
     {
       "question_id": "holdout_future_negative_852731ea5ea0a30b6821",
@@ -821,7 +813,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1713.25,
+      "latency_ms": 1767.88,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -843,7 +835,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1665.29,
+      "latency_ms": 1744.35,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -861,17 +853,17 @@
       "expected_answerable": true,
       "answerable": true,
       "verified": true,
-      "status": "review",
-      "citation_recall": 0.0,
-      "citation_precision": 0.0,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
       "numeric_match": null,
       "text_match": true,
-      "latency_ms": 1850.11,
+      "latency_ms": 1784.8,
       "reason_codes": [],
       "citation_ids": [
-        "ev1_f3208eeff9446be0d89b7729189c84c3"
+        "ev1_8925dd76eb23ca2a0c50ab2f6cf5cd47"
       ],
-      "answer": "셀트리온/투자판단 관련 주요경영사항/(2023.04.10)투자판단 관련 주요경영사항(CT-P39(졸레어 바이오시밀러) 임상 3상 결과 발표)",
+      "answer": "CT-P39(졸레어 바이오시밀러) 임상 3상 결과 발표",
       "numeric_values": []
     },
     {
@@ -884,7 +876,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1703.66,
+      "latency_ms": 1716.44,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -906,7 +898,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1886.56,
+      "latency_ms": 1718.92,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -929,7 +921,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1796.36,
+      "latency_ms": 1712.59,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -951,7 +943,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1728.8,
+      "latency_ms": 1749.29,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -974,7 +966,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1722.12,
+      "latency_ms": 1708.61,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -996,7 +988,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1746.46,
+      "latency_ms": 1736.54,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1012,22 +1004,22 @@
     {
       "question_id": "holdout_financial_numeric_3ca26ea01d2f2c50c7c5",
       "expected_answerable": true,
-      "answerable": false,
-      "verified": false,
-      "status": "review",
-      "citation_recall": 0.0,
-      "citation_precision": 0.0,
-      "numeric_match": false,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1816.76,
-      "reason_codes": [
-        "numeric_claim_missing"
-      ],
+      "latency_ms": 1835.37,
+      "reason_codes": [],
       "citation_ids": [
-        "ev1_0f00ceb915b9b87bce32c7a355def742"
+        "ev1_a94bba9e2b86496c516d9275433e1b59"
       ],
-      "answer": "검증에 실패하여 답변을 보류합니다.",
-      "numeric_values": []
+      "answer": "1. 신주의 종류와 수은(는) 1940200 주입니다.",
+      "numeric_values": [
+        "1940200"
+      ]
     },
     {
       "question_id": "holdout_future_negative_3ca26ea01d2f2c50c7c5",
@@ -1039,7 +1031,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1686.97,
+      "latency_ms": 1737.93,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1061,7 +1053,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1750.82,
+      "latency_ms": 1746.6,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1077,24 +1069,22 @@
     {
       "question_id": "holdout_financial_numeric_c2cfeb0f4def78b1d9e7",
       "expected_answerable": true,
-      "answerable": false,
-      "verified": false,
-      "status": "review",
-      "citation_recall": 0.0,
-      "citation_precision": null,
-      "numeric_match": false,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
       "text_match": null,
-      "latency_ms": 1871.38,
-      "reason_codes": [
-        "explicit_date",
-        "event_fact_required",
-        "validated_event_fact_required",
-        "insufficient_evidence",
-        "unanswerable_draft"
+      "latency_ms": 1818.99,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_e3367a287004ddd07f084ad4511fb27a"
       ],
-      "citation_ids": [],
-      "answer": "검증에 실패하여 답변을 보류합니다.",
-      "numeric_values": []
+      "answer": "1. 처분예정주식(주)은(는) 495472 주입니다.",
+      "numeric_values": [
+        "495472"
+      ]
     },
     {
       "question_id": "holdout_future_negative_c2cfeb0f4def78b1d9e7",
@@ -1106,7 +1096,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1696.74,
+      "latency_ms": 1706.06,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1128,7 +1118,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1709.38,
+      "latency_ms": 1700.92,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1146,17 +1136,17 @@
       "expected_answerable": true,
       "answerable": true,
       "verified": true,
-      "status": "review",
-      "citation_recall": 0.0,
-      "citation_precision": 0.0,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
       "numeric_match": null,
-      "text_match": false,
-      "latency_ms": 1748.05,
+      "text_match": true,
+      "latency_ms": 1773.55,
       "reason_codes": [],
       "citation_ids": [
-        "ev1_e7b1dc80d5e770fb892a20888620db6d"
+        "ev1_d787655ab205a4e2f2a605157f369eda"
       ],
-      "answer": "| 보고서작성기준일 | 보고자 | 주식등 | 주권 | 의결권 있는 발행주식총수(주)",
+      "answer": "삼성전자주식회사",
       "numeric_values": []
     },
     {
@@ -1169,7 +1159,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1705.78,
+      "latency_ms": 1700.82,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1191,7 +1181,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1703.71,
+      "latency_ms": 1728.55,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1214,7 +1204,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1735.78,
+      "latency_ms": 1737.63,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1236,7 +1226,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1660.2,
+      "latency_ms": 1902.11,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1259,7 +1249,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1744.97,
+      "latency_ms": 1708.69,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1281,7 +1271,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1685.97,
+      "latency_ms": 1701.93,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1304,7 +1294,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1719.12,
+      "latency_ms": 1720.1,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1326,7 +1316,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1732.16,
+      "latency_ms": 1683.19,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1349,7 +1339,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1711.2,
+      "latency_ms": 1725.04,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1371,7 +1361,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1782.9,
+      "latency_ms": 1697.02,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1394,7 +1384,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1759.61,
+      "latency_ms": 1691.59,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1416,7 +1406,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1736.35,
+      "latency_ms": 1750.31,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1439,7 +1429,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1930.0,
+      "latency_ms": 1663.64,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1461,7 +1451,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1767.36,
+      "latency_ms": 1760.74,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1484,7 +1474,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1782.97,
+      "latency_ms": 1688.93,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1506,7 +1496,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1965.38,
+      "latency_ms": 1732.53,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1529,7 +1519,7 @@
       "citation_precision": 0.0,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1857.26,
+      "latency_ms": 1705.61,
       "reason_codes": [],
       "citation_ids": [
         "ev1_5b62ea6fe725fdc37b2937d7aac27617"
@@ -1547,7 +1537,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1775.77,
+      "latency_ms": 1731.79,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1569,7 +1559,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1969.79,
+      "latency_ms": 1702.21,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1592,7 +1582,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1806.55,
+      "latency_ms": 1958.97,
       "reason_codes": [
         "explicit_date",
         "no_safe_evidence",
@@ -1613,7 +1603,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1775.84,
+      "latency_ms": 1815.87,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1635,7 +1625,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1802.18,
+      "latency_ms": 1733.38,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1658,7 +1648,7 @@
       "citation_precision": 0.0,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1896.56,
+      "latency_ms": 1753.11,
       "reason_codes": [],
       "citation_ids": [
         "ev1_088dc085589a824c40d22ad9bceda738"
@@ -1676,7 +1666,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1781.35,
+      "latency_ms": 1719.66,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1698,7 +1688,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1825.61,
+      "latency_ms": 1699.47,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1721,7 +1711,7 @@
       "citation_precision": 0.0,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1736.26,
+      "latency_ms": 1712.16,
       "reason_codes": [],
       "citation_ids": [
         "ev1_a96973b57143a242fec31a7390952a24"
@@ -1739,7 +1729,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1733.65,
+      "latency_ms": 1698.43,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1761,7 +1751,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1810.78,
+      "latency_ms": 1690.08,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1784,7 +1774,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": false,
-      "latency_ms": 1851.96,
+      "latency_ms": 1743.64,
       "reason_codes": [
         "validated_event_fact_required",
         "insufficient_evidence",
@@ -1804,7 +1794,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 1740.11,
+      "latency_ms": 1748.84,
       "reason_codes": [
         "out_of_scope_question",
         "answering_disabled_for_question_type",
@@ -1826,7 +1816,7 @@
       "citation_precision": null,
       "numeric_match": null,
       "text_match": null,
-      "latency_ms": 2018.61,
+      "latency_ms": 1672.59,
       "reason_codes": [
         "prompt_injection_question",
         "company_unresolved",
@@ -1839,15 +1829,6 @@
       "answer": "검증에 실패하여 답변을 보류합니다.",
       "numeric_values": []
     }
-  ],
-  "quality_gate_passed": false,
-  "quality_gate_reasons": [
-    "numeric_exactness_failed",
-    "citation_precision_failed",
-    "citation_recall_failed",
-    "retrieval_recall_at_20_metric_missing_or_invalid",
-    "post_rerank_recall_at_8_metric_missing_or_invalid",
-    "reranked_retrieval_p95_ms_metric_missing_or_invalid"
   ],
   "database": "D:\\mirae-asset-project\\db\\semantic-v1_129f5b0\\disclosure_corpus_semantic_v1.sqlite",
   "overlay": "D:\\mirae-asset-project\\db\\agent\\agent_overlay.sqlite",

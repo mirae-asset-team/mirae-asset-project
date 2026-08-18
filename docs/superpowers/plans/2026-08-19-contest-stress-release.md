@@ -314,27 +314,27 @@ git commit -m "test: add resumable disclosure stress runner"
 **Interfaces:**
 - Uses the exact manifest generated in Task 2; does not regenerate cases during a fix loop.
 
-- [ ] **Step 1: Record the pre-run immutable identities**
+- [x] **Step 1: Record the pre-run immutable identities**
 
 Record git commit, manifest hash, base fast identity and trusted SHA, overlay hash/revision, search hash/revision, provider configured boolean, Python/package versions, free D-drive space, and server mode. Do not record secret values.
 
-- [ ] **Step 2: Run the 300 cases sequentially**
+- [x] **Step 2: Run the 300 cases sequentially**
 
 Use the command from Task 4 with `--workers 1`. At current ~5.1s end-to-end p95, expect about 25–35 minutes. If D-drive read errors or p95 exceeds twice the measured baseline, stop and diagnose instead of increasing workers.
 
-- [ ] **Step 3: Enforce immediate hard-stop conditions**
+- [x] **Step 3: Enforce immediate hard-stop conditions**
 
 Stop on unsafe answer, false numeric claim, unknown/cross-filing citation, evaluator error, failed fault isolation, or non-reproducible manifest. Use `superpowers:systematic-debugging` before changing code.
 
-- [ ] **Step 4: Fix one dominant primary cause with TDD**
+- [x] **Step 4: Fix one dominant primary cause with TDD**
 
 Choose the largest failure class, reproduce it with the smallest failing unit test in the owning module, confirm RED, implement the minimum fix, confirm GREEN, run the related suite, and commit. Do not batch unrelated causes or weaken an oracle/gate.
 
-- [ ] **Step 5: Resume the same run identity**
+- [x] **Step 5: Resume the same run identity**
 
 Because the git commit changed, completed cases must not be silently reused. Start a new run ID against the same manifest, compare summaries by question ID, and repeat Steps 3–5 until all hard gates pass and no further safe improvement fits the time window.
 
-- [ ] **Step 6: Run the full regression after the final loop**
+- [x] **Step 6: Run the full regression after the final loop**
 
 Run: `python -m unittest discover -s tests -v`
 
@@ -342,7 +342,7 @@ Run: `python -m compileall -q src scripts tests`
 
 Run both 31/83 evaluations and retrieval evaluation from Plan 2.
 
-- [ ] **Step 7: Commit truthful results**
+- [x] **Step 7: Commit truthful results**
 
 ```powershell
 git add data/derived/agent_stress_300_summary.json data/derived/agent_stress_failures.jsonl docs/development-log.md
@@ -360,23 +360,23 @@ If hard gates pass and at least 90 minutes remain, generate and run the determin
 **Interfaces:**
 - Requires a rotated `CLOVASTUDIO_API_KEY` supplied as a local environment secret.
 
-- [ ] **Step 1: Verify secret hygiene before setting the key**
+- [x] **Step 1: Verify secret hygiene before setting the key**
 
 Run `git grep` for common key prefixes and inspect `.env` ignore status. Confirm no plaintext password/key from chat exists in tracked or staged files. If a key previously appeared in chat, use only a rotated replacement.
 
-- [ ] **Step 2: Set the key only in the current process or untracked `.env`**
+- [ ] **Step 2: Set the key only in the current process or untracked `.env`** — `BLOCKED_EXTERNAL`: no rotated credential supplied.
 
 Do not place the key in a PowerShell command recorded in the development log. Confirm `/health.provider_configured=true` without showing the value.
 
-- [ ] **Step 3: Run a bounded provider smoke set**
+- [ ] **Step 3: Run a bounded provider smoke set** — `BLOCKED_EXTERNAL`: provider credential unavailable.
 
 Use 10 structured, 10 textual, 5 abstention, and 5 adversarial cases. Verify JSON schema, verifier rejection behavior, citations, provider timeout fallback, and p95. Stop on any hard-gate violation.
 
-- [ ] **Step 4: Run the 300-case provider pass if smoke succeeds**
+- [ ] **Step 4: Run the 300-case provider pass if smoke succeeds** — `BLOCKED_EXTERNAL`: provider credential unavailable.
 
 Use a new run ID and identical 300-case manifest. Record provider configured=true, post-rerank Recall@8, provider error/fallback counts, and end-to-end p95. Never commit raw provider responses.
 
-- [ ] **Step 5: Commit only sanitized metrics**
+- [ ] **Step 5: Commit only sanitized metrics** — `BLOCKED_EXTERNAL`: no provider metrics exist to record.
 
 ```powershell
 git add data/derived/agent_stress_300_summary.json docs/development-log.md
@@ -395,31 +395,31 @@ If no rotated key is available, mark this task `BLOCKED_EXTERNAL` in the release
 - Public API: `GET /health`, `POST /query`
 - Requires: NCP Server, Public IP, ACG, at least 80GB data volume, rotated secrets
 
-- [ ] **Step 1: Create the release checklist with binary evidence fields**
+- [x] **Step 1: Create the release checklist with binary evidence fields**
 
 Include image git commit, DB/overlay/index hashes, Compose config hash, provider configured boolean, external source network, health request ID, answerable smoke request ID, abstention smoke request ID, restart result, and rollback path. Each item is pass/fail/not-run with timestamp.
 
-- [ ] **Step 2: Provision or verify NCP prerequisites**
+- [ ] **Step 2: Provision or verify NCP prerequisites** — `BLOCKED_EXTERNAL`: no NCP account/resource/credential is available.
 
 Confirm Server state, public IP, ACG inbound rule, SSH restriction, storage capacity and mount. If any is unavailable, use an approved temporary tunnel only for team testing and mark NCP submission endpoint incomplete.
 
-- [ ] **Step 3: Transfer immutable artifacts and verify hashes remotely**
+- [ ] **Step 3: Transfer immutable artifacts and verify hashes remotely** — `BLOCKED_EXTERNAL`: no approved remote host/storage path.
 
 Transfer the base, overlay, index, and attestation to `/srv/mirae/data`. Compare SHA-256/size against the local manifest before starting. Do not transfer `.env` through Git.
 
-- [ ] **Step 4: Start the exact verified image**
+- [ ] **Step 4: Start the exact verified image** — `BLOCKED_EXTERNAL`: Docker runtime and public host unavailable.
 
 Use the committed Compose file and secret environment on the server. Confirm container health and no write access to `/data/base` or `/data/agent`.
 
-- [ ] **Step 5: Test from a second external network**
+- [ ] **Step 5: Test from a second external network** — `BLOCKED_EXTERNAL`: no public endpoint or second network.
 
 Call `/health`, one exact numeric `/query`, one textual `/query`, one out-of-scope question, and one injection question. Verify response schema, receipt/evidence IDs, abstention behavior, and latency. Then reboot or restart Docker and repeat health plus one query.
 
-- [ ] **Step 6: Complete the go/no-go decision**
+- [ ] **Step 6: Complete the go/no-go decision** — local deterministic gates are GO; public contest submission remains NO-GO.
 
 GO requires: all safety hard gates, `/query` schema, external restart recovery, provider smoke, no secrets, numeric exactness 100%, citation precision 100%, and documented remaining soft quality gaps. Any missing external prerequisite or provider smoke is NO-GO for final submission but may remain GO for team demo.
 
-- [ ] **Step 7: Commit the sanitized release evidence**
+- [x] **Step 7: Commit the sanitized release evidence**
 
 ```powershell
 git add docs/operations/contest-release-checklist.md docs/development-log.md
