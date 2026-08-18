@@ -8,8 +8,9 @@ import unittest
 from pathlib import Path
 
 from scripts.build_agent_gold import load_predicate_config
-from scripts.build_agent_gold import extract_fact_candidates
+from scripts.build_agent_gold import AuditResult, audit_candidate, extract_fact_candidates, write_jsonl_atomic
 from disclosure_db.schema import create_schema
+from disclosure_db.gold_validation import validate_record_contract
 
 
 SAFE_CONFIG = load_predicate_config(Path("config/agent_gold_predicates.json"))
@@ -56,6 +57,45 @@ def build_fixture_database(path: Path) -> Path:
     return path
 
 
+def valid_text_record() -> dict[str, object]:
+    filing_id = "20240101000001"
+    return {
+        "schema_version": "0.1.0",
+        "question_id": "fixture_counterparty",
+        "question_type": "single_filing_fact",
+        "question": "테스트회사의 계약상대는 누구인가?",
+        "answerability": "answerable",
+        "answer": {"kind": "text", "text": "상대회사"},
+        "answer_origin": "model_generated",
+        "candidate_filing_ids": [filing_id],
+        "company_resolution": {"query_name": "테스트회사", "issuer_name": "테스트회사", "corp_code": "00000001", "stock_code": "000001"},
+        "period": {"period_type": "event_date", "start_date": None, "end_date": None, "instant_date": "2024-01-01"},
+        "scope": "not_applicable",
+        "as_of": "2024-01-01",
+        "version_basis": "as_of",
+        "formula": None,
+        "attack_label": None,
+        "evidence": [{
+            "evidence_id": "ev_fixture", "filing_id": filing_id, "source_sha256": "a" * 64,
+            "locator": {"kind": "table_cell", "table": 0, "row": 0, "column": 0}, "role": "support",
+            "lineage_status": "root", "is_current": True, "effective_from": "2024-01-01", "effective_to": None,
+            "source_format": "xml", "table_structure_status": "parsed_unreviewed", "table_id": "tbl_fixture",
+            "cell_evidence_id": "ev_fixture", "unit": None, "scale": None,
+        }],
+        "version_evidence": [{
+            "filing_id": filing_id, "event_id": "evt_fixture", "parent_filing_id": None,
+            "lineage_status": "root", "lineage_confidence": "high", "is_current": True,
+            "effective_from": "2024-01-01", "effective_to": None, "rationale": "fixture",
+        }],
+        "source_evidence": [{
+            "source_id": "src_fixture", "filing_id": filing_id, "sha256": "a" * 64,
+            "detected_format": "dart_xml", "parse_status": "success", "fragment_count": 0,
+            "table_count": 1, "cell_count": 1, "table_structure_status": "parsed_unreviewed",
+        }],
+        "review": {"status": "candidate", "annotator": "fixture", "reviewer": None, "reviewed_at": None, "notes": ""},
+    }
+
+
 class AgentGoldTests(unittest.TestCase):
     def test_predicate_config_has_only_explicit_safe_predicates(self) -> None:
         config = load_predicate_config(Path("config/agent_gold_predicates.json"))
@@ -75,6 +115,86 @@ class AgentGoldTests(unittest.TestCase):
             self.assertEqual(rows[0]["filing_id"], rows[0]["evidence_filing_id"])
             self.assertEqual(rows[0]["evidence_id"], "ev_fixture")
             self.assertEqual(hashlib.sha256(base.read_bytes()).hexdigest(), before)
+
+    def test_valid_text_candidate_is_agent_audited(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = build_fixture_database(Path(temp) / "base.sqlite")
+            result = audit_candidate(valid_text_record(), base, source_sha256="b" * 64)
+            self.assertIsInstance(result, AuditResult)
+            self.assertEqual(result.status, "agent_audited")
+            self.assertEqual(result.reason_codes, [])
+            self.assertEqual(result.record["review"]["status"], "agent_audited")
+
+    def test_agent_audited_contract_is_not_human_approval(self) -> None:
+        record = valid_text_record()
+        record["review"]["status"] = "agent_audited"
+        self.assertEqual(validate_record_contract(record), [])
+        record["review"].update({"status": "approved", "reviewer": "fixture", "reviewed_at": "2024-01-02T00:00:00+00:00"})
+        issues = validate_record_contract(record)
+        self.assertTrue(any(item["rule_id"] == "approved_answer_not_human" for item in issues))
+
+    def test_missing_evidence_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = build_fixture_database(Path(temp) / "base.sqlite")
+            record = valid_text_record()
+            record["evidence"][0]["evidence_id"] = "missing"
+            result = audit_candidate(record, base, source_sha256="b" * 64)
+            self.assertEqual(result.status, "rejected")
+            self.assertIn("evidence_not_found", result.reason_codes)
+
+    def test_cross_filing_evidence_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = build_fixture_database(Path(temp) / "base.sqlite")
+            record = valid_text_record()
+            record["candidate_filing_ids"] = ["20240101000002"]
+            result = audit_candidate(record, base, source_sha256="b" * 64)
+            self.assertIn("cross_filing_evidence", result.reason_codes)
+
+    def test_unresolved_lineage_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = build_fixture_database(Path(temp) / "base.sqlite")
+            connection = sqlite3.connect(base)
+            try:
+                connection.execute("UPDATE filing_version SET lineage_status='unresolved' WHERE filing_id=?", ("20240101000001",))
+                connection.commit()
+            finally:
+                connection.close()
+            result = audit_candidate(valid_text_record(), base, source_sha256="b" * 64)
+            self.assertIn("lineage_not_answer_safe", result.reason_codes)
+
+    def test_pdf_evidence_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = build_fixture_database(Path(temp) / "base.sqlite")
+            connection = sqlite3.connect(base)
+            try:
+                connection.execute("UPDATE source_document SET detected_format='pdf', extension='.pdf' WHERE source_id=?", ("src_fixture",))
+                connection.commit()
+            finally:
+                connection.close()
+            result = audit_candidate(valid_text_record(), base, source_sha256="b" * 64)
+            self.assertIn("visual_evidence_blocked", result.reason_codes)
+
+    def test_nonfinite_numeric_value_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = build_fixture_database(Path(temp) / "base.sqlite")
+            record = valid_text_record()
+            record["answer"] = {"kind": "numeric", "value": "NaN", "unit": "원", "scale": 1}
+            result = audit_candidate(record, base, source_sha256="b" * 64)
+            self.assertIn("numeric_not_decimal", result.reason_codes)
+
+    def test_duplicate_evidence_ids_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = build_fixture_database(Path(temp) / "base.sqlite")
+            record = valid_text_record()
+            record["evidence"].append(dict(record["evidence"][0]))
+            result = audit_candidate(record, base, source_sha256="b" * 64)
+            self.assertIn("duplicate_candidate", result.reason_codes)
+
+    def test_atomic_jsonl_writer_replaces_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "nested" / "rows.jsonl"
+            write_jsonl_atomic(output, [{"b": 2, "a": 1}])
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8")), {"a": 1, "b": 2})
 
 
 if __name__ == "__main__":

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import closing
+from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -168,6 +171,197 @@ def extract_overlay_candidates(seed_path: Path) -> list[dict[str, Any]]:
         candidate["_candidate_source"] = "overlay"
         rows.append(candidate)
     return rows
+
+
+@dataclass(frozen=True)
+class AuditResult:
+    status: str
+    record: dict[str, Any] | None
+    reason_codes: list[str]
+
+
+def write_jsonl_atomic(path: Path, rows: Any) -> None:
+    """Write stable JSONL through a sibling temporary path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            for row in rows:
+                handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _record_evidence_row(connection: sqlite3.Connection, evidence_id: str) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT tc.evidence_id, tc.filing_id, tc.source_id, tc.table_id,
+               tr.parse_status AS table_parse_status,
+               sd.sha256 AS source_sha256, sd.extension, sd.detected_format,
+               sd.parse_status AS source_parse_status,
+               fv.lineage_status, fv.lineage_confidence, fv.is_current,
+               fv.event_id, fv.parent_filing_id, fv.effective_from, fv.effective_to,
+               fv.rationale
+        FROM table_cell AS tc
+        JOIN table_record AS tr ON tr.table_id = tc.table_id
+        JOIN source_document AS sd ON sd.source_id = tc.source_id
+        JOIN filing_version AS fv ON fv.filing_id = tc.filing_id
+        WHERE tc.evidence_id = ?
+        UNION ALL
+        SELECT fr.evidence_id, fr.filing_id, fr.source_id, fr.table_id,
+               NULL AS table_parse_status,
+               sd.sha256 AS source_sha256, sd.extension, sd.detected_format,
+               sd.parse_status AS source_parse_status,
+               fv.lineage_status, fv.lineage_confidence, fv.is_current,
+               fv.event_id, fv.parent_filing_id, fv.effective_from, fv.effective_to,
+               fv.rationale
+        FROM fragment AS fr
+        JOIN source_document AS sd ON sd.source_id = fr.source_id
+        JOIN filing_version AS fv ON fv.filing_id = fr.filing_id
+        WHERE fr.evidence_id = ?
+        LIMIT 1
+        """,
+        (evidence_id, evidence_id),
+    ).fetchone()
+
+
+def _record_source_row(connection: sqlite3.Connection, source_id: str) -> sqlite3.Row | None:
+    return connection.execute(
+        """
+        SELECT s.source_id, s.filing_id, s.sha256, s.detected_format, s.parse_status,
+               (SELECT count(*) FROM fragment fr WHERE fr.source_id=s.source_id),
+               (SELECT count(*) FROM table_record tr WHERE tr.source_id=s.source_id),
+               (SELECT count(*) FROM table_cell tc WHERE tc.source_id=s.source_id)
+        FROM source_document AS s WHERE s.source_id=?
+        """,
+        (source_id,),
+    ).fetchone()
+
+
+def _numeric_reasons(record: dict[str, Any]) -> list[str]:
+    answer = record.get("answer")
+    if not isinstance(answer, dict):
+        return []
+    values: list[Any] = []
+    if answer.get("kind") == "numeric":
+        values.append(answer.get("value"))
+    elif answer.get("kind") == "multi_numeric":
+        values.extend(item.get("value") for item in answer.get("values", []) if isinstance(item, dict))
+    reasons: list[str] = []
+    for value in values:
+        try:
+            decimal_value = Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            reasons.append("numeric_not_decimal")
+            continue
+        if not decimal_value.is_finite():
+            reasons.append("numeric_not_decimal")
+    return reasons
+
+
+def _copy_without_internal_keys(record: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in record.items() if not str(key).startswith("_")}
+
+
+def audit_candidate(
+    candidate: dict[str, Any], base: Path, *, source_sha256: str
+) -> AuditResult:
+    """Apply deterministic contract, evidence, lineage, and value gates."""
+    record = _copy_without_internal_keys(candidate)
+    reasons: set[str] = set()
+    review = record.setdefault(
+        "review",
+        {"status": "candidate", "annotator": "deterministic_agent_gold_v1", "reviewer": None, "reviewed_at": None, "notes": ""},
+    )
+    if isinstance(review, dict) and review.get("status") not in {"candidate", "agent_audited"}:
+        review["status"] = "candidate"
+    if record.get("answer_origin") != "model_generated":
+        reasons.add("schema_invalid")
+    try:
+        from disclosure_db.gold_validation import validate_record_contract
+
+        if validate_record_contract(record):
+            reasons.add("schema_invalid")
+    except (KeyError, TypeError, ValueError):
+        reasons.add("schema_invalid")
+
+    evidence_ids: list[str] = []
+    declared_filing_ids = {str(value) for value in record.get("candidate_filing_ids", [])}
+    with closing(_readonly_connection(base)) as connection:
+        for item in record.get("evidence", []):
+            if not isinstance(item, dict):
+                reasons.add("schema_invalid")
+                continue
+            evidence_id = str(item.get("evidence_id") or "")
+            evidence_ids.append(evidence_id)
+            actual = _record_evidence_row(connection, evidence_id) if evidence_id else None
+            if actual is None:
+                reasons.add("evidence_not_found")
+                continue
+            if str(actual["filing_id"]) != str(item.get("filing_id")) or str(actual["filing_id"]) not in declared_filing_ids:
+                reasons.add("cross_filing_evidence")
+            if str(actual["source_sha256"]) != str(item.get("source_sha256")):
+                reasons.add("citation_mismatch")
+            if str(actual["source_parse_status"]) != "success":
+                reasons.add("source_parse_failed")
+            if actual["table_parse_status"] is not None and str(actual["table_parse_status"]) != "success":
+                reasons.add("table_parse_failed")
+            if _source_format(actual["extension"], actual["detected_format"]) == "pdf":
+                reasons.add("visual_evidence_blocked")
+            if str(actual["lineage_status"]) not in {"root", "resolved"}:
+                reasons.add("lineage_not_answer_safe")
+        for item in record.get("source_evidence", []):
+            if not isinstance(item, dict):
+                reasons.add("schema_invalid")
+                continue
+            actual_source = _record_source_row(connection, str(item.get("source_id") or ""))
+            if actual_source is None:
+                reasons.add("evidence_not_found")
+                continue
+            if str(actual_source["filing_id"]) != str(item.get("filing_id")):
+                reasons.add("cross_filing_evidence")
+            if str(actual_source["sha256"]) != str(item.get("sha256")):
+                reasons.add("citation_mismatch")
+            if str(actual_source["parse_status"]) != "success":
+                reasons.add("source_parse_failed")
+            if _source_format(None, actual_source["detected_format"]) == "pdf":
+                reasons.add("visual_evidence_blocked")
+
+    if len(evidence_ids) != len(set(evidence_ids)):
+        reasons.add("duplicate_candidate")
+    seen_keys = candidate.get("_seen_keys")
+    if isinstance(seen_keys, set):
+        key = (str(record.get("question_id")), tuple(sorted(evidence_ids)))
+        if key in seen_keys:
+            reasons.add("duplicate_candidate")
+        else:
+            seen_keys.add(key)
+    reasons.update(_numeric_reasons(record))
+    citation_ids = candidate.get("_runtime_citation_ids")
+    if citation_ids is not None and not set(map(str, citation_ids)) <= set(evidence_ids):
+        reasons.add("citation_mismatch")
+
+    if reasons:
+        return AuditResult(status="rejected", record=None, reason_codes=sorted(reasons))
+
+    record["answer_origin"] = "model_generated"
+    record["review"] = {
+        "status": "agent_audited",
+        "annotator": "deterministic_agent_gold_v1",
+        "reviewer": None,
+        "reviewed_at": None,
+        "notes": "Deterministic schema, evidence, lineage, value, and citation gates passed; human promotion remains required.",
+    }
+    record["audit"] = {
+        "state": "agent_audited",
+        "generator": "deterministic_agent_gold_v1",
+        "base_sha256": source_sha256,
+        "gold_input_sha256": candidate.get("_gold_input_sha256"),
+        "seed_input_sha256": candidate.get("_seed_input_sha256"),
+    }
+    return AuditResult(status="agent_audited", record=record, reason_codes=[])
 
 
 if __name__ == "__main__":

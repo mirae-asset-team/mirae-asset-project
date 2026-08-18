@@ -32,8 +32,10 @@ def validate_record_contract(record: dict[str, Any]) -> list[dict[str, str]]:
     review = record["review"]
     origin = record["answer_origin"]
     status = review.get("status")
-    if origin == "model_generated" and status != "candidate":
-        add_issue(issues, question_id, "model_answer_not_candidate", "model_generated must remain candidate")
+    if origin == "model_generated" and status not in {"candidate", "agent_audited"}:
+        add_issue(issues, question_id, "model_answer_not_candidate", "model_generated must remain candidate or agent_audited")
+    if status == "agent_audited" and origin != "model_generated":
+        add_issue(issues, question_id, "agent_audited_not_model_origin", "agent_audited must remain model_generated")
     if status == "approved":
         if origin != "human_verified":
             add_issue(issues, question_id, "approved_answer_not_human", "approved requires human_verified")
