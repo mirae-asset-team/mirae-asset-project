@@ -685,7 +685,7 @@ def _reject_row(candidate: dict[str, Any], reasons: list[str], *, base_sha256: s
 def generate_gold(
     *, database: Path, gold_path: Path, overlay_seed: Path, output: Path, summary: Path, rejects: Path,
     predicate_config: Path = Path("config/agent_gold_predicates.json"), expected_base_sha256: str = EXPECTED_BASE_SHA256,
-    precomputed_base_sha256: str | None = None,
+    precomputed_base_sha256: str | None = None, fact_limit: int | None = None,
 ) -> dict[str, Any]:
     config = load_predicate_config(predicate_config)
     if precomputed_base_sha256 is not None:
@@ -716,7 +716,7 @@ def generate_gold(
     generated_candidates: list[dict[str, Any]] = []
     base_valid = not expected_base_sha256 or base_hash == expected_base_sha256
     if base_valid:
-        for row in extract_fact_candidates(database, config):
+        for row in extract_fact_candidates(database, config, limit=fact_limit):
             record = _fact_record(row, config)
             record["_candidate_source"] = "fact"
             record["_seen_keys"] = seen_keys
@@ -762,6 +762,7 @@ def generate_gold(
         "gold_input_sha256": gold_hash,
         "seed_input_sha256": seed_hash,
         "candidate_count": len(existing) + len(generated_candidates),
+        "fact_limit": fact_limit,
         "audited_count": sum(row.get("review", {}).get("status") == "agent_audited" for row in output_rows),
         "human_passthrough_count": sum(row.get("answer_origin") == "human_verified" for row in output_rows),
         "rejected_count": len(rejected_rows),
@@ -787,12 +788,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--predicate-config", type=Path, default=Path("config/agent_gold_predicates.json"))
     parser.add_argument("--expected-base-sha256", default=EXPECTED_BASE_SHA256)
     parser.add_argument("--precomputed-base-sha256", help="Use an independently verified SHA-256 and skip rereading a very large immutable file")
+    parser.add_argument("--fact-limit", type=int, help="Limit generic fact candidates for a fast regression smoke run; omit for full extraction")
     args = parser.parse_args(argv)
     result = generate_gold(
         database=args.database, gold_path=args.gold, overlay_seed=args.overlay_seed,
         output=args.output, summary=args.summary, rejects=args.rejects,
         predicate_config=args.predicate_config, expected_base_sha256=args.expected_base_sha256,
         precomputed_base_sha256=args.precomputed_base_sha256,
+        fact_limit=args.fact_limit,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
