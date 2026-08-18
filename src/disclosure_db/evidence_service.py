@@ -128,18 +128,49 @@ class EvidenceService:
             )
             refs.extend(structured_refs)
         if len(refs) < limit:
-            try:
-                query = compile_retrieval_query(plan.question, company_names=[plan.company] if plan.company else self.company_candidates())
-            except ValueError:
-                query = " OR ".join(f'"{term}"' for term in plan.account_terms) or '"공시"'
-            rows = query_database(
-                self.base_database,
-                query,
-                company=plan.company,
-                limit=max(1, limit - len(refs)),
-                as_of=version_as_of,
-            )
-            refs.extend(self._fragment_refs(rows))
+            index_used = False
+            index_available = False
+            if self.search_database is not None:
+                if self.search_database.exists():
+                    index_available = True
+                    try:
+                        if self.attestation is None:
+                            raise ValueError("search index requires base attestation")
+                        from .search_index import SafeSearchIndex
+                        rows = SafeSearchIndex(
+                            self.search_database, base_sha256=self.attestation.sha256,
+                        ).search(
+                            plan.question,
+                            company=plan.company,
+                            as_of=version_as_of,
+                            limit=max(1, limit - len(refs)),
+                        )
+                        # A valid index is authoritative for this retrieval attempt,
+                        # including a valid empty result; never silently mix it with
+                        # an unsafe partial corpus result.
+                        refs.extend(self._fragment_refs(rows))
+                        index_used = True
+                    except ValueError:
+                        plan.reason_codes.append("search_index_attestation_mismatch")
+                    except (OSError, sqlite3.Error):
+                        plan.reason_codes.append("search_index_sqlite_error")
+                if not index_used:
+                    plan.reason_codes.append(
+                        "search_index_unavailable" if not index_available else "search_index_fallback_to_ssot"
+                    )
+            if not index_used:
+                try:
+                    query = compile_retrieval_query(plan.question, company_names=[plan.company] if plan.company else self.company_candidates())
+                except ValueError:
+                    query = " OR ".join(f'"{term}"' for term in plan.account_terms) or '"공시"'
+                rows = query_database(
+                    self.base_database,
+                    query,
+                    company=plan.company,
+                    limit=max(1, limit - len(refs)),
+                    as_of=version_as_of,
+                )
+                refs.extend(self._fragment_refs(rows))
         unique: list[EvidenceRef] = []
         seen: set[str] = set()
         for ref in refs:
