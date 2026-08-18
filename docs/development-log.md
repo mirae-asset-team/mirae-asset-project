@@ -65,3 +65,15 @@
 
 - `python -m pip install -r requirements.txt` installed the pinned runtime dependencies required by `evaluate_agent.py` (`lxml`, `PyMuPDF`, `pdfplumber` and transitive packages).
 - No source database write occurred; generator connections use `mode=ro` and generated files are sibling-atomic replacements.
+
+## Task 6 — final verification before close
+
+- Intent: verify the release boundary before pushing the tracking branch.
+- Commands and results:
+  - `$env:PYTHONPATH='src'; python -m unittest discover -s tests -v` → 49 tests ran, 48 passed, 1 skipped because the full external Gold/DB is not in this workspace.
+  - `python -m compileall -q src scripts` → pass.
+  - `git diff --check` → pass.
+  - JSONL parse → 31 audited-output rows, 0 reject rows; summary status `ok`.
+  - `Get-Item`/`Get-FileHash` on immutable base → 38,773,280,768 bytes and SHA-256 `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563`.
+- Release result: `agent_audited` baseline is regression-ready; `human_verified` promotion is still a human decision. Unlimited generic-fact extraction remains a separately reproducible long-running command.
+- Pre-close HEAD: `a70553a docs: record agent gold audit and development process`.
