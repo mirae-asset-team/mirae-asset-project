@@ -41,6 +41,9 @@ def verify_answer(bundle: EvidenceBundle, draft: AnswerDraft) -> VerifiedAnswer:
     if not set(draft.citation_ids).issubset(allowed):
         valid = False
         reasons.append("unknown_citation")
+    if draft.answerable and not draft.citation_ids:
+        valid = False
+        reasons.append("citation_missing")
     if draft.answerable and not bundle.answerable:
         valid = False
         reasons.append("answer_asserted_without_safe_evidence")

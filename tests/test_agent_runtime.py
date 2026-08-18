@@ -258,6 +258,40 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertTrue(answer.answerable)
         self.assertEqual(answer.numeric_values, ["2000"])
 
+    def test_answerable_generic_text_without_citation_abstains(self) -> None:
+        evidence = EvidenceRef("ev1", "f1", "s1", "계약 상대방은 테스트회사입니다")
+        bundle = EvidenceBundle(question="계약 상대방은 누구인가?", evidence=[evidence], answerable=True)
+        draft = AnswerDraft(answer="테스트회사입니다.", citation_ids=[], answerable=True)
+        answer = verify_answer(bundle, draft)
+        self.assertFalse(answer.verified)
+        self.assertFalse(answer.answerable)
+        self.assertEqual(answer.answer, "검증에 실패하여 답변을 보류합니다.")
+        self.assertEqual(answer.numeric_values, [])
+        self.assertIn("citation_missing", answer.reason_codes)
+
+    def test_answerable_generic_text_with_safe_citation_is_hydrated(self) -> None:
+        class Service:
+            def company_candidates(self):
+                return ["테스트회사"]
+
+            def search(self, plan, **kwargs):
+                return EvidenceBundle(
+                    question=plan.question,
+                    evidence=[EvidenceRef("ev1", "f1", "s1", "계약 상대방은 테스트회사입니다", {"page": 3}, report_name="사업보고서")],
+                    answerable=True,
+                )
+
+        class TextGenerator:
+            def generate(self, bundle):
+                return AnswerDraft(answer="테스트회사입니다.", citation_ids=["ev1"], answerable=True)
+
+        answer = DisclosureAgent(evidence_service=Service(), generator=TextGenerator()).answer("테스트회사 계약 상대방은 누구인가?")
+        self.assertTrue(answer.verified)
+        self.assertTrue(answer.answerable)
+        self.assertEqual(answer.citation_ids, ["ev1"])
+        self.assertEqual(answer.citations[0].evidence_id, "ev1")
+        self.assertEqual(answer.citations[0].report_name, "사업보고서")
+
     @staticmethod
     def _hcx_response(payload: object) -> Mock:
         response = Mock()
