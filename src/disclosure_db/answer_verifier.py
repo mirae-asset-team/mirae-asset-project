@@ -29,6 +29,24 @@ def verify_answer(bundle: EvidenceBundle, draft: AnswerDraft) -> VerifiedAnswer:
     if not draft.answerable and draft.citation_ids:
         valid = False
         reasons.append("unanswerable_answer_has_citation")
+    structured_facts = [*bundle.financial_facts, *bundle.event_facts]
+    structured_evidence_ids = {
+        str(evidence_id)
+        for fact in structured_facts
+        for evidence_id in fact.get("evidence_ids", [])
+    }
+    if bundle.answerable and structured_facts:
+        required_structured_ids = (
+            set(bundle.calculation.evidence_ids)
+            if bundle.calculation and bundle.calculation.evidence_ids
+            else structured_evidence_ids
+        )
+        if not draft.citation_ids or not required_structured_ids.issubset(set(draft.citation_ids)):
+            valid = False
+            reasons.append("structured_citation_missing")
+    if bundle.calculation and not set(bundle.calculation.evidence_ids).issubset(set(draft.citation_ids)):
+        valid = False
+        reasons.append("calculation_citation_missing")
     if bundle.calculation and draft.numeric_values and bundle.calculation.value is not None:
         try:
             if any(Decimal(value) != bundle.calculation.value for value in draft.numeric_values):
@@ -38,8 +56,17 @@ def verify_answer(bundle: EvidenceBundle, draft: AnswerDraft) -> VerifiedAnswer:
             valid = False
             reasons.append("numeric_claim_not_decimal")
     numeric_request = any(term in bundle.question for term in ("얼마", "금액", "몇", "수량", "가격", "증가율", "성장률", "증감률", "비율"))
+    required_claim_terms = [term for term in ("승인", "완료", "체결", "해지", "변경") if term in bundle.question]
+    if bundle.answerable and required_claim_terms:
+        if any(not any(term in ref.text for ref in bundle.evidence) for term in required_claim_terms):
+            valid = False
+            reasons.append("required_claim_term_missing")
     if numeric_request and bundle.answerable:
-        trusted_values = {str(fact.get("value_numeric")) for fact in bundle.financial_facts if fact.get("value_numeric") is not None}
+        trusted_values = {
+            str(fact.get("value_numeric"))
+            for fact in [*bundle.financial_facts, *bundle.event_facts]
+            if fact.get("value_numeric") is not None
+        }
         if bundle.calculation and bundle.calculation.value is not None:
             trusted_values.add(str(bundle.calculation.value))
         if not draft.numeric_values:

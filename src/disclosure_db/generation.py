@@ -27,6 +27,11 @@ class DeterministicGenerator:
             fact = bundle.financial_facts[0]
             numeric_values = [str(fact.get("value_numeric", ""))]
             answer = f"{fact.get('account_name_raw', '해당 항목')}은(는) {fact.get('value_numeric')} {fact.get('unit_raw') or fact.get('currency') or ''}입니다.".strip()
+        elif bundle.event_facts:
+            fact = bundle.event_facts[0]
+            value = str(fact.get("value_numeric") or fact.get("value_raw") or "")
+            numeric_values = [value] if fact.get("value_numeric") is not None else []
+            answer = f"{fact.get('predicate_raw') or fact.get('predicate_id')}은(는) {value} {fact.get('unit') or ''}입니다.".strip()
         else:
             answer = bundle.evidence[0].text.strip() or UNANSWERABLE_TEXT
         return AnswerDraft(answer=answer, citation_ids=citations, numeric_values=numeric_values, answerable=True)

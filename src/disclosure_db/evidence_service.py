@@ -10,7 +10,7 @@ from typing import Iterable
 
 from .attestation import CorpusAttestation, verify_fast_identity
 from .agent_contracts import EvidenceBundle, EvidenceRef, QueryPlan
-from .financial_overlay import fetch_overlay_facts, overlay_matches_base
+from .financial_overlay import fetch_event_facts, fetch_overlay_facts, overlay_matches_base
 from .pipeline import query_database
 from .retrieval_evaluation import compile_retrieval_query
 
@@ -70,6 +70,7 @@ class EvidenceService:
             )
         refs: list[EvidenceRef] = []
         financial_facts: list[dict[str, object]] = []
+        event_facts: list[dict[str, object]] = []
         account_terms = list(plan.account_terms)
         for term in plan.account_terms:
             account_terms.extend(self.account_aliases.get(term, []))
@@ -78,11 +79,12 @@ class EvidenceService:
         version_as_of = plan.as_of if plan.as_of_source == "api" else (
             None if plan.period_start or plan.period_end or plan.instant_date else plan.as_of
         )
-        if self.overlay_database and self.overlay_database.exists() and plan.question_type == "numeric":
+        structured_domain = plan.fact_domain in {"financial", "event"}
+        if self.overlay_database and self.overlay_database.exists() and structured_domain:
             overlay_attested = overlay_matches_base(self.base_database, self.overlay_database, attestation=self.attestation)
             if not overlay_attested:
                 plan.reason_codes.append("overlay_base_attestation_failed")
-        if self.overlay_database and self.overlay_database.exists() and plan.question_type == "numeric" and overlay_attested:
+        if self.overlay_database and self.overlay_database.exists() and plan.fact_domain == "financial" and overlay_attested:
             # A year/month in the question is a financial period, not a point-in-time
             # knowledge cutoff. An API-provided as_of remains authoritative; only an
             # inferred cutoff is suppressed when a financial period is present.
@@ -107,7 +109,24 @@ class EvidenceService:
                 limit=limit,
                 attestation=self.attestation,
             )
-            refs.extend(self._financial_refs(financial_facts, as_of=version_as_of, correction_policy=plan.correction_policy))
+            financial_facts, structured_refs = self._hydrate_facts(
+                financial_facts, as_of=version_as_of, correction_policy=plan.correction_policy,
+            )
+            refs.extend(structured_refs)
+        elif self.overlay_database and self.overlay_database.exists() and plan.fact_domain == "event" and overlay_attested:
+            event_facts = fetch_event_facts(
+                self.base_database,
+                self.overlay_database,
+                company=plan.company,
+                predicate_terms=plan.predicate_terms,
+                as_of=version_as_of,
+                limit=limit,
+                attestation=self.attestation,
+            )
+            event_facts, structured_refs = self._hydrate_facts(
+                event_facts, as_of=version_as_of, correction_policy=plan.correction_policy,
+            )
+            refs.extend(structured_refs)
         if len(refs) < limit:
             try:
                 query = compile_retrieval_query(plan.question, company_names=[plan.company] if plan.company else self.company_candidates())
@@ -127,25 +146,79 @@ class EvidenceService:
             if ref.evidence_id not in seen and ref.lineage_status in {"root", "resolved"} and not any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS):
                 seen.add(ref.evidence_id)
                 unique.append(ref)
+        final_evidence = unique[:min(limit, 8)]
+        final_ids = {ref.evidence_id for ref in final_evidence}
+        financial_facts = self._facts_with_final_evidence(financial_facts, final_ids)
+        event_facts = self._facts_with_final_evidence(event_facts, final_ids)
         reasons = list(plan.reason_codes)
-        if plan.question_type in {"adversarial", "out_of_scope", "event_numeric"}:
+        if plan.question_type in {"adversarial", "out_of_scope"}:
             reasons.append("answering_disabled_for_question_type")
-        elif plan.question_type == "numeric" and not financial_facts:
+        if plan.fact_domain == "financial" and not financial_facts:
             reasons.append("validated_financial_fact_required")
-        if not unique:
+        if plan.question_type == "event_numeric" and not event_facts:
+            reasons.append("validated_event_fact_required")
+        unresolved_company = plan.company is None or "company_unresolved" in plan.reason_codes
+        if unresolved_company and "answering_disabled_for_unresolved_company" not in reasons:
+            reasons.append("answering_disabled_for_unresolved_company")
+        required_claim_terms = [term for term in ("승인", "완료", "체결", "해지", "변경") if term in plan.question]
+        safe_text = [ref.text for ref in final_evidence]
+        if required_claim_terms and any(not any(term in text for text in safe_text) for term in required_claim_terms):
+            reasons.append("required_claim_term_missing")
+        if not final_evidence:
             reasons.append("no_safe_evidence")
-        answerable = (
-            bool(unique) and plan.question_type not in {"numeric", "adversarial", "out_of_scope", "event_numeric"}
-        ) or (
-            bool(financial_facts) and plan.question_type == "numeric" and bool(unique)
-        )
+        answerable = bool(final_evidence) and plan.question_type not in {"adversarial", "out_of_scope"}
+        if plan.fact_domain == "financial":
+            answerable = answerable and bool(financial_facts)
+        elif plan.question_type == "event_numeric":
+            answerable = answerable and bool(event_facts)
+        if unresolved_company or "required_claim_term_missing" in reasons:
+            answerable = False
         return EvidenceBundle(
             question=plan.question,
-            evidence=unique[:limit],
+            evidence=final_evidence,
             answerable=answerable,
             reason_codes=reasons,
             financial_facts=financial_facts,
+            event_facts=event_facts,
         )
+
+    def _hydrate_facts(
+        self,
+        facts: Iterable[dict[str, object]],
+        *,
+        as_of: str | None = None,
+        correction_policy: str = "current",
+    ) -> tuple[list[dict[str, object]], list[EvidenceRef]]:
+        """Admit structured facts only when at least one declared evidence ID hydrates safely."""
+        eligible: list[dict[str, object]] = []
+        refs: list[EvidenceRef] = []
+        for raw_fact in facts:
+            fact = dict(raw_fact)
+            declared_ids = [str(item) for item in fact.get("evidence_ids", [])]  # type: ignore[union-attr]
+            hydrated = self._hydrate_ids(declared_ids, as_of=as_of, correction_policy=correction_policy)
+            if not hydrated:
+                continue
+            hydrated_ids = {ref.evidence_id for ref in hydrated}
+            fact["evidence_ids"] = [item for item in declared_ids if item in hydrated_ids]
+            if not fact["evidence_ids"]:
+                continue
+            eligible.append(fact)
+            refs.extend(hydrated)
+        return eligible, refs
+
+    @staticmethod
+    def _facts_with_final_evidence(
+        facts: Iterable[dict[str, object]], final_ids: set[str],
+    ) -> list[dict[str, object]]:
+        result: list[dict[str, object]] = []
+        for raw_fact in facts:
+            fact = dict(raw_fact)
+            ids = [str(item) for item in fact.get("evidence_ids", [])]  # type: ignore[union-attr]
+            ids = [item for item in ids if item in final_ids]
+            if ids:
+                fact["evidence_ids"] = ids
+                result.append(fact)
+        return result
 
     def _financial_refs(self, facts: Iterable[dict[str, object]], *, as_of: str | None = None, correction_policy: str = "current") -> list[EvidenceRef]:
         ids = [str(evidence_id) for fact in facts for evidence_id in fact.get("evidence_ids", [])]  # type: ignore[union-attr]

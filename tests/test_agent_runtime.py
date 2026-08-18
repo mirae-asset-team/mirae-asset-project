@@ -63,6 +63,31 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertTrue(answer.verified)
         self.assertIn("매출액", answer.answer)
 
+    def test_event_numeric_question_uses_audited_event_fact(self) -> None:
+        class Service:
+            def company_candidates(self):
+                return ["테스트회사"]
+
+            def search(self, plan, **kwargs):
+                return EvidenceBundle(
+                    question=plan.question,
+                    evidence=[EvidenceRef("ev1", "f1", "s1", "계약금액 2000원", {}, "root")],
+                    answerable=True,
+                    event_facts=[{
+                        "event_fact_id": "event1",
+                        "predicate_id": "contract_amount",
+                        "value_raw": "2000",
+                        "value_numeric": "2000",
+                        "unit": "원",
+                        "evidence_ids": ["ev1"],
+                    }],
+                )
+
+        answer = DisclosureAgent(evidence_service=Service()).answer("테스트회사 계약금액은 얼마인가?")
+        self.assertTrue(answer.answerable)
+        self.assertEqual(answer.numeric_values, ["2000"])
+        self.assertEqual(answer.citation_ids, ["ev1"])
+
     def test_multi_period_operation_fails_closed_with_one_fact(self) -> None:
         class FakeService:
             def company_candidates(self):
