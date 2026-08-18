@@ -205,3 +205,11 @@
 - Intent: document exact local, Docker, NCP, stop/restart, diagnosis, and recoverable rollback flows.
 - Added `docs/operations/contest-server.md` and linked it from README. The runbook states that base/overlay/index are read-only, secrets are process-scoped, and public submission readiness requires external checks.
 - Sanitized status: local server start and health route worked; Docker CLI is unavailable; the answerable smoke fixture remains blocked by the known correctness issue; no provider credential or public NCP endpoint is available.
+
+## 2026-08-19T03:36:26+09:00 — Plan 2 Task 1: financial date semantics
+
+- Intent: distinguish accounting periods from filing/version cutoffs for exact-date financial questions.
+- RED: the new IS regression returned `(period_start, period_end)=(None, None)` for `2024-12-31`, while the BS case retained its instant date.
+- Root cause: the planner assigned an exact calendar date to `instant_date` before statement type detection.
+- GREEN: preserved `parsed_calendar_date` and normalized IS/CIS/CF to `YYYY-01-01..YYYY-MM-DD`; BS remains instant. API `as_of` behavior is unchanged.
+- Verification: `python -m unittest tests.test_evidence_service -v` → 14 passed. Gold/gate values were not changed.

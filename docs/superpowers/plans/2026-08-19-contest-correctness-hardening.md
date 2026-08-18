@@ -47,7 +47,7 @@
 - Produces: IS/CIS/CF `YYYY-MM-DD` → duration `YYYY-01-01..YYYY-MM-DD`; BS → `instant_date=YYYY-MM-DD`
 - Preserves: explicit API `as_of`
 
-- [ ] **Step 1: Write failing statement-aware date tests**
+- [x] **Step 1: Write failing statement-aware date tests**
 
 ```python
 def test_exact_date_income_statement_is_year_to_date_duration(self):
@@ -64,13 +64,13 @@ def test_exact_date_balance_sheet_remains_instant(self):
     self.assertIsNone(plan.period_start)
 ```
 
-- [ ] **Step 2: Run and confirm the IS test fails**
+- [x] **Step 2: Run and confirm the IS test fails**
 
 Run: `python -m unittest tests.test_evidence_service.EvidenceServiceTests.test_exact_date_income_statement_is_year_to_date_duration tests.test_evidence_service.EvidenceServiceTests.test_exact_date_balance_sheet_remains_instant -v`
 
 Expected: IS plan incorrectly has `instant_date`.
 
-- [ ] **Step 3: Normalize after statement type detection**
+- [x] **Step 3: Normalize after statement type detection**
 
 Keep `parsed_calendar_date` separate during regex parsing. After `statement_type` is known:
 
@@ -86,13 +86,13 @@ elif parsed_calendar_date and statement_type == "BS":
 
 Build `target_periods` only after this normalization. A text/event exact date is handled in Task 2.
 
-- [ ] **Step 4: Run focused and full planner/evidence tests**
+- [x] **Step 4: Run focused and full planner/evidence tests**
 
 Run: `python -m unittest tests.test_evidence_service -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/disclosure_db/query_planner.py tests/test_evidence_service.py

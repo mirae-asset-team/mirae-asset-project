@@ -32,13 +32,15 @@ def plan_query(
     period_start: str | None = None
     period_end: str | None = None
     instant_date: str | None = None
+    parsed_calendar_date: str | None = None
     reason_codes: list[str] = []
     # Parse the accounting period independently of the point-in-time filing cutoff.
     # An API-provided as_of remains authoritative for version selection.
     if date_match:
         year, month, day = int(date_match.group(1)), int(date_match.group(2)), date_match.group(3)
         if day:
-            instant_date = f"{year:04d}-{month:02d}-{int(day):02d}"
+            parsed_calendar_date = f"{year:04d}-{month:02d}-{int(day):02d}"
+            instant_date = parsed_calendar_date
         else:
             import calendar
             period_end = f"{year:04d}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
@@ -71,6 +73,13 @@ def plan_query(
     statement_type = "IS" if any(term in text for term in ("매출", "영업이익", "순이익")) else (
         "BS" if any(term in text for term in ("자산", "부채", "자본", "현금및현금성자산")) else None
     )
+    if parsed_calendar_date and statement_type in {"IS", "CIS", "CF"}:
+        year = parsed_calendar_date[:4]
+        period_start = f"{year}-01-01"
+        period_end = parsed_calendar_date
+        instant_date = None
+    elif parsed_calendar_date and statement_type == "BS":
+        instant_date = parsed_calendar_date
     question_type = "numeric" if operation != "lookup" or account_terms else "text"
     if any(marker in text.casefold() for marker in ("ignore previous", "ignore all previous", "system prompt", "developer message", "이전 지시를 무시", "지시를 무시", "시스템 프롬프트")):
         question_type = "adversarial"

@@ -138,6 +138,28 @@ class EvidenceServiceTests(unittest.TestCase):
         self.assertEqual(instant_bs.statement_type, "BS")
         self.assertEqual(instant_bs.period_end, "2023-12-31")
 
+    def test_exact_date_income_statement_is_year_to_date_duration(self) -> None:
+        plan = plan_query(
+            "고려아연의 2024-12-31 연결 XI. 당기순이익은 얼마인가?",
+            company_candidates=["고려아연"],
+        )
+        self.assertEqual(plan.statement_type, "IS")
+        self.assertEqual((plan.period_start, plan.period_end), ("2024-01-01", "2024-12-31"))
+        self.assertIsNone(plan.instant_date)
+        self.assertEqual(
+            plan.target_periods,
+            [{"period_type": "duration", "start": "2024-01-01", "end": "2024-12-31", "instant": None}],
+        )
+
+    def test_exact_date_balance_sheet_remains_instant(self) -> None:
+        plan = plan_query(
+            "테스트의 2024-12-31 연결 자산총계는 얼마인가?",
+            company_candidates=["테스트"],
+        )
+        self.assertEqual(plan.statement_type, "BS")
+        self.assertEqual(plan.instant_date, "2024-12-31")
+        self.assertIsNone(plan.period_start)
+
     def test_financial_period_does_not_become_knowledge_cutoff(self) -> None:
         plan = plan_query("삼성전자 2023년 매출액은?", company_candidates=["삼성전자"])
         self.assertEqual(plan.fact_domain, "financial")
