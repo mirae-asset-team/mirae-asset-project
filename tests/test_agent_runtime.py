@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from decimal import Decimal
 
-from disclosure_db.agent_contracts import EvidenceBundle, EvidenceRef, QueryPlan
+from disclosure_db.agent_contracts import CitationRef, EvidenceBundle, EvidenceRef, QueryPlan, VerifiedAnswer, to_jsonable
 from disclosure_db.agent import DisclosureAgent
 from disclosure_db.answer_verifier import verify_answer
 from disclosure_db.api import create_app
@@ -12,6 +12,28 @@ from disclosure_db.generation import DeterministicGenerator
 
 
 class AgentRuntimeTests(unittest.TestCase):
+    def test_serializable_contracts_have_backward_compatible_routing_defaults(self) -> None:
+        plan = QueryPlan("질문")
+        bundle = EvidenceBundle(question="질문")
+        citation = CitationRef("ev1", "f1")
+        answer = VerifiedAnswer("답", [], True, True)
+
+        self.assertEqual(plan.fact_domain, "text")
+        self.assertEqual(plan.predicate_terms, [])
+        self.assertEqual(plan.target_periods, [])
+        self.assertFalse(plan.requires_complete_evidence_set)
+        self.assertEqual(bundle.event_facts, [])
+        self.assertEqual(bundle.retrieval_diagnostics, {})
+        self.assertEqual(citation.report_name, None)
+        self.assertEqual(citation.filed_at, None)
+        self.assertEqual(citation.locator, {})
+        self.assertEqual(answer.citations, [])
+        self.assertIsNone(answer.calculation)
+
+        serialized = to_jsonable(bundle)
+        self.assertEqual(serialized["event_facts"], [])
+        self.assertEqual(serialized["retrieval_diagnostics"], {})
+
     def test_api_is_optional_and_lazy(self) -> None:
         class Service:
             def company_candidates(self):

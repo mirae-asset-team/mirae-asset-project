@@ -8,6 +8,15 @@ from typing import Any
 
 
 @dataclass(slots=True)
+class CitationRef:
+    evidence_id: str
+    filing_id: str
+    report_name: str | None = None
+    filed_at: str | None = None
+    locator: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class QueryPlan:
     question: str
     company: str | None = None
@@ -23,6 +32,10 @@ class QueryPlan:
     correction_policy: str = "current"
     question_type: str = "unknown"
     reason_codes: list[str] = field(default_factory=list)
+    fact_domain: str = "text"
+    predicate_terms: list[str] = field(default_factory=list)
+    target_periods: list[dict[str, str | None]] = field(default_factory=list)
+    requires_complete_evidence_set: bool = False
 
 
 @dataclass(slots=True)
@@ -47,6 +60,8 @@ class EvidenceBundle:
     answerable: bool = False
     reason_codes: list[str] = field(default_factory=list)
     financial_facts: list[dict[str, Any]] = field(default_factory=list)
+    event_facts: list[dict[str, Any]] = field(default_factory=list)
+    retrieval_diagnostics: dict[str, Any] = field(default_factory=dict)
     calculation: "CalculationResult | None" = None
 
 
@@ -77,6 +92,8 @@ class VerifiedAnswer:
     answerable: bool
     reason_codes: list[str] = field(default_factory=list)
     numeric_values: list[str] = field(default_factory=list)
+    citations: list[CitationRef] = field(default_factory=list)
+    calculation: "CalculationResult | None" = None
 
 
 def to_jsonable(value: Any) -> Any:
