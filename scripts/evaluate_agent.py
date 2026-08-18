@@ -12,9 +12,10 @@ from disclosure_db.agent_contracts import to_jsonable
 from disclosure_db.agent_evaluation import evaluate_agent
 
 STAGE_METRIC_KEYS = ("planner_p95_ms", "fact_lookup_p95_ms", "local_retrieval_p95_ms", "reranked_retrieval_p95_ms")
+STAGE_METADATA_KEYS = ("reranker_provider_configured",)
 
 
-def load_stage_metrics(path: Path | None) -> tuple[dict[str, float], list[str]]:
+def load_stage_metrics(path: Path | None) -> tuple[dict[str, float | bool], list[str]]:
     """Load finite stage p95 metrics without allowing malformed artifacts to pass."""
     if path is None:
         return {}, ["stage_metrics_missing"]
@@ -24,11 +25,16 @@ def load_stage_metrics(path: Path | None) -> tuple[dict[str, float], list[str]]:
         return {}, [f"stage_metrics_invalid_json:{exc}"]
     if not isinstance(payload, dict):
         return {}, ["stage_metrics_not_object"]
-    unknown = sorted(set(payload) - set(STAGE_METRIC_KEYS))
+    unknown = sorted(set(payload) - (set(STAGE_METRIC_KEYS) | set(STAGE_METADATA_KEYS)))
     if unknown:
         return {}, ["stage_metrics_unknown_fields:" + ",".join(unknown)]
-    values: dict[str, float] = {}
+    values: dict[str, float | bool] = {}
     errors: list[str] = []
+    provider_configured = payload.get("reranker_provider_configured", True)
+    if not isinstance(provider_configured, bool):
+        errors.append("reranker_provider_configured:must_be_boolean")
+    else:
+        values["reranker_provider_configured"] = provider_configured
     for key in STAGE_METRIC_KEYS:
         value = payload.get(key)
         if isinstance(value, bool) or not isinstance(value, (int, float)):

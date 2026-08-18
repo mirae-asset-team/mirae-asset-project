@@ -94,6 +94,8 @@ def quality_gate_diagnostics(summary: dict[str, Any], acceptance: dict[str, Any]
         metric = summary.get(metric_name)
         if threshold_name == "end_to_end_p95_ms" and metric is None:
             metric = summary.get("end_to_end_p95_ms")
+        if threshold_name == "reranked_retrieval_p95_ms" and summary.get("reranker_provider_configured") is False:
+            metric = None
         threshold_integer = threshold_name == "regression_answerability_matches"
         if not _finite_number(threshold, integer=threshold_integer, nonnegative=True):
             reasons.append(threshold_name + "_threshold_invalid")
@@ -372,7 +374,10 @@ def evaluate_agent(
         bool(item.get("answerable")) and (not bool(item.get("verified")) or not bool(item.get("expected_answerable")))
         for item in answered
     )
-    allowed_stage_metrics = {"planner_p95_ms", "fact_lookup_p95_ms", "local_retrieval_p95_ms", "reranked_retrieval_p95_ms"}
+    allowed_stage_metrics = {
+        "planner_p95_ms", "fact_lookup_p95_ms", "local_retrieval_p95_ms",
+        "reranked_retrieval_p95_ms", "reranker_provider_configured",
+    }
     merged_stage_metrics = {key: value for key, value in (stage_metrics or {}).items() if key in allowed_stage_metrics}
     result: dict[str, Any] = {
         "count": len(evaluations),
@@ -397,6 +402,7 @@ def evaluate_agent(
         "fact_lookup_p95_ms": merged_stage_metrics.get("fact_lookup_p95_ms"),
         "local_retrieval_p95_ms": merged_stage_metrics.get("local_retrieval_p95_ms"),
         "reranked_retrieval_p95_ms": merged_stage_metrics.get("reranked_retrieval_p95_ms"),
+        "reranker_provider_configured": merged_stage_metrics.get("reranker_provider_configured", True),
         "end_to_end_p95_ms": percentile(latencies, 0.95),
         "stage_metrics_errors": list(stage_metrics_errors or []),
         "evaluations": evaluations,

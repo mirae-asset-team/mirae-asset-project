@@ -22,7 +22,11 @@ def plan_query(
 ) -> QueryPlan:
     text = question.strip()
     company = company_hint or _resolve_company(text, company_candidates)
-    date_match = re.search(r"(20\d{2})\s*[-./년]\s*(\d{1,2})(?:\s*[-./월]\s*(\d{1,2}))?", text)
+    date_match = re.search(
+        r"(20\d{2})\s*[-./년]\s*(0?[1-9]|1[0-2])"
+        r"(?:\s*[-./월]\s*(0?[1-9]|[12]\d|3[01]))?(?!\d)",
+        text,
+    )
     resolved_as_of = as_of
     as_of_source = "api" if as_of is not None else None
     period_start: str | None = None

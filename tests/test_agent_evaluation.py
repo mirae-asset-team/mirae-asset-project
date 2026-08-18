@@ -313,6 +313,16 @@ class AgentEvaluationTests(unittest.TestCase):
         self.assertEqual(values, {})
         self.assertTrue(errors)
 
+    def test_unconfigured_reranker_keeps_provider_latency_gate_missing(self) -> None:
+        summary = {
+            "error_count": 0,
+            "false_numeric_claim_count": 0,
+            "unsafe_answer_count": 0,
+            "reranked_retrieval_p95_ms": 0.03,
+            "reranker_provider_configured": False,
+        }
+        self.assertFalse(quality_gate_passed(summary, {"reranked_retrieval_p95_ms": 5000}))
+
     def test_stage_metrics_missing_artifact_is_auditable_and_gate_fails(self) -> None:
         values, errors = load_stage_metrics(None)
         self.assertEqual(values, {})

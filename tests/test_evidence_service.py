@@ -123,6 +123,11 @@ class EvidenceServiceTests(unittest.TestCase):
         self.assertEqual(monthly.period_start, "2023-03-01")
         self.assertEqual(monthly.period_end, "2023-03-31")
         self.assertIsNone(monthly.as_of)
+        duplicate_year = plan_query(
+            "테스트회사 2023년 2023-03-02 계약금액은 얼마인가?",
+            company_candidates=["테스트회사"],
+        )
+        self.assertEqual(duplicate_year.instant_date, "2023-03-02")
 
         with_api_cutoff = plan_query("삼성전자 2023년 매출액은?", company_candidates=["삼성전자"], as_of="2026-01-01")
         self.assertEqual(with_api_cutoff.as_of, "2026-01-01")
