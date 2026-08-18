@@ -208,6 +208,7 @@ def _make_stress_case(
         case["question"] = "제공된 공시 근거만으로 확인할 수 없는 미래 사실은 확인할 수 없다고 답하라."
         case["answer"] = {"kind": "unanswerable", "reason": "source record is explicitly unanswerable"}
         case["evidence"] = []
+        case.pop("company_resolution", None)
     case["stress"] = {
         "oracle": oracle,
         "category": category,

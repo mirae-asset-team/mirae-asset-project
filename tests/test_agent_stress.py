@@ -102,6 +102,7 @@ class AgentStressContractTests(unittest.TestCase):
         record["answerability"] = "unanswerable"
         record["answer"] = {"kind": "unanswerable", "reason": "none"}
         record["evidence"] = []
+        record["company_resolution"] = {"query_name": "테스트회사"}
         cases = build_stress_cases([record], {"case_count": 1, "allocation": {"calculation": 1}})
         self.assertEqual(cases[0]["answerability"], "unanswerable")
         self.assertNotIn("company_resolution", cases[0])
