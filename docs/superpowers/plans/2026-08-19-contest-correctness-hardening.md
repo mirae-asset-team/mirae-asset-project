@@ -321,7 +321,7 @@ git commit -m "fix: validate row-aware numeric event facts"
 **Interfaces:**
 - Promotes candidate files only after `PRAGMA quick_check`, base attestation, build report, and representative fact queries pass.
 
-- [ ] **Step 1: Verify the immutable base identity before building**
+- [x] **Step 1: Verify the immutable base identity before building**
 
 Run:
 
@@ -331,7 +331,7 @@ python scripts/validate_database.py --database 'D:\mirae-asset-project\db\semant
 
 Expected: size 38,773,280,768 and SHA-256 `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563` match. Stop on mismatch.
 
-- [ ] **Step 2: Build a candidate overlay outside the live path**
+- [x] **Step 2: Build a candidate overlay outside the live path**
 
 Run:
 
@@ -341,11 +341,11 @@ python -m disclosure_db.cli build-agent-overlay --database 'D:\mirae-asset-proje
 
 Expected: build exits 0 and q001/q004/q009/q010 numeric facts are present with exact evidence cells.
 
-- [ ] **Step 3: Run read-only candidate verification**
+- [x] **Step 3: Run read-only candidate verification**
 
 Run `PRAGMA quick_check`, `overlay_matches_base`, counts by predicate/reject reason, and four representative agent queries. Record imported/rejected counts and candidate SHA-256 in the development log. Any `event_numeric_cell_ambiguous`, cross-filing, PDF, or lineage case must remain rejected.
 
-- [ ] **Step 4: Build and verify a candidate search index if schema revision changed**
+- [x] **Step 4: Build and verify a candidate search index if schema revision changed**
 
 Run:
 
@@ -355,11 +355,11 @@ python -m disclosure_db.cli build-search-index --database 'D:\mirae-asset-projec
 
 Expected: build exits 0, quick check is `ok`, and exact filing-date fixtures work.
 
-- [ ] **Step 5: Promote with a recoverable rename**
+- [x] **Step 5: Promote with a recoverable rename**
 
 Stop the server. Resolve and verify the four absolute paths under `D:\mirae-asset-project`. Rename current live files to timestamped `.previous.sqlite`, then rename fully verified candidates to `agent_overlay.sqlite` and `agent_search.sqlite`. Never delete the previous files in this task. Start the server and run `scripts/smoke-agent.ps1`.
 
-- [ ] **Step 6: Commit only the audit record**
+- [x] **Step 6: Commit only the audit record**
 
 ```powershell
 git add docs/development-log.md

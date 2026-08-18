@@ -234,3 +234,13 @@
 - RED: the composite fixture was rejected as `event_numeric_not_decimal`, and the two-number row had no row-ambiguity reject.
 - GREEN: added strict full-cell decimal parsing, configured header/suffix/table-unit resolution, selected-cell-only evidence, and issued/treasury-share predicate aliases. Non-composite arbitrary text retains the prior `event_numeric_not_decimal` reject.
 - Verification: targeted resolver tests → 2 passed; `python -m unittest tests.test_financial_overlay -v` → 20 passed. No live D-drive database was read for writing or rebuilt in this task.
+
+## 2026-08-19T04:47:00+09:00 — Plan 2 Task 5: corrected derived database rebuild
+
+- Intent: rebuild overlay/search candidates through staging, verify them against the immutable corpus, and promote only through recoverable renames.
+- Base gate: manifest size `38,773,280,768`, mtime, and SHA-256 `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563` matched. The handoff's `--distribution-attestation` validator option is absent in this checkout; the current validator plus distribution-attestation fast/hash checks were used without lowering gates.
+- Validation: `integrity_check=ok`, foreign-key violations `0`, structure gate `true`, retrieval smoke gate `true`, semantic schema gate `true`. Counts: 4,204 filings, 4,622 sources, 8,437,771 fragments, 36,697,165 table cells.
+- Candidate overlay: `imported=1,431` (`financial=8`, `event=1,423`), `rejected=2,498`, `quick_check=ok`, base SHA matched. Candidate SHA-256 `0da755d055e1148e45f611d996805ae9dcfc4124860a5458d645bbed56a22633`.
+- Candidate search: `indexed_rows=329,323`, `trigram_rows=298,128`, `quick_check=ok`, revision `safe-search-v1`, candidate SHA-256 `e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793`.
+- Representative checks: q001 `240993039040원`, q004 `495278073440원`, q009 `1940200주`, q010 `495472주`; each returned one selected numeric evidence cell. Live overlay/index were promoted after port 8000 was confirmed stopped. Previous files were preserved as `agent_overlay.20260819-044541.previous.sqlite` and `agent_search.20260819-044541.previous.sqlite`; no base file was modified.
+- Verification: fresh full suite → `194 passed, 1 skipped`. Post-promotion live quick checks are `ok`, overlay matches base attestation, and live search metadata validates.
