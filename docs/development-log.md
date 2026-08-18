@@ -178,3 +178,10 @@
 - GREEN: added `HyperClovaGenerator.configured`, `DisclosureAgent.provider_configured`, and boolean-only `/health` mapping.
 - Verification: provider-status focused test → 1 passed; `tests.test_agent_runtime tests.test_reranker` → 41 passed. The test used a sentinel key only in memory; it was not written to logs or responses.
 - External status: no rotated production credential is available, so live provider smoke remains blocked and deterministic fallback remains the only verified provider mode.
+
+## 2026-08-19T03:20:09+09:00 — Plan 1 Task 4: environment-backed serve selection
+
+- Intent: let `disclosure-agent serve` load all runtime paths from `DISCLOSURE_*` while preserving explicit CLI settings.
+- RED: `tests.test_cli` failed to import the planned `_serving_settings` selector because it did not exist.
+- GREEN: added all-or-none explicit path selection, runtime environment loading and validation, and host/port selection; `agent-query` behavior remains unchanged.
+- Verification: `python -m unittest tests.test_cli tests.test_runtime_config -v` → 4 passed. No database files or provider credentials were accessed.

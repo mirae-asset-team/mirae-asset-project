@@ -7,6 +7,8 @@ from pathlib import Path
 
 from .pipeline import build_database, export_gold_candidates, export_inventory, query_database
 from .agent_contracts import to_jsonable
+from .agent import AgentSettings
+from .runtime import RuntimeConfig
 
 
 def _build_search_index(args: argparse.Namespace) -> object:
@@ -114,13 +116,29 @@ def _agent_parser() -> argparse.ArgumentParser:
     search.add_argument("--attestation", type=Path, required=True)
     search.add_argument("--report", type=Path, required=True)
     serve = sub.add_parser("serve")
-    serve.add_argument("--database", type=Path, required=True)
+    serve.add_argument("--database", type=Path)
     serve.add_argument("--overlay", type=Path)
     serve.add_argument("--attestation", type=Path)
     serve.add_argument("--search-index", "--search-database", dest="search_database", type=Path)
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8000)
     return parser
+
+
+def _serving_settings(args: argparse.Namespace) -> tuple[AgentSettings, str, int]:
+    explicit = (args.database, args.overlay, args.search_database, args.attestation)
+    if any(explicit):
+        if not all(explicit):
+            raise SystemExit("serve requires all four database arguments or none")
+        return AgentSettings(
+            base_database=args.database,
+            overlay_database=args.overlay,
+            search_database=args.search_database,
+            attestation_path=args.attestation,
+        ), args.host, args.port
+    config = RuntimeConfig.from_env()
+    config.validate()
+    return config.to_agent_settings(), config.host, config.port
 
 
 def agent_main() -> None:
@@ -152,16 +170,14 @@ def agent_main() -> None:
         settings = AgentSettings(base_database=args.database, overlay_database=args.overlay, attestation_path=args.attestation, search_database=args.search_database)
         result = to_jsonable(DisclosureAgent(settings).answer(args.question, company=args.company, as_of=args.as_of, limit=args.limit))
     else:
-        if (args.overlay or args.search_database) and args.attestation is None:
-            raise SystemExit("--attestation is required when --overlay or --search-index is configured")
         try:
             import uvicorn
         except ImportError as exc:
             raise SystemExit("serve requires: pip install 'miraeasset-disclosure-db[agent]'") from exc
-        from .agent import AgentSettings, DisclosureAgent
+        from .agent import DisclosureAgent
         from .api import create_app
-        settings = AgentSettings(base_database=args.database, overlay_database=args.overlay, attestation_path=args.attestation, search_database=args.search_database)
-        uvicorn.run(create_app(DisclosureAgent(settings)), host=args.host, port=args.port)
+        settings, host, port = _serving_settings(args)
+        uvicorn.run(create_app(DisclosureAgent(settings)), host=host, port=port)
         return
     print(json.dumps(to_jsonable(result) if args.command in {"build-financial-overlay", "build-agent-overlay", "build-search-index"} else result, ensure_ascii=False, indent=2))
 

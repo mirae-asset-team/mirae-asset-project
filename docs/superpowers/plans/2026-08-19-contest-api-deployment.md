@@ -338,7 +338,7 @@ git commit -m "feat: report disclosure provider readiness"
 - `disclosure-agent serve` consumes `DISCLOSURE_*` when file arguments are omitted.
 - Explicit CLI arguments override environment variables.
 
-- [ ] **Step 1: Write failing parser/selection tests**
+- [x] **Step 1: Write failing parser/selection tests**
 
 ```python
 def test_serve_without_paths_loads_runtime_environment(self):
@@ -356,13 +356,13 @@ def test_serve_without_paths_loads_runtime_environment(self):
 
 Add a second test with all four explicit paths and assert environment loading is not used.
 
-- [ ] **Step 2: Run the tests and confirm argparse rejects missing `--database`**
+- [x] **Step 2: Run the tests and confirm argparse rejects missing `--database`**
 
 Run: `python -m unittest tests.test_cli -v`
 
 Expected: FAIL with argparse exit 2.
 
-- [ ] **Step 3: Implement one settings selection function**
+- [x] **Step 3: Implement one settings selection function**
 
 ```python
 def _serving_settings(args: argparse.Namespace) -> tuple[AgentSettings, str, int]:
@@ -383,13 +383,13 @@ def _serving_settings(args: argparse.Namespace) -> tuple[AgentSettings, str, int
 
 Make the four `serve` file arguments optional. Keep `agent-query` behavior unchanged.
 
-- [ ] **Step 4: Run CLI and runtime tests**
+- [x] **Step 4: Run CLI and runtime tests**
 
 Run: `python -m unittest tests.test_cli tests.test_runtime_config -v`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add src/disclosure_db/cli.py src/disclosure_db/runtime.py tests/test_cli.py tests/test_runtime_config.py
