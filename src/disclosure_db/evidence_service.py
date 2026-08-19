@@ -22,6 +22,18 @@ _PROMPT_INJECTION_MARKERS = (
 )
 
 
+def _readonly_connection(database: Path) -> sqlite3.Connection:
+    """Open a frozen serving database without SQLite write-back attempts."""
+    connection = sqlite3.connect(
+        f"file:{Path(database).resolve().as_posix()}?mode=ro&immutable=1",
+        uri=True,
+    )
+    connection.execute("PRAGMA busy_timeout=5000")
+    connection.execute("PRAGMA query_only=ON")
+    connection.execute("PRAGMA temp_store=MEMORY")
+    return connection
+
+
 class EvidenceService:
     def __init__(
         self,
@@ -69,7 +81,7 @@ class EvidenceService:
             self._companies = []
             return []
         if self._companies is None:
-            with closing(sqlite3.connect(f"file:{self.base_database.resolve().as_posix()}?mode=ro", uri=True)) as connection:
+            with closing(_readonly_connection(self.base_database)) as connection:
                 columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(filing)")}
                 sources = [name for name in ("issuer_name", "listed_name", "reporter_name") if name in columns]
                 union = " UNION ".join(f"SELECT {name} FROM filing WHERE {name}<>''" for name in sources)
@@ -89,7 +101,7 @@ class EvidenceService:
         company_fields = ["f.issuer_name=?", "f.listed_name=?", "f.stock_code=?", "f.issuer_corp_code=?"]
         params: list[object] = [plan.company] * len(company_fields)
         params.append(plan.filing_date)
-        with closing(sqlite3.connect(f"file:{self.base_database.resolve().as_posix()}?mode=ro", uri=True)) as connection:
+        with closing(_readonly_connection(self.base_database)) as connection:
             rows = connection.execute(
                 f"""SELECT DISTINCT value.evidence_id
                        FROM table_cell label
@@ -146,7 +158,7 @@ class EvidenceService:
         company_fields = ["f.issuer_name=?", "f.listed_name=?", "f.stock_code=?", "f.issuer_corp_code=?"]
         params: list[object] = [plan.company] * len(company_fields)
         params.append(plan.filing_date)
-        with closing(sqlite3.connect(f"file:{self.base_database.resolve().as_posix()}?mode=ro", uri=True)) as connection:
+        with closing(_readonly_connection(self.base_database)) as connection:
             rows = connection.execute(
                 f"""SELECT DISTINCT value.evidence_id
                        FROM table_cell label
@@ -458,7 +470,7 @@ class EvidenceService:
             version_sql, version_params = "v.lineage_status IN ('root','resolved') AND v.effective_from<=? AND (v.effective_to IS NULL OR ? < v.effective_to)", [as_of, as_of]
         if correction_policy == "corrected":
             version_sql += " AND f.is_correction=1"
-        with closing(sqlite3.connect(f"file:{self.base_database.resolve().as_posix()}?mode=ro", uri=True)) as connection:
+        with closing(_readonly_connection(self.base_database)) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 f"""SELECT x.evidence_id,x.filing_id,x.source_id,x.text_value,x.locator_json,

@@ -147,6 +147,18 @@ class AgentRuntimeTests(unittest.TestCase):
                 self.assertTrue(client.get("/health").json()["ready"])
         self.assertEqual(health_status.call_count, 1)
 
+    def test_serving_readonly_connection_uses_immutable_sqlite_uri(self):
+        from disclosure_db.evidence_service import _readonly_connection
+
+        with patch("disclosure_db.evidence_service.sqlite3.connect") as connect:
+            connection = connect.return_value
+            _readonly_connection(Path("base.sqlite"))
+
+        uri = connect.call_args.args[0]
+        self.assertIn("mode=ro", uri)
+        self.assertIn("immutable=1", uri)
+        connection.execute.assert_any_call("PRAGMA query_only=ON")
+
     def test_deterministic_financial_answer_cites_only_selected_fact(self):
         bundle = EvidenceBundle(
             question="매출액?",

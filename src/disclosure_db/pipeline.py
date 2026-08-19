@@ -47,8 +47,10 @@ MANIFEST_FIELDS = {
 
 def _readonly_connection(database: Path) -> sqlite3.Connection:
     """Open an answer-producing corpus read in SQLite URI mode=ro."""
-    connection = sqlite3.connect(f"file:{Path(database).resolve().as_posix()}?mode=ro", uri=True)
+    connection = sqlite3.connect(f"file:{Path(database).resolve().as_posix()}?mode=ro&immutable=1", uri=True)
     connection.execute("PRAGMA busy_timeout=5000")
+    connection.execute("PRAGMA query_only=ON")
+    connection.execute("PRAGMA temp_store=MEMORY")
     return connection
 
 

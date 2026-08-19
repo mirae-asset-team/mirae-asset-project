@@ -230,7 +230,7 @@ class SafeSearchIndex:
         if not self.path.exists():
             raise FileNotFoundError(self.path)
         try:
-            with closing(sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro", uri=True)) as connection:
+            with closing(sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro&immutable=1", uri=True)) as connection:
                 revision = connection.execute(
                     "SELECT revision,base_sha256,base_size_bytes,row_count FROM index_revision ORDER BY rowid DESC LIMIT 1"
                 ).fetchone()
@@ -277,7 +277,7 @@ class SafeSearchIndex:
 
     def _unicode_search(self, token: str, *, company: str | None, as_of: str | None, filed_at: str | None, correction_policy: str, limit: int) -> list[dict[str, object]]:
         where, params = self._filters(company, as_of, filed_at, correction_policy)
-        with closing(sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro", uri=True)) as connection:
+        with closing(sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro&immutable=1", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 f"""SELECT d.evidence_id,d.filing_id,d.filed_at,d.source_id,d.company,d.stock_code,d.doc_group,
@@ -292,7 +292,7 @@ class SafeSearchIndex:
 
     def _trigram_search(self, token: str, *, company: str | None, as_of: str | None, filed_at: str | None, correction_policy: str, limit: int) -> list[dict[str, object]]:
         where, params = self._filters(company, as_of, filed_at, correction_policy)
-        with closing(sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro", uri=True)) as connection:
+        with closing(sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro&immutable=1", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
                 f"""SELECT d.evidence_id,d.filing_id,d.filed_at,d.source_id,d.company,d.stock_code,d.doc_group,

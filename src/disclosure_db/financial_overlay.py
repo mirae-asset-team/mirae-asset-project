@@ -130,7 +130,7 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
 @lru_cache(maxsize=8)
 def _overlay_matches_base_cached(base_name: str, overlay_name: str, base_size: int, base_mtime: int, overlay_size: int, overlay_mtime: int) -> bool:
     try:
-        with closing(sqlite3.connect(overlay_name)) as connection:
+        with closing(sqlite3.connect(f"file:{Path(overlay_name).resolve().as_posix()}?mode=ro&immutable=1", uri=True)) as connection:
             connection.execute("PRAGMA busy_timeout=5000")
             connection.execute("PRAGMA query_only=ON")
             row = connection.execute(
@@ -156,7 +156,7 @@ def overlay_matches_base(
         if attestation is not None:
             if not verify_fast_identity(Path(base_database), attestation):
                 return False
-            with closing(sqlite3.connect(str(Path(overlay_database)))) as connection:
+            with closing(sqlite3.connect(f"file:{Path(overlay_database).resolve().as_posix()}?mode=ro&immutable=1", uri=True)) as connection:
                 connection.execute("PRAGMA busy_timeout=5000")
                 connection.execute("PRAGMA query_only=ON")
                 row = connection.execute(
@@ -174,8 +174,10 @@ def overlay_matches_base(
 
 def _read_base(path: Path) -> sqlite3.Connection:
     # URI mode=ro is intentional: an importer must never mutate the immutable corpus.
-    connection = sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro", uri=True)
+    connection = sqlite3.connect(f"file:{Path(path).resolve().as_posix()}?mode=ro&immutable=1", uri=True)
     connection.execute("PRAGMA busy_timeout=5000")
+    connection.execute("PRAGMA query_only=ON")
+    connection.execute("PRAGMA temp_store=MEMORY")
     connection.row_factory = sqlite3.Row
     return connection
 
