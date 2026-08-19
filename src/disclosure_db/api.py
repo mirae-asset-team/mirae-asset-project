@@ -142,6 +142,26 @@ def create_app(agent: DisclosureAgent):
         evidence_ids: list[str] = Field(default_factory=list)
 
     app = FastAPI(title="Mirae Asset Disclosure Agent", version="0.3.0")
+    startup_health: dict[str, Any] | None = None
+
+    @app.on_event("startup")
+    async def validate_runtime_once() -> None:
+        """Run the full read-only runtime validation before serving requests.
+
+        Search-index validation includes ``PRAGMA quick_check``.  Running that
+        scan for every health request makes Docker Desktop bind mounts exceed
+        the short healthcheck timeout, while the serving inputs are explicitly
+        mounted read-only.  Validate once at startup and reuse the attested
+        result for readiness and health responses.
+        """
+        nonlocal startup_health
+        startup_health = _health_status(agent.evidence_service)
+
+    def runtime_health() -> dict[str, Any]:
+        nonlocal startup_health
+        if startup_health is None:
+            startup_health = _health_status(agent.evidence_service)
+        return dict(startup_health)
 
     def envelope(payload: Any, started: float) -> dict[str, Any]:
         body = to_jsonable(payload)
@@ -159,13 +179,13 @@ def create_app(agent: DisclosureAgent):
     @app.get("/health")
     def health() -> dict[str, Any]:
         started = perf_counter()
-        health_payload = _health_status(agent.evidence_service)
+        health_payload = runtime_health()
         health_payload["provider_configured"] = bool(getattr(agent, "provider_configured", False))
         return envelope(health_payload, started)
 
     def contest_query(request: ContestQueryRequest) -> dict[str, Any]:
         started = perf_counter()
-        health_status = _health_status(agent.evidence_service)
+        health_status = runtime_health()
         if not health_status["ready"]:
             raise HTTPException(status_code=503, detail="runtime_not_ready")
         answer = agent.answer(

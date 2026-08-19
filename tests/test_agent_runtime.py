@@ -117,6 +117,36 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertTrue(body["provider_configured"])
         self.assertNotIn("secret", json.dumps(body))
 
+    def test_health_reuses_startup_runtime_validation(self):
+        from fastapi.testclient import TestClient
+
+        class Service:
+            base_database = Path("unused.sqlite")
+            overlay_database = None
+            search_database = None
+            attestation = None
+            corpus_revision = "test-revision"
+
+        class FakeAgent:
+            evidence_service = Service()
+            provider_configured = False
+
+        snapshot = {
+            "status": "ok",
+            "ready": True,
+            "base_attested": True,
+            "attestation_configured": True,
+            "overlay_configured": True,
+            "overlay_attested": True,
+            "search_index_configured": True,
+            "search_index_ready": True,
+        }
+        with patch("disclosure_db.api._health_status", return_value=snapshot) as health_status:
+            with TestClient(create_app(FakeAgent())) as client:
+                self.assertTrue(client.get("/health").json()["ready"])
+                self.assertTrue(client.get("/health").json()["ready"])
+        self.assertEqual(health_status.call_count, 1)
+
     def test_deterministic_financial_answer_cites_only_selected_fact(self):
         bundle = EvidenceBundle(
             question="매출액?",
