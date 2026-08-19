@@ -1,6 +1,6 @@
 # Contest server release checklist
 
-Last updated: 2026-08-20 02:13:30 KST
+Last updated: 2026-08-20 02:23:34 KST
 
 This checklist records binary evidence without credentials or raw provider responses. `BLOCKED_EXTERNAL` means the local gate is defined but the required external resource is unavailable; it is not treated as a pass.
 `BLOCKED_LOCAL_RUNTIME` means a local runtime limitation prevented evidence collection; it is not treated as a pass.
@@ -25,6 +25,8 @@ This checklist records binary evidence without credentials or raw provider respo
 | Provider HTTP smoke | PASS | HyperCLOVA endpoint returned HTTP 200; response body redacted |
 | Provider adapter schema smoke | FAIL_CLOSED | Parser now accepts exactly one prose-wrapped JSON object and rejects ambiguity; the prior live text response still did not satisfy the exact schema, and no current credential is available for re-smoke |
 | Provider 300-case pass | NOT_RUN | Stopped after schema smoke; no provider quality gate was claimed |
+| Provider-required runner | PASS | `--provider-mode required` now fails before cases when unconfigured, isolates checkpoint identity by mode/model, records p95 and explicit gate reasons, and cannot treat disabled fallback as provider evidence |
+| Official example `GET /answer` | PASS_LOCAL | Five-field response contract, bounded public context/trace, abstention and anonymous request limiting passed focused tests; public NCP deployment is not yet performed |
 | Compose config hash | PASS | `compose.yaml` SHA-256 `eebdcf5a7604ae904fe8ffbb049f508a2f3abe9194bdfad510392e636c4886d1`; anonymous limits render as `120/4/8` |
 | NCP Docker image build/start | PASS | Docker Engine 29.1.3 / Compose 2.40.3; image rebuilt from `3ad8dd8`, container healthy |
 | NCP Docker `/health` | PASS | HTTP 200; ready/base-attested/overlay-attested/search-ready all true; provider false |

@@ -1,6 +1,6 @@
 # Contest server runbook
 
-이 문서는 공모전 호환 `POST /query` 서버의 로컬·Docker·NCP 실행 절차다. 원본 SQLite,
+이 문서는 공모전 호환 `POST /query`와 `GET /answer` 서버의 로컬·Docker·NCP 실행 절차다. 원본 SQLite,
 agent overlay, sparse search index는 서비스와 운영자가 읽기 전용으로 취급한다. `runs`와
 `staging`만 쓰기 대상으로 둔다.
 
@@ -72,7 +72,7 @@ Compose는 base SQLite와 `db\agent`를 `:ro`로 mount하고 `/runtime`만 쓰�
 | `DISCLOSURE_PUBLIC_PER_IP_CONCURRENCY` | 4 | 연결 IP별 동시 질문 수 |
 | `DISCLOSURE_PUBLIC_GLOBAL_CONCURRENCY` | 8 | 단일 서버 프로세스 전체 동시 질문 수 |
 
-`POST /query`와 호환 경로 `POST /v1/answer`에만 적용된다. `/`, 정적 자산, `/health`는
+`POST /query`, 호환 경로 `POST /v1/answer`, 공식 예시 경로 `GET /answer`에 적용된다. `/`, 정적 자산, `/health`는
 적용 대상이 아니다. 분당 또는 IP 동시 제한은 HTTP `429`, 서버 전체 동시 제한은
 HTTP `503`과 `detail=server_busy`를 반환한다. 클라이언트는 `Retry-After` 초 이후에
 재시도한다.
@@ -100,6 +100,57 @@ powershell -ExecutionPolicy Bypass -File scripts/smoke-agent.ps1 -BaseUrl 'http:
 ```
 
 웹 화면이 없거나 CSP가 빠졌거나 어느 질문 계약이 깨지면 0이 아닌 종료 코드로 실패한다.
+
+## Evaluation API contract
+
+공식 예시 형식은 다음처럼 호출한다. 실제 public IP나 credential은 문서에 기록하지 않는다.
+
+```powershell
+curl.exe -G "https://<team-endpoint>/answer" `
+  --data-urlencode "question_id=Q-001" `
+  --data-urlencode "question=평가 질의"
+```
+
+```json
+{
+  "question_id": "Q-001",
+  "question": "평가 질의",
+  "retrieved_context": "공시명=사업보고서 | 공시일=2025-03-18 | 접수번호=20250318000001",
+  "think_trace": "질의 구조화 -> 공시 검색 -> 정정·수치 검증 -> 근거 귀속",
+  "answer": "검증된 최종 답변"
+}
+```
+
+`retrieved_context`는 최대 20개 근거와 6,000자로 제한한다. `think_trace`는 모델의 비공개
+추론을 노출하지 않고 시스템의 공개 처리 단계만 표시한다. 답변할 근거가 없으면 context는
+빈 문자열이고 trace는 `정보한계 판정`으로 끝난다.
+
+## Provider-required 300-case gate
+
+기본 300문항 실행은 `--provider-mode disabled`이며 비용 없이 결정론적 회귀를 검증한다.
+최종 제출용 실행은 교체된 credential을 승인된 프로세스 secret으로 주입한 뒤 아래처럼
+별도 출력 경로에서 실행한다.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path 'src').Path
+python scripts/evaluate_agent_stress.py `
+  --database 'D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite' `
+  --overlay 'D:\mirae-asset-project\db\agent\agent_overlay.sqlite' `
+  --search-index 'D:\mirae-asset-project\db\agent\agent_search.sqlite' `
+  --attestation 'data\derived\database_distribution_manifest_semantic_v1.json' `
+  --cases 'D:\mirae-asset-project\runs\evaluation\agent_stress_300.jsonl' `
+  --contract 'config\stress_evaluation_contract.json' `
+  --run-root 'D:\mirae-asset-project\runs\evaluation\provider' `
+  --summary 'D:\mirae-asset-project\runs\evaluation\provider_summary.json' `
+  --failures 'D:\mirae-asset-project\runs\evaluation\provider_failures.jsonl' `
+  --provider-mode required
+```
+
+required 모드는 provider 미구성 시 첫 문항 전에 종료한다. summary의
+`provider_gate_passed=true`는 provider 구성, 300/300, 기존 hard/quality gate와 p95 10초를
+모두 통과했을 때만 가능하다. 키·질문 본문·provider 원문 응답은 summary/checkpoint에 쓰지
+않으며, provider-disabled checkpoint를 required 실행에 재사용하지 않는다. 실제 300회 호출은
+비용이 발생하므로 credential·예산·모델을 확인한 승인 실행에서만 수행한다.
 
 ## NCP deployment
 

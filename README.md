@@ -141,6 +141,18 @@ uvicorn은 선택 의존성으로 지연 로딩되며, 핵심 CLI·테스트에�
 [contest server runbook](docs/operations/contest-server.md)을 따릅니다. `/health.ready=true`는
 서버 readiness만 의미하며, 정확도·provider·외부 endpoint gate 통과를 의미하지 않습니다.
 
+공식 과제자료의 평가 API 예시와 호환되는 `GET /answer`도 제공합니다.
+
+```bash
+curl -G "https://<team-endpoint>/answer" \
+  --data-urlencode "question_id=Q-001" \
+  --data-urlencode "question=평가 질의"
+```
+
+응답은 `question_id`, `question`, `retrieved_context`, `think_trace`, `answer` 다섯 필드로
+구성됩니다. `think_trace`는 숨은 사고과정이 아니라 공개 가능한 처리 단계 요약이며,
+`retrieved_context`에는 검증된 공시명·공시일·접수번호만 포함됩니다.
+
 Runtime `agent-query`/`serve` requires `--attestation` whenever `--overlay` or `--search-index` is
 configured. The distribution manifest records the offline-verified SHA-256, byte size, and trusted
 `mtime_ns`; a missing or mismatched trusted mtime fails closed. Copying or re-extracting the database
