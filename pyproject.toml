@@ -23,3 +23,6 @@ disclosure-agent = "disclosure_db.cli:agent_main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+disclosure_db = ["web/*.html", "web/*.css", "web/*.js"]
+

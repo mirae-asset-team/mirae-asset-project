@@ -15,6 +15,18 @@ from .calculator import calculate
 from .query_planner import plan_query
 
 
+SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self'; "
+        "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
+        "base-uri 'none'; frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+}
+
+
 def _fetch_financial_facts(
     service: Any,
     *,
@@ -115,6 +127,8 @@ def _health_status(service: Any) -> dict[str, Any]:
 def create_app(agent: DisclosureAgent):
     try:
         from fastapi import FastAPI, HTTPException, Query
+        from fastapi.responses import FileResponse
+        from fastapi.staticfiles import StaticFiles
         from pydantic import BaseModel, Field
     except ImportError as exc:  # pragma: no cover - depends on optional deployment extra
         raise RuntimeError("FastAPI is optional; install miraeasset-disclosure-db[agent]") from exc
@@ -142,7 +156,21 @@ def create_app(agent: DisclosureAgent):
         evidence_ids: list[str] = Field(default_factory=list)
 
     app = FastAPI(title="Mirae Asset Disclosure Agent", version="0.3.0")
+    web_directory = Path(__file__).with_name("web")
+
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        response = await call_next(request)
+        for name, value in SECURITY_HEADERS.items():
+            response.headers[name] = value
+        return response
+
+    app.mount("/static", StaticFiles(directory=web_directory), name="static")
     startup_health: dict[str, Any] | None = None
+
+    @app.get("/", include_in_schema=False)
+    def public_web():
+        return FileResponse(web_directory / "index.html")
 
     @app.on_event("startup")
     async def validate_runtime_once() -> None:

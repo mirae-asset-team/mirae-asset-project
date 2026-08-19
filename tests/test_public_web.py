@@ -1,0 +1,74 @@
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from disclosure_db.agent_contracts import CitationRef, VerifiedAnswer
+from disclosure_db.api import create_app
+
+
+@pytest.fixture
+def ready_agent():
+    with tempfile.NamedTemporaryFile(suffix=".sqlite") as base:
+        class ReadyService:
+            base_database = Path(base.name)
+            overlay_database = None
+            search_database = None
+            attestation = None
+            corpus_revision = "test-revision"
+
+            def company_candidates(self) -> list[str]:
+                return ["테스트"]
+
+        class FakeAgent:
+            evidence_service = ReadyService()
+            provider_configured = False
+
+            def answer(self, question: str, **kwargs: object) -> VerifiedAnswer:
+                return VerifiedAnswer(
+                    answer="검증된 답변",
+                    citation_ids=["ev1"],
+                    verified=True,
+                    answerable=True,
+                    citations=[CitationRef("ev1", "f1", report_name="사업보고서")],
+                )
+
+        yield FakeAgent()
+
+
+def test_root_serves_accessible_web_shell(ready_agent) -> None:
+    from fastapi.testclient import TestClient
+
+    response = TestClient(create_app(ready_agent)).get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    for element_id in (
+        "new-chat",
+        "history-search",
+        "conversation-list",
+        "messages",
+        "question-input",
+        "send-question",
+        "service-status",
+    ):
+        assert f'id="{element_id}"' in response.text
+    assert '<script type="module" src="/static/app.js"></script>' in response.text
+
+
+def test_public_assets_have_security_headers_and_local_sources(ready_agent) -> None:
+    from fastapi.testclient import TestClient
+
+    client = TestClient(create_app(ready_agent))
+    root = client.get("/")
+
+    assert "frame-ancestors 'none'" in root.headers["content-security-policy"]
+    assert root.headers["x-content-type-options"] == "nosniff"
+    assert root.headers["referrer-policy"] == "no-referrer"
+    assert root.headers["x-frame-options"] == "DENY"
+    assert "http://" not in root.text
+    assert "https://" not in root.text
+    assert client.get("/static/app.css").headers["content-type"].startswith("text/css")
+    assert "javascript" in client.get("/static/app.js").headers["content-type"]
