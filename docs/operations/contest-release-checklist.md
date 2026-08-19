@@ -1,6 +1,6 @@
 # Contest server release checklist
 
-Last updated: 2026-08-20 02:04:49 KST
+Last updated: 2026-08-20 02:13:30 KST
 
 This checklist records binary evidence without credentials or raw provider responses. `BLOCKED_EXTERNAL` means the local gate is defined but the required external resource is unavailable; it is not treated as a pass.
 `BLOCKED_LOCAL_RUNTIME` means a local runtime limitation prevented evidence collection; it is not treated as a pass.
@@ -30,6 +30,9 @@ This checklist records binary evidence without credentials or raw provider respo
 | NCP Docker `/health` | PASS | HTTP 200; ready/base-attested/overlay-attested/search-ready all true; provider false |
 | NCP Docker `/query` smoke | PASS | Exact numeric returned 2 verified values/2 citations; textual returned 1 citation; out-of-scope and injection returned no values/citations; 1.66–1.71s internally |
 | NCP server/public IP/ACG | PASS | Operational 2-vCPU/8GB server with public IP; inbound current-admin `/32` TCP 22 and public TCP 8000 only; outbound TCP 443; stale SSH `/32` removed |
+| Current public API reachability | PASS | Fresh Windows-network probe on 2026-08-20: TCP 22 and 8000 open; `/health` HTTP 200 with ready/base/overlay/search true and provider false; q005 HTTP 200, verified/answerable, both expected values present, two evidence records, about 2.09s |
+| Anonymous public web root | BLOCKED_EXTERNAL | Fresh `GET /` did not return HTTP 200, proving the new packaged UI is not on the public deployment. NCP console redirected to login and no attached Chrome session was available, so no cached/chat-exposed credential was used and no remote state was changed. |
+| Public UI code-only deploy and re-attestation | NOT_RUN | Remote `0444` modes/hashes, Compose read-only mounts, exact source commit deployment, bounded `429`, browser, container restart, and host reboot checks require an authenticated NCP session. These gates remain open. |
 | Data volume and remote artifact transfer | PASS | 100GB ext4 mounted at `/srv/mirae`; base, overlay, search, and attestation hashes/sizes matched; all files mode `0444` |
 | Local `/health` request ID | PASS | TestClient request `97de5985c7894355b2618abc38b5b01d`; HTTP 200; ready/attested/search-ready true |
 | Local answerable request ID | PASS | `/query` request `a76c16260e274c61ab9a66cbf7e91341`; HTTP 200; q005 verified with 2 values and 2 citations |
@@ -47,6 +50,6 @@ The previous live overlay is preserved at `D:\mirae-asset-project\db\agent\agent
 
 ## Go/no-go
 
-Local deterministic hard gates: GO. Public endpoint and restart-recovery gates: GO. Team demo: GO.
+Local deterministic hard gates: GO. Existing public API and its prior restart-recovery evidence: GO. Anonymous public web UI deployment: NO-GO (`BLOCKED_EXTERNAL`). API-only team demo: GO; browser UI team demo: NO-GO until the code-only NCP redeploy and Steps 4-6 are freshly verified.
 
 Final contest submission: NO-GO until a rotated HyperCLOVA X credential is supplied and the bounded provider schema smoke plus 300-case provider pass complete. This missing external gate was not relaxed.
