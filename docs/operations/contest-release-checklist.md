@@ -1,6 +1,6 @@
 # Contest server release checklist
 
-Last updated: 2026-08-20 02:23:34 KST
+Last updated: 2026-08-20 02:38:02 KST
 
 This checklist records binary evidence without credentials or raw provider responses. `BLOCKED_EXTERNAL` means the local gate is defined but the required external resource is unavailable; it is not treated as a pass.
 `BLOCKED_LOCAL_RUNTIME` means a local runtime limitation prevented evidence collection; it is not treated as a pass.
@@ -27,6 +27,8 @@ This checklist records binary evidence without credentials or raw provider respo
 | Provider 300-case pass | NOT_RUN | Stopped after schema smoke; no provider quality gate was claimed |
 | Provider-required runner | PASS | `--provider-mode required` now fails before cases when unconfigured, isolates checkpoint identity by mode/model, records p95 and explicit gate reasons, and cannot treat disabled fallback as provider evidence |
 | Official example `GET /answer` | PASS_LOCAL | Five-field response contract, bounded public context/trace, abstention and anonymous request limiting passed focused tests; public NCP deployment is not yet performed |
+| Technical proposal source/PDF | PASS | Korean Markdown plus visually inspected 12-page A4 PDF; all required sections, tables and architecture diagram present; PDF SHA-256 `0812179582f69025a508b43e654e8169222117c4dbbe96118d3da726de802829` |
+| Evaluation API server specification | PASS_LOCAL | Standalone request/response/error/limit/health/deployment contract for `GET /answer` and `POST /query`; final public endpoint URL remains blocked until the authenticated code-only NCP redeploy |
 | Compose config hash | PASS | `compose.yaml` SHA-256 `eebdcf5a7604ae904fe8ffbb049f508a2f3abe9194bdfad510392e636c4886d1`; anonymous limits render as `120/4/8` |
 | NCP Docker image build/start | PASS | Docker Engine 29.1.3 / Compose 2.40.3; image rebuilt from `3ad8dd8`, container healthy |
 | NCP Docker `/health` | PASS | HTTP 200; ready/base-attested/overlay-attested/search-ready all true; provider false |
