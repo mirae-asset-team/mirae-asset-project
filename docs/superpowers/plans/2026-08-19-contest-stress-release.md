@@ -399,23 +399,23 @@ If no rotated key is available, mark this task `BLOCKED_EXTERNAL` in the release
 
 Include image git commit, DB/overlay/index hashes, Compose config hash, provider configured boolean, external source network, health request ID, answerable smoke request ID, abstention smoke request ID, restart result, and rollback path. Each item is pass/fail/not-run with timestamp.
 
-- [ ] **Step 2: Provision or verify NCP prerequisites** — `BLOCKED_EXTERNAL`: no NCP account/resource/credential is available.
+- [x] **Step 2: Provision or verify NCP prerequisites** — PASS: VPC server is operational with a public IP, a 100GB data disk mounted at `/srv/mirae`, inbound TCP 8000, outbound TCP 443, and SSH restricted to the current administrator `/32`. The stale administrator `/32` was removed after verification.
 
 Confirm Server state, public IP, ACG inbound rule, SSH restriction, storage capacity and mount. If any is unavailable, use an approved temporary tunnel only for team testing and mark NCP submission endpoint incomplete.
 
-- [ ] **Step 3: Transfer immutable artifacts and verify hashes remotely** — `BLOCKED_EXTERNAL`: no approved remote host/storage path.
+- [x] **Step 3: Transfer immutable artifacts and verify hashes remotely** — PASS: base, overlay, index, and attestation were transferred to `/srv/mirae/data`; size and SHA-256 matched the release checklist, and all four files are mode `0444`.
 
 Transfer the base, overlay, index, and attestation to `/srv/mirae/data`. Compare SHA-256/size against the local manifest before starting. Do not transfer `.env` through Git.
 
-- [ ] **Step 4: Start the exact verified image** — `BLOCKED_EXTERNAL`: Docker runtime and public host unavailable.
+- [x] **Step 4: Start the exact verified image** — PASS: image source commit `3ad8dd8` was built with Docker Engine 29.1.3 / Compose 2.40.3. The container is healthy, DB mounts are read-only, and the runtime alias configuration regression is covered by tests.
 
 Use the committed Compose file and secret environment on the server. Confirm container health and no write access to `/data/base` or `/data/agent`.
 
-- [ ] **Step 5: Test from a second external network** — `BLOCKED_EXTERNAL`: no public endpoint or second network.
+- [x] **Step 5: Test from a second external network** — PASS from the Windows development network after host reboot and ACG cleanup: health, exact numeric, textual, out-of-scope, and injection cases all passed; latency was 90.82ms for health and 1.74–1.99s for queries. Container restart and full host reboot recovery were both verified.
 
 Call `/health`, one exact numeric `/query`, one textual `/query`, one out-of-scope question, and one injection question. Verify response schema, receipt/evidence IDs, abstention behavior, and latency. Then reboot or restart Docker and repeat health plus one query.
 
-- [ ] **Step 6: Complete the go/no-go decision** — local deterministic gates are GO; public contest submission remains NO-GO.
+- [x] **Step 6: Complete the go/no-go decision** — deterministic and public endpoint gates are GO for team demo. Final contest submission remains NO-GO because no rotated HyperCLOVA X credential is available for the bounded provider smoke and 300-case provider pass.
 
 GO requires: all safety hard gates, `/query` schema, external restart recovery, provider smoke, no secrets, numeric exactness 100%, citation precision 100%, and documented remaining soft quality gaps. Any missing external prerequisite or provider smoke is NO-GO for final submission but may remain GO for team demo.
 

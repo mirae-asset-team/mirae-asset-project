@@ -2,6 +2,18 @@
 
 이 문서는 append-only 실행 기록입니다. 시간은 KST와 UTC를 함께 적고, credential·API key·개인 경로의 비밀값은 기록하지 않습니다.
 
+## 2026-08-19T23:34:18+09:00 / 2026-08-19T14:34:18Z — NCP public deployment and restart verification
+
+- Intent: finish the public contest-server execution plan on the approved NCP account while keeping the D-drive base, live overlay, and live search index read-only and without lowering any release gate.
+- Provisioning: created the contest VPC/server path with 2 vCPU, 8GB memory, a public IP, and a 100GB ext4 data disk mounted persistently at `/srv/mirae`. Docker Engine 29.1.3 and Compose 2.40.3 were installed. ACG permits current-administrator `/32` TCP 22, public TCP 8000, and outbound TCP 443; the stale administrator `/32` was removed after deployment.
+- Artifact transfer: compressed base transfer, zstd integrity, decompressed SHA-256/size/mtime attestation, overlay hash, search-index hash, and attestation hash all passed before promotion. Remote base, overlay, search, and attestation files are mode `0444`; container mounts remain read-only. The source files on D were read only.
+- Systematic debugging: the first health calculation detected decompression mtime drift, so the manifest mtime was restored and the container restarted; readiness then became healthy without changing the attestation gate. The first q005 remote query found zero event facts even though overlay rows existed. A runtime probe proved `event_alias_count=0`: the Docker image omitted `config`, and the installed wheel resolved the repository-relative path outside `/app`. RED tests covered Docker config inclusion and explicit runtime config-directory resolution; the minimal fixes are commits `8886c10` and `3ad8dd8`.
+- Local verification: focused deployment/alias suites passed; full `PYTHONPATH=src` regression ran `221 tests` with one documented optional skip; `compileall` and `git diff --check` passed.
+- Internal NCP smoke: health passed; exact numeric returned two verified values/two citations; textual returned one citation; out-of-scope and injection cases returned no values or citations. Query latency was 1.66–1.71s. The same five cases passed after a container restart and again after a full host reboot.
+- External smoke: from the Windows development network after host reboot and ACG cleanup, health was 90.82ms; exact numeric request `992c7539608d4a65aface324b0d375f9`, textual `1d4a14498e314e5ca905d510677d48dc`, out-of-scope `7092506341e74bd2bec1377691386e46`, and injection `8a080cd7045547b9ba525268c889bec0` all passed in 1.74–1.99s. No private URL or raw response was recorded.
+- Restart evidence: `/srv/mirae` auto-mounted after reboot, all four immutable artifacts remained `0444`, the Compose container auto-started healthy, and internal/public representative queries passed.
+- Release status: deterministic hard gates and the public endpoint are GO for team demo. Final submission remains NO-GO because no rotated HyperCLOVA X credential is available for the bounded provider schema smoke and 300-case provider pass; the old chat credential was not reused.
+
 ## 2026-08-19T12:16:11+09:00 / 2026-08-19T03:16:11Z — Docker runtime hardening and verification
 
 - Intent: complete local Docker execution after WSL2/Docker Desktop became available without changing the immutable base DB or live read-only overlay/index.

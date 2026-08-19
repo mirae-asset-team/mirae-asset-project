@@ -596,7 +596,7 @@ Run: `git diff --check`
 
 Expected: all tests PASS except documented optional skips; compile and diff checks exit 0.
 
-- [ ] **Step 4: Run Docker smoke** — `BLOCKED_LOCAL_RUNTIME`: `/health` passed, but the D-drive bind-mounted `/query` exceeded 120 seconds; no query gate was marked pass.
+- [x] **Step 4: Run Docker smoke** — PASS on NCP Linux Docker using the exact attested base/overlay/index copies. The earlier Windows Docker Desktop D-drive bind-mount timeout remains historical evidence, but the submitted Linux container passed health, numeric/text queries, abstention, injection, container restart, host reboot, and public-network smoke without lowering the latency or safety gates.
 
 Run: `docker compose up -d --build`
 
