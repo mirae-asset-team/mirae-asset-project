@@ -8,7 +8,7 @@
   </head>
   <body>
     <div class="app-shell">
-      <aside class="sidebar" aria-label="대화 기록">
+      <aside id="sidebar" class="sidebar" aria-label="대화 기록">
         <button id="new-chat" type="button">새 대화</button>
         <label for="history-search">대화 검색</label>
         <input id="history-search" type="search" autocomplete="off" placeholder="대화 검색">
@@ -17,12 +17,18 @@
       </aside>
       <main class="chat" aria-labelledby="app-title">
         <header class="chat-header">
+          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="false">대화 목록</button>
           <div>
             <h1 id="app-title">미래에셋 공시 에이전트</h1>
             <p>공시를 근거로 기업 정보를 검색하고 설명합니다.</p>
           </div>
           <p id="service-status" role="status" aria-live="polite">서버 상태 확인 중</p>
         </header>
+        <section class="examples" aria-label="질문 예시">
+          <span>질문 예시</span>
+          <button type="button" data-example="삼성전자의 최근 사업보고서 기준 매출액을 알려줘">최근 매출액</button>
+          <button type="button" data-example="현대자동차의 최근 공시에서 영업이익을 찾아줘">영업이익 찾기</button>
+        </section>
         <ol id="messages" class="messages" aria-live="polite"></ol>
         <form id="question-form" class="question-form">
           <label class="sr-only" for="question-input">공시 질문</label>

@@ -1,3 +1,4 @@
+import {askDisclosure, classifyAnswer, evidenceLabel} from "/static/api.js";
 import {
   appendMessage,
   clearConversations,
@@ -9,8 +10,11 @@ import {
 } from "/static/history.js";
 
 const STORAGE_KEY = "mirae-disclosure-agent-history-v1";
+const REQUEST_TIMEOUT_MS = 30_000;
 
 const status = document.querySelector("#service-status");
+const sidebar = document.querySelector("#sidebar");
+const sidebarToggle = document.querySelector("#sidebar-toggle");
 const newChat = document.querySelector("#new-chat");
 const clearHistory = document.querySelector("#clear-history");
 const historySearch = document.querySelector("#history-search");
@@ -18,9 +22,13 @@ const conversationList = document.querySelector("#conversation-list");
 const messages = document.querySelector("#messages");
 const questionForm = document.querySelector("#question-form");
 const questionInput = document.querySelector("#question-input");
+const sendQuestion = document.querySelector("#send-question");
+const exampleButtons = document.querySelectorAll("[data-example]");
 
 let store = loadStore();
 let selectedConversationId = store.conversations[0]?.id ?? null;
+let transientFailure = null;
+let requestPending = false;
 
 function loadStore() {
   try {
@@ -36,34 +44,132 @@ function saveStore() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   } catch {
     status.textContent = "이 브라우저에서는 대화 기록을 저장할 수 없습니다.";
+    status.dataset.state = "warning";
   }
-}
-
-function createId() {
-  return `chat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function selectedConversation() {
   return store.conversations.find(({id}) => id === selectedConversationId) ?? null;
 }
 
+function closeSidebar(returnFocus = false) {
+  sidebar.classList.remove("sidebar-open");
+  sidebarToggle.setAttribute("aria-expanded", "false");
+  if (returnFocus && sidebarToggle.offsetParent !== null) {
+    sidebarToggle.focus();
+  }
+}
+
+function addText(parent, tagName, className, text) {
+  const element = document.createElement(tagName);
+  element.className = className;
+  element.textContent = text;
+  parent.append(element);
+  return element;
+}
+
+function renderEvidence(parent, evidence) {
+  if (!Array.isArray(evidence) || evidence.length === 0) {
+    return;
+  }
+  const section = document.createElement("section");
+  section.className = "evidence-section";
+  addText(section, "h3", "evidence-heading", "공시 근거");
+
+  const list = document.createElement("ol");
+  list.className = "evidence-list";
+  for (const item of evidence) {
+    const evidenceItem = document.createElement("li");
+    addText(evidenceItem, "strong", "evidence-label", evidenceLabel(item) || "공시 근거");
+    if (item.locator && typeof item.locator === "object") {
+      const locatorList = document.createElement("dl");
+      locatorList.className = "locator-list";
+      for (const [key, value] of Object.entries(item.locator)) {
+        addText(locatorList, "dt", "locator-key", key);
+        addText(
+          locatorList,
+          "dd",
+          "locator-value",
+          typeof value === "string" ? value : JSON.stringify(value),
+        );
+      }
+      evidenceItem.append(locatorList);
+    }
+    list.append(evidenceItem);
+  }
+  section.append(list);
+  parent.append(section);
+}
+
+function renderResponseDetails(parent, message) {
+  const values = [
+    ["요청 ID", message.request_id],
+    ["응답 시간", typeof message.latency_ms === "number" ? `${message.latency_ms} ms` : null],
+    ["판정 코드", Array.isArray(message.reason_codes) ? message.reason_codes.join(", ") : null],
+  ].filter(([, value]) => value);
+  if (values.length === 0) {
+    return;
+  }
+
+  const details = document.createElement("details");
+  details.className = "response-details";
+  addText(details, "summary", "", "응답 정보");
+  const list = document.createElement("dl");
+  for (const [label, value] of values) {
+    addText(list, "dt", "", label);
+    addText(list, "dd", "", value);
+  }
+  details.append(list);
+  parent.append(details);
+}
+
+function renderMessage(message) {
+  const item = document.createElement("li");
+  item.className = `message message-${message.role}`;
+  if (message.role === "assistant") {
+    const badgeText = message.answer_state === "verified" ? "검증된 답변" : "답변 보류";
+    addText(item, "span", `answer-badge answer-${message.answer_state || "abstained"}`, badgeText);
+  }
+  addText(item, "p", "message-text", message.text);
+  if (message.role === "assistant") {
+    renderEvidence(item, message.evidence);
+    renderResponseDetails(item, message);
+  }
+  return item;
+}
+
+function renderFailure() {
+  if (!transientFailure || transientFailure.conversationId !== selectedConversationId) {
+    return;
+  }
+  const item = document.createElement("li");
+  item.className = "message message-error";
+  item.setAttribute("role", "alert");
+  addText(item, "p", "message-text", transientFailure.error.message);
+  if (transientFailure.error.retryable) {
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "retry-button";
+    retry.textContent = "다시 시도";
+    retry.disabled = requestPending;
+    retry.addEventListener("click", () => submitQuestion(transientFailure.question, false));
+    item.append(retry);
+  }
+  messages.append(item);
+}
+
 function renderMessages() {
   messages.replaceChildren();
   const conversation = selectedConversation();
   if (!conversation) {
-    const empty = document.createElement("li");
-    empty.className = "empty-message";
-    empty.textContent = "새 질문을 입력하면 이 브라우저에 대화가 저장됩니다.";
-    messages.append(empty);
+    addText(messages, "li", "empty-message", "새 질문을 입력하면 이 브라우저에 대화가 저장됩니다.");
     return;
   }
-
   for (const message of conversation.messages) {
-    const item = document.createElement("li");
-    item.className = `message message-${message.role}`;
-    item.textContent = message.text;
-    messages.append(item);
+    messages.append(renderMessage(message));
   }
+  renderFailure();
+  messages.scrollTop = messages.scrollHeight;
 }
 
 function renderConversations() {
@@ -79,6 +185,8 @@ function renderConversations() {
     selectButton.setAttribute("aria-current", String(conversation.id === selectedConversationId));
     selectButton.addEventListener("click", () => {
       selectedConversationId = conversation.id;
+      transientFailure = null;
+      closeSidebar(true);
       render();
     });
 
@@ -91,6 +199,7 @@ function renderConversations() {
       store = deleteConversation(store, conversation.id);
       if (selectedConversationId === conversation.id) {
         selectedConversationId = store.conversations[0]?.id ?? null;
+        transientFailure = null;
       }
       saveStore();
       render();
@@ -106,11 +215,92 @@ function render() {
   renderMessages();
 }
 
+function setPending(pending) {
+  requestPending = pending;
+  sendQuestion.disabled = pending;
+  questionInput.disabled = pending;
+  questionForm.setAttribute("aria-busy", String(pending));
+  messages.setAttribute("aria-busy", String(pending));
+  sendQuestion.textContent = pending ? "확인 중…" : "질문하기";
+}
+
+async function submitQuestion(question, appendUser = true) {
+  const text = question.trim();
+  if (!text || requestPending) {
+    return;
+  }
+
+  const now = new Date().toISOString();
+  if (appendUser) {
+    if (selectedConversationId) {
+      store = appendMessage(store, selectedConversationId, {role: "user", text, created_at: now});
+    } else {
+      selectedConversationId = `chat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      store = createConversation(store, text, now, selectedConversationId);
+    }
+    saveStore();
+  }
+  const conversationId = selectedConversationId;
+
+  transientFailure = null;
+  setPending(true);
+  render();
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const body = await askDisclosure(text, {signal: controller.signal});
+    store = appendMessage(store, conversationId, {
+      role: "assistant",
+      text: body.answer,
+      created_at: new Date().toISOString(),
+      answer_state: classifyAnswer(body),
+      evidence: Array.isArray(body.evidence) ? body.evidence : [],
+      request_id: body.request_id,
+      latency_ms: body.latency_ms,
+      reason_codes: Array.isArray(body.reason_codes) ? body.reason_codes : [],
+    });
+    saveStore();
+  } catch (error) {
+    const safeError = error
+      && typeof error.message === "string"
+      && typeof error.retryable === "boolean"
+      ? error
+      : {kind: "client_error", message: "응답을 처리하지 못했습니다.", retryable: true};
+    transientFailure = {conversationId, question: text, error: safeError};
+  } finally {
+    window.clearTimeout(timeout);
+    setPending(false);
+    render();
+    questionInput.focus();
+  }
+}
+
+async function refreshHealth() {
+  try {
+    const response = await fetch("/health", {headers: {Accept: "application/json"}});
+    const body = response.ok ? await response.json() : {};
+    if (body.ready === true) {
+      status.textContent = body.provider_configured === true
+        ? "준비됨"
+        : "준비됨 · HyperCLOVA X 미연결";
+      status.dataset.state = body.provider_configured === true ? "ready" : "warning";
+    } else {
+      status.textContent = "준비 중";
+      status.dataset.state = "waiting";
+    }
+  } catch {
+    status.textContent = "상태 확인 불가";
+    status.dataset.state = "warning";
+  }
+}
+
 newChat.addEventListener("click", () => {
   selectedConversationId = null;
+  transientFailure = null;
   questionInput.value = "";
-  questionInput.focus();
+  closeSidebar(true);
   render();
+  questionInput.focus();
 });
 
 historySearch.addEventListener("input", renderConversations);
@@ -121,32 +311,51 @@ clearHistory.addEventListener("click", () => {
   }
   store = clearConversations();
   selectedConversationId = null;
+  transientFailure = null;
   saveStore();
   render();
+});
+
+sidebarToggle.addEventListener("click", () => {
+  const willOpen = !sidebar.classList.contains("sidebar-open");
+  sidebar.classList.toggle("sidebar-open", willOpen);
+  sidebarToggle.setAttribute("aria-expanded", String(willOpen));
+  if (willOpen) {
+    newChat.focus();
+  } else {
+    sidebarToggle.focus();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && sidebar.classList.contains("sidebar-open")) {
+    closeSidebar(true);
+  }
+});
+
+for (const button of exampleButtons) {
+  button.addEventListener("click", () => {
+    questionInput.value = button.dataset.example;
+    questionInput.focus();
+  });
+}
+
+questionInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    questionForm.requestSubmit();
+  }
 });
 
 questionForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  const text = questionInput.value.trim();
-  if (!text) {
+  const text = questionInput.value;
+  if (!text.trim()) {
     return;
   }
-
-  const now = new Date().toISOString();
-  if (selectedConversationId) {
-    store = appendMessage(store, selectedConversationId, {
-      role: "user",
-      text,
-      created_at: now,
-    });
-  } else {
-    selectedConversationId = createId();
-    store = createConversation(store, text, now, selectedConversationId);
-  }
   questionInput.value = "";
-  saveStore();
-  render();
+  submitQuestion(text);
 });
 
-status.textContent = "서버 상태 확인 중";
 render();
+refreshHealth();
