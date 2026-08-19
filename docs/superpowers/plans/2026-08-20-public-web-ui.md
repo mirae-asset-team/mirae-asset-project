@@ -40,6 +40,7 @@
 | `.env.example`, `compose.yaml` | 익명 요청 제한 기본값과 운영 override |
 | `tests/test_public_web.py` | route, MIME, package data, CSP, 정적 계약 |
 | `tests/test_public_limits.py` | rate/concurrency/실제 client IP 계약 |
+| `tests/test_smoke_agent.py` | 실제 PowerShell smoke가 웹 UI 누락을 탐지하는지 검증 |
 | `tests/web_history.test.mjs` | 브라우저 대화 store 순수 함수 계약 |
 | `tests/web_api.test.mjs` | API 응답·오류 분류 순수 함수 계약 |
 | `scripts/smoke-agent.ps1` | 공개 UI·health·query 스모크 확장 |
@@ -66,8 +67,6 @@
 - [ ] **Step 1: Write failing route and package-data tests**
 
 ```python
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 from disclosure_db.api import create_app
@@ -83,12 +82,6 @@ def test_root_serves_accessible_web_shell(ready_agent):
     ):
         assert f'id="{element_id}"' in response.text
     assert '<script type="module" src="/static/app.js"></script>' in response.text
-
-
-def test_web_assets_are_declared_as_package_data():
-    text = Path("pyproject.toml").read_text(encoding="utf-8")
-    assert "[tool.setuptools.package-data]" in text
-    assert 'disclosure_db = ["web/*.html", "web/*.css", "web/*.js"]' in text
 ```
 
 Use a `ready_agent` fixture in the same file with a temporary base SQLite path, `overlay_database=None`, `search_database=None`, and a deterministic `VerifiedAnswer`, matching `tests/test_agent_runtime.py`.
@@ -97,7 +90,7 @@ Use a `ready_agent` fixture in the same file with a temporary base SQLite path, 
 
 Run: `$env:PYTHONPATH='src'; python -m pytest tests/test_public_web.py -q`
 
-Expected: FAIL because `/` returns `404` and package data is absent.
+Expected: FAIL because `/` returns `404`.
 
 - [ ] **Step 3: Add the minimal HTML shell and placeholder-safe local assets**
 
@@ -136,7 +129,7 @@ SECURITY_HEADERS = {
 }
 ```
 
-- [ ] **Step 5: Add security and MIME assertions, then verify GREEN**
+- [ ] **Step 5: Add security/MIME assertions and verify the built wheel**
 
 ```python
 def test_public_assets_have_security_headers_and_local_sources(ready_agent):
@@ -151,7 +144,14 @@ def test_public_assets_have_security_headers_and_local_sources(ready_agent):
 
 Run: `$env:PYTHONPATH='src'; python -m pytest tests/test_public_web.py tests/test_agent_runtime.py -q`
 
-Expected: all focused and API regression tests PASS.
+Run:
+
+```powershell
+python -m pip wheel . --no-deps --wheel-dir tmp/web-shell-wheel
+python -c "import zipfile,glob; p=glob.glob('tmp/web-shell-wheel/*.whl')[0]; names=zipfile.ZipFile(p).namelist(); assert all(any(n.endswith('/web/'+f) for n in names) for f in ['index.html','app.css','app.js'])"
+```
+
+Expected: focused/API regression tests PASS and the actual built wheel contains all three web assets.
 
 - [ ] **Step 6: Commit Task 1**
 
@@ -238,23 +238,13 @@ export function emptyStore() {
 
 In `app.js`, use key `mirae-disclosure-agent-history-v1`. Parse with `normalizeStore`, render titles using `document.createElement` and `textContent`, and persist only after a successful pure state transition. Implement new conversation, selection, single delete, confirmed clear-all, and case-insensitive search. Never use `innerHTML`, `insertAdjacentHTML`, `outerHTML`, `eval`, or `new Function`.
 
-- [ ] **Step 5: Add static safety assertions and run GREEN**
-
-```python
-def test_frontend_never_uses_html_injection_sinks():
-    scripts = "\n".join(
-        Path(path).read_text(encoding="utf-8")
-        for path in ("src/disclosure_db/web/app.js", "src/disclosure_db/web/history.js")
-    )
-    for forbidden in ("innerHTML", "outerHTML", "insertAdjacentHTML", "eval(", "new Function"):
-        assert forbidden not in scripts
-```
+- [ ] **Step 5: Run the pure history behavior and route regressions GREEN**
 
 Run: `node --experimental-default-type=module --test tests/web_history.test.mjs`
 
 Run: `$env:PYTHONPATH='src'; python -m pytest tests/test_public_web.py -q`
 
-Expected: both commands PASS.
+Expected: both commands PASS. The actual DOM injection behavior is exercised in Task 7 with a browser by submitting `<img src=x onerror=alert(1)>` and proving it appears as literal text with no new `img` element or dialog.
 
 - [ ] **Step 6: Commit Task 2**
 
@@ -689,28 +679,99 @@ git commit -m "feat: protect anonymous public query traffic"
 - Modify: `scripts/smoke-agent.ps1`
 - Modify: `docs/operations/contest-server.md`
 - Modify: `docs/development-log.md`
-- Modify: `tests/test_deployment_artifacts.py`
+- Create: `tests/test_smoke_agent.py`
 
 **Interfaces:**
 - Consumes: public `GET /`, `GET /health`, `POST /query`.
 - Produces: smoke evidence for HTML shell, ready health, answerable query, abstention query; documented rate-limit tuning and local-history privacy boundary.
 
-- [ ] **Step 1: Write a failing smoke-script contract test**
+- [ ] **Step 1: Write a failing behavioral test for the real smoke script**
 
 ```python
-def test_windows_smoke_checks_public_web_shell():
-    smoke = Path("scripts/smoke-agent.ps1").read_text(encoding="utf-8")
-    assert "text/html" in smoke
-    assert "question-input" in smoke
-    assert "Content-Security-Policy" in smoke
-    assert "DISCLOSURE_PUBLIC_RATE_PER_MINUTE" in Path("docs/operations/contest-server.md").read_text(encoding="utf-8")
+import json
+import subprocess
+import threading
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+
+@contextmanager
+def fake_agent(*, include_ui: bool):
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            return
+
+        def send_json(self, body):
+            payload = json.dumps(body).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def do_GET(self):
+            if self.path == "/health":
+                self.send_json({"ready": True, "request_id": "health-1"})
+                return
+            if self.path == "/" and include_ui:
+                payload = b'<textarea id="question-input"></textarea><script type="module" src="/static/app.js"></script>'
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Security-Policy", "default-src 'self'")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+            self.send_error(404)
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            body = json.loads(self.rfile.read(length))
+            answerable = body.get("question_id") == "smoke-answerable"
+            self.send_json({
+                "request_id": f"request-{body.get('question_id')}",
+                "answerable": answerable,
+                "verified": answerable,
+                "evidence": [{"receipt_no": "f1"}] if answerable else [],
+            })
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}"
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
+
+
+def run_smoke(base_url):
+    return subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(Path("scripts/smoke-agent.ps1")), "-BaseUrl", base_url],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+
+
+def test_smoke_fails_when_public_web_shell_is_missing():
+    with fake_agent(include_ui=False) as base_url:
+        assert run_smoke(base_url).returncode != 0
+
+
+def test_smoke_passes_when_web_health_and_queries_are_valid():
+    with fake_agent(include_ui=True) as base_url:
+        result = run_smoke(base_url)
+    assert result.returncode == 0, result.stderr
 ```
 
 - [ ] **Step 2: Run the contract test and verify RED**
 
-Run: `$env:PYTHONPATH='src'; python -m pytest tests/test_deployment_artifacts.py::DeploymentArtifactTests::test_windows_smoke_checks_public_web_shell -q`
+Run: `$env:PYTHONPATH='src'; python -m pytest tests/test_smoke_agent.py -q`
 
-Expected: FAIL because the script checks only health/query.
+Expected: the missing-UI test FAILS because the current script incorrectly returns `0`; the complete fake-agent test PASSES.
 
 - [ ] **Step 3: Extend the smoke script without writing service data**
 
@@ -731,7 +792,7 @@ Append Task 1-6 RED/GREEN commands and results to `docs/development-log.md`. Rec
 
 - [ ] **Step 5: Run local fixture and full smoke prerequisites**
 
-Run: `$env:PYTHONPATH='src'; python -m pytest tests/test_deployment_artifacts.py tests/test_public_web.py tests/test_public_limits.py -q`
+Run: `$env:PYTHONPATH='src'; python -m pytest tests/test_smoke_agent.py tests/test_deployment_artifacts.py tests/test_public_web.py tests/test_public_limits.py -q`
 
 Run after starting the local agent with existing read-only paths: `powershell -ExecutionPolicy Bypass -File scripts/smoke-agent.ps1 -BaseUrl http://127.0.0.1:8000`
 
@@ -740,7 +801,7 @@ Expected: web, health, answerable, abstention, and injection probes PASS. If the
 - [ ] **Step 6: Commit Task 6**
 
 ```powershell
-git add scripts/smoke-agent.ps1 docs/operations/contest-server.md docs/development-log.md tests/test_deployment_artifacts.py
+git add scripts/smoke-agent.ps1 docs/operations/contest-server.md docs/development-log.md tests/test_smoke_agent.py
 git commit -m "docs: add anonymous web ui operations and smoke"
 ```
 
@@ -801,7 +862,7 @@ Expected: `300/300` pass; all hard counters 0; three data artifacts unchanged. A
 
 - [ ] **Step 5: Inspect the UI at desktop and 360px**
 
-Open the local UI in an actual browser, submit one answerable and one abstention question, verify sidebar search/delete, inspect evidence cards, then repeat at a 360px viewport. Capture screenshots to an ignored runtime evidence directory; do not commit user history or a public IP.
+Open the local UI in an actual browser, submit one answerable and one abstention question, verify sidebar search/delete, inspect evidence cards, then repeat at a 360px viewport. Submit the literal question `<img src=x onerror=alert(1)>`; assert the message text equals that literal string, the message contains no `img` descendant, and no dialog opens. Capture screenshots to an ignored runtime evidence directory; do not commit user history or a public IP.
 
 Expected: no horizontal overflow, clipped controls, HTML injection, console error, or inaccessible keyboard path.
 
