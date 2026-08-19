@@ -262,6 +262,32 @@ class EvidenceServiceTests(unittest.TestCase):
         self.assertIn("2. 계약내역", terms)
         self.assertIn("contract_amount", terms)
 
+    def test_alias_configuration_uses_explicit_runtime_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            config_directory = Path(temporary_directory)
+            (config_directory / "financial_account_aliases.json").write_text("{}", encoding="utf-8")
+            (config_directory / "agent_gold_predicates.json").write_text(
+                json.dumps(
+                    {
+                        "predicates": [
+                            {
+                                "id": "contract_amount",
+                                "predicate_values": ["계약금액", "2. 계약내역"],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict("os.environ", {"DISCLOSURE_CONFIG_DIR": str(config_directory)}):
+                service = EvidenceService(Path("missing.sqlite"))
+
+        self.assertEqual(
+            service._expand_event_terms(["계약금액"]),
+            ["계약금액", "contract_amount", "2. 계약내역"],
+        )
+
         facts = [
             {"event_id": "chain", "filing_id": "original", "effective_from": "2023-03-02"},
             {"event_id": "other", "filing_id": "unrelated", "effective_from": "2023-07-10"},

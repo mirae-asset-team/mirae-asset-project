@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -54,13 +55,19 @@ class EvidenceService:
         if (self.overlay_database is not None or self.search_database is not None) and attestation is None:
             raise ValueError("attestation is required when runtime overlay/search is configured")
         self._companies: list[str] | None = None
-        aliases_path = Path(__file__).resolve().parents[2] / "config" / "financial_account_aliases.json"
+        config_directory = Path(
+            os.environ.get(
+                "DISCLOSURE_CONFIG_DIR",
+                Path(__file__).resolve().parents[2] / "config",
+            )
+        )
+        aliases_path = config_directory / "financial_account_aliases.json"
         try:
             raw_aliases = json.loads(aliases_path.read_text(encoding="utf-8"))
             self.account_aliases = {str(key): [str(item) for item in values] for key, values in raw_aliases.items()}
         except (OSError, json.JSONDecodeError):
             self.account_aliases = {}
-        predicate_path = Path(__file__).resolve().parents[2] / "config" / "agent_gold_predicates.json"
+        predicate_path = config_directory / "agent_gold_predicates.json"
         try:
             predicate_payload = json.loads(predicate_path.read_text(encoding="utf-8"))
             self.event_predicate_aliases = {

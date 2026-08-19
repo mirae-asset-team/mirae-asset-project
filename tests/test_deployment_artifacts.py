@@ -17,6 +17,7 @@ class DeploymentArtifactTests(unittest.TestCase):
     def test_dockerfile_copies_runtime_alias_configuration(self):
         text = Path("Dockerfile").read_text(encoding="utf-8")
         self.assertIn("COPY config ./config", text)
+        self.assertIn("DISCLOSURE_CONFIG_DIR=/app/config", text)
 
     def test_windows_scripts_validate_read_only_inputs_and_smoke_query(self):
         start = Path("scripts/start-agent.ps1").read_text(encoding="utf-8")
