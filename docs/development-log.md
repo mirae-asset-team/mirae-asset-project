@@ -11,6 +11,12 @@
 - Commits: `c804bfc fix: cache startup runtime validation for docker health`; `06841c1 fix: use immutable sqlite reads for serving`; `3e41882 perf: prewarm company candidates before serving`.
 - External status: CLOVA/NCP credentials were found in the user-provided export, but no external API/login call was made without explicit permission to use those credentials. Public NCP endpoint and provider smoke remain blocked.
 
+## 2026-08-19T12:25:00+09:00 / 2026-08-19T03:25:00Z — Approved external provider and NCP access attempt
+
+- CLOVA: approved test credential was used process-scoped only. The endpoint returned HTTP 200 with the response body redacted. The adapter's text schema smoke failed closed because the model response was not exact JSON; the structured smoke returned a validated deterministic result with `hcx_fallback`, one citation, and numeric value `10`. No raw provider response or credential was recorded.
+- NCP: the console was reached and the sub-account login mode was selected. NCP requires a separate login-page access key in addition to the sub-account ID/password; the supplied export marked that field as unset. No server, public IP, ACG, storage, or billing resource was created or changed.
+- Release status: provider HTTP reachability is PASS, provider schema/quality pass remains incomplete, and NCP/public endpoint remains `BLOCKED_EXTERNAL`.
+
 ## Plan baseline — `b882f19`
 
 - Design and execution plan committed before implementation: `b882f19 docs: plan deterministic agent gold audit`.
