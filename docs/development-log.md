@@ -2,6 +2,15 @@
 
 이 문서는 append-only 실행 기록입니다. 시간은 KST와 UTC를 함께 적고, credential·API key·개인 경로의 비밀값은 기록하지 않습니다.
 
+## 2026-08-19T12:16:11+09:00 / 2026-08-19T03:16:11Z — Docker runtime hardening and verification
+
+- Intent: complete local Docker execution after WSL2/Docker Desktop became available without changing the immutable base DB or live read-only overlay/index.
+- Findings/fixes: Docker Desktop D-drive bind mounts required SQLite `mode=ro&immutable=1` for serving reads; `/health` full search-index validation was moved to startup and cached; company candidates are prewarmed before readiness. Full integrity checks remain enabled.
+- Verification: targeted serving suites `88 passed`; full suite `216 passed, 1 skipped, 17 subtests passed`; compileall exit `0`. Docker Compose config rendered successfully; image built and container became healthy. Docker `/health` returned HTTP 200, `ready=true`, attestation/search ready true, provider false, request `aa6a926a29b14ea38b3f19b4c54b436f`.
+- Docker query status: answerable query smoke did not return within 120 seconds on the Windows Docker Desktop D-drive bind mount; recorded as `BLOCKED_LOCAL_RUNTIME`, not as a pass and not as a relaxed latency gate.
+- Commits: `c804bfc fix: cache startup runtime validation for docker health`; `06841c1 fix: use immutable sqlite reads for serving`; `3e41882 perf: prewarm company candidates before serving`.
+- External status: CLOVA/NCP credentials were found in the user-provided export, but no external API/login call was made without explicit permission to use those credentials. Public NCP endpoint and provider smoke remain blocked.
+
 ## Plan baseline — `b882f19`
 
 - Design and execution plan committed before implementation: `b882f19 docs: plan deterministic agent gold audit`.

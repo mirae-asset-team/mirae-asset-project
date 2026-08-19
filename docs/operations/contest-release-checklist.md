@@ -1,22 +1,25 @@
 # Contest server release checklist
 
-Last updated: 2026-08-19 06:32:39 KST
+Last updated: 2026-08-19 12:16:11 KST
 
 This checklist records binary evidence without credentials or raw provider responses. `BLOCKED_EXTERNAL` means the local gate is defined but the required external resource is unavailable; it is not treated as a pass.
+`BLOCKED_LOCAL_RUNTIME` means a local runtime limitation prevented evidence collection; it is not treated as a pass.
 
 | Item | Status | Evidence |
 |---|---|---|
-| Source/image commit | PASS | `e7c8e28` (`e7c8e28` narrow correction-aware multi-value routing; parent `548f66a`) |
+| Source/image commit | PASS | `3e41882` (`perf: prewarm company candidates before serving`; parents `06841c1`, `c804bfc`) |
 | Immutable base size/SHA-256 | PASS | `38,773,280,768` bytes / `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563` |
 | Live overlay SHA-256 | PASS | `92ffe3ce1740153cfec457f5354685535a31cc5fe0d7722d61f1195f2ac1d3ad` |
 | Live search SHA-256/revision | PASS | `e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793` / `safe-search-v1` |
 | Overlay integrity/base attestation | PASS | `integrity_check=ok`, `overlay_matches_base=true`, event facts `1,423` |
 | 300-case manifest | PASS | SHA-256 `1b014f0bfca75c8db6f6306dcdab80fff4cafb80dfb3709bf1e9d3bb8d8dd2a0`; run `20260818T214805Z-1b014f0bfca7`; `300/300` pass; all hard gates pass |
-| Full local regression | PASS | `214 passed, 1 skipped, 17 subtests passed`; compileall passed |
+| Full local regression | PASS | `216 passed, 1 skipped, 17 subtests passed`; compileall passed |
 | Provider configured | BLOCKED_EXTERNAL | No rotated `CLOVASTUDIO_API_KEY`; local value is `false` |
 | Provider smoke/300-case provider pass | BLOCKED_EXTERNAL | Requires the missing rotated credential; no network call was made |
-| Compose config hash | NOT_RUN | No verified Docker/Compose runtime is available |
-| Docker image build/start | BLOCKED_EXTERNAL | Docker CLI/runtime unavailable |
+| Compose config hash | PASS | `compose.yaml` SHA-256 `C0EC24E3740C0574F376A9295B48D43AE181FEF8113625E631A2E052DC7635A2` |
+| Docker image build/start | PASS | Docker Desktop 4.87.0 / Engine 29.7.2; Compose image built and container started |
+| Docker `/health` | PASS | HTTP 200; ready/attested/search-ready true; request `aa6a926a29b14ea38b3f19b4c54b436f` |
+| Docker `/query` smoke | BLOCKED_LOCAL_RUNTIME | D-drive bind-mounted query exceeded 120 seconds under Windows Docker Desktop; no query gate was marked pass |
 | NCP server/public IP/ACG | BLOCKED_EXTERNAL | No NCP account/resource/credential is available |
 | Data volume and remote artifact transfer | BLOCKED_EXTERNAL | No approved NCP host or external storage path is available |
 | Local `/health` request ID | PASS | TestClient request `97de5985c7894355b2618abc38b5b01d`; HTTP 200; ready/attested/search-ready true |
