@@ -12,6 +12,7 @@ from .attestation import verify_fast_identity
 from .agent import DisclosureAgent
 from .agent_contracts import to_jsonable
 from .calculator import calculate
+from .public_limits import PublicLimitSettings, PublicRequestLimiter
 from .query_planner import plan_query
 
 
@@ -124,10 +125,14 @@ def _health_status(service: Any) -> dict[str, Any]:
     }
 
 
-def create_app(agent: DisclosureAgent):
+def create_app(
+    agent: DisclosureAgent,
+    *,
+    public_limits: PublicLimitSettings | None = None,
+):
     try:
         from fastapi import FastAPI, HTTPException, Query
-        from fastapi.responses import FileResponse
+        from fastapi.responses import FileResponse, JSONResponse
         from fastapi.staticfiles import StaticFiles
         from pydantic import BaseModel, Field
     except ImportError as exc:  # pragma: no cover - depends on optional deployment extra
@@ -157,6 +162,8 @@ def create_app(agent: DisclosureAgent):
 
     app = FastAPI(title="Mirae Asset Disclosure Agent", version="0.3.0")
     web_directory = Path(__file__).with_name("web")
+    limit_settings = PublicLimitSettings.from_env() if public_limits is None else public_limits
+    request_limiter = PublicRequestLimiter(limit_settings)
 
     @app.middleware("http")
     async def security_headers(request, call_next):
@@ -164,6 +171,24 @@ def create_app(agent: DisclosureAgent):
         for name, value in SECURITY_HEADERS.items():
             response.headers[name] = value
         return response
+
+    @app.middleware("http")
+    async def limit_public_queries(request, call_next):
+        if request.method != "POST" or request.url.path not in {"/query", "/v1/answer"}:
+            return await call_next(request)
+
+        client_ip = request.client.host if request.client is not None else "unknown"
+        admission = request_limiter.try_acquire(client_ip)
+        if not admission.allowed:
+            return JSONResponse(
+                {"detail": admission.detail},
+                status_code=admission.status_code,
+                headers={"Retry-After": str(admission.retry_after)},
+            )
+        try:
+            return await call_next(request)
+        finally:
+            request_limiter.release(client_ip)
 
     app.mount("/static", StaticFiles(directory=web_directory), name="static")
     startup_health: dict[str, Any] | None = None
@@ -292,9 +317,11 @@ def create_app(agent: DisclosureAgent):
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.post("/v1/answer")
     def answer(request: QueryRequest) -> dict[str, Any]:
         started = perf_counter()
         return envelope(agent.answer(request.question, company=request.company, as_of=request.as_of, limit=request.limit), started)
+
+    answer.__annotations__["request"] = QueryRequest
+    app.post("/v1/answer")(answer)
 
     return app

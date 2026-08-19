@@ -10,6 +10,18 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn("healthcheck:", text)
         self.assertNotIn("CLOVASTUDIO_API_KEY=", text)
 
+    def test_public_limit_defaults_are_explicit_in_compose_and_example_env(self):
+        compose = Path("compose.yaml").read_text(encoding="utf-8")
+        example = Path(".env.example").read_text(encoding="utf-8")
+        expected = {
+            "DISCLOSURE_PUBLIC_RATE_PER_MINUTE": "120",
+            "DISCLOSURE_PUBLIC_PER_IP_CONCURRENCY": "4",
+            "DISCLOSURE_PUBLIC_GLOBAL_CONCURRENCY": "8",
+        }
+        for name, value in expected.items():
+            self.assertIn(f"{name}: ${{{name}:-{value}}}", compose)
+            self.assertIn(f"{name}={value}", example)
+
     def test_dockerfile_does_not_copy_local_data(self):
         self.assertIn("data/", Path(".dockerignore").read_text(encoding="utf-8"))
         self.assertNotIn("D:\\", Path("Dockerfile").read_text(encoding="utf-8"))

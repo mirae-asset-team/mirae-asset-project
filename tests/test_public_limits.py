@@ -1,8 +1,59 @@
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import pytest
 
+from disclosure_db.agent_contracts import VerifiedAnswer
+from disclosure_db.api import create_app
 from disclosure_db.public_limits import PublicLimitSettings, PublicRequestLimiter
+
+
+@pytest.fixture
+def ready_agent():
+    with tempfile.NamedTemporaryFile(suffix=".sqlite") as base:
+        class ReadyService:
+            base_database = Path(base.name)
+            overlay_database = None
+            search_database = None
+            attestation = None
+            corpus_revision = "test-revision"
+
+            def company_candidates(self) -> list[str]:
+                return ["테스트"]
+
+        class ReadyAgent:
+            evidence_service = ReadyService()
+            provider_configured = False
+
+            def answer(self, question: str, **kwargs: object) -> VerifiedAnswer:
+                return VerifiedAnswer("답", [], True, True)
+
+        yield ReadyAgent()
+
+
+@pytest.fixture
+def raising_agent():
+    with tempfile.NamedTemporaryFile(suffix=".sqlite") as base:
+        class ReadyService:
+            base_database = Path(base.name)
+            overlay_database = None
+            search_database = None
+            attestation = None
+            corpus_revision = "test-revision"
+
+            def company_candidates(self) -> list[str]:
+                return ["테스트"]
+
+        class RaisingAgent:
+            evidence_service = ReadyService()
+            provider_configured = False
+
+            def answer(self, question: str, **kwargs: object) -> VerifiedAnswer:
+                raise RuntimeError("agent failed")
+
+        yield RaisingAgent()
 
 
 def test_rate_limit_reopens_after_rolling_window() -> None:
@@ -72,3 +123,71 @@ def test_extra_release_does_not_reduce_global_active_count() -> None:
     limiter.release("198.51.100.1")
     limiter.release("198.51.100.1")
     assert limiter.try_acquire("198.51.100.2", now=0.1).allowed
+
+
+def test_public_query_uses_socket_ip_and_ignores_forwarded_header(ready_agent) -> None:
+    from fastapi.testclient import TestClient
+
+    settings = PublicLimitSettings(per_minute=1, per_ip_concurrency=4, global_concurrency=8)
+    client = TestClient(create_app(ready_agent, public_limits=settings))
+
+    assert client.post(
+        "/query",
+        json={"question": "첫 질문"},
+        headers={"X-Forwarded-For": "1.1.1.1"},
+    ).status_code == 200
+    response = client.post(
+        "/query",
+        json={"question": "둘째 질문"},
+        headers={"X-Forwarded-For": "2.2.2.2"},
+    )
+    assert response.status_code == 429
+    assert response.json()["detail"] == "rate_limited"
+    assert response.headers["Retry-After"] == "60"
+
+
+def test_health_and_static_assets_are_not_rate_limited(ready_agent) -> None:
+    from fastapi.testclient import TestClient
+
+    settings = PublicLimitSettings(per_minute=1, per_ip_concurrency=1, global_concurrency=1)
+    client = TestClient(create_app(ready_agent, public_limits=settings))
+
+    for _ in range(3):
+        assert client.get("/health").status_code == 200
+        assert client.get("/").status_code == 200
+
+
+def test_sequential_queries_release_the_per_ip_lease(ready_agent) -> None:
+    from fastapi.testclient import TestClient
+
+    settings = PublicLimitSettings(per_minute=120, per_ip_concurrency=1, global_concurrency=1)
+    client = TestClient(create_app(ready_agent, public_limits=settings))
+
+    assert client.post("/query", json={"question": "첫 질문"}).status_code == 200
+    assert client.post("/query", json={"question": "둘째 질문"}).status_code == 200
+
+
+def test_query_lease_releases_after_agent_exception(raising_agent) -> None:
+    from fastapi.testclient import TestClient
+
+    settings = PublicLimitSettings(per_minute=120, per_ip_concurrency=1, global_concurrency=1)
+    client = TestClient(
+        create_app(raising_agent, public_limits=settings),
+        raise_server_exceptions=False,
+    )
+
+    assert client.post("/query", json={"question": "첫 실패"}).status_code == 500
+    assert client.post("/query", json={"question": "둘째 실패"}).status_code == 500
+
+
+def test_legacy_public_answer_route_uses_the_same_limit(ready_agent) -> None:
+    from fastapi.testclient import TestClient
+
+    settings = PublicLimitSettings(per_minute=1, per_ip_concurrency=4, global_concurrency=8)
+    client = TestClient(create_app(ready_agent, public_limits=settings))
+
+    first = client.post("/v1/answer", json={"question": "첫 질문"})
+    assert first.status_code == 200, first.text
+    response = client.post("/v1/answer", json={"question": "둘째 질문"})
+    assert response.status_code == 429
+    assert response.json()["detail"] == "rate_limited"
