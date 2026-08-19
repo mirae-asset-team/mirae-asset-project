@@ -49,6 +49,7 @@ def test_root_serves_accessible_web_shell(ready_agent) -> None:
         "new-chat",
         "history-search",
         "conversation-list",
+        "clear-history",
         "messages",
         "question-input",
         "send-question",
@@ -72,3 +73,4 @@ def test_public_assets_have_security_headers_and_local_sources(ready_agent) -> N
     assert "https://" not in root.text
     assert client.get("/static/app.css").headers["content-type"].startswith("text/css")
     assert "javascript" in client.get("/static/app.js").headers["content-type"]
+    assert "javascript" in client.get("/static/history.js").headers["content-type"]
