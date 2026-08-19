@@ -174,7 +174,9 @@ def create_app(
 
     @app.middleware("http")
     async def limit_public_queries(request, call_next):
-        if request.method != "POST" or request.url.path not in {"/query", "/v1/answer"}:
+        is_post_query = request.method == "POST" and request.url.path in {"/query", "/v1/answer"}
+        is_official_get = request.method == "GET" and request.url.path == "/answer"
+        if not (is_post_query or is_official_get):
             return await call_next(request)
 
         client_ip = request.client.host if request.client is not None else "unknown"
@@ -240,12 +242,26 @@ def create_app(
         health_payload["provider_configured"] = bool(getattr(agent, "provider_configured", False))
         return envelope(health_payload, started)
 
-    def contest_query(request: ContestQueryRequest) -> dict[str, Any]:
-        started = perf_counter()
+    def verified_answer(
+        question: str,
+        *,
+        company: str | None = None,
+        as_of: str | None = None,
+        limit: int = 20,
+    ) -> Any:
         health_status = runtime_health()
         if not health_status["ready"]:
             raise HTTPException(status_code=503, detail="runtime_not_ready")
-        answer = agent.answer(
+        return agent.answer(
+            question,
+            company=company,
+            as_of=as_of,
+            limit=limit,
+        )
+
+    def contest_query(request: ContestQueryRequest) -> dict[str, Any]:
+        started = perf_counter()
+        answer = verified_answer(
             request.question,
             company=request.company,
             as_of=request.as_of,
@@ -266,6 +282,37 @@ def create_app(
     # module namespace. Bind the local model before registering the route.
     contest_query.__annotations__["request"] = ContestQueryRequest
     app.post("/query")(contest_query)
+
+    def official_answer(
+        question_id: str = Query(min_length=1, max_length=200),
+        question: str = Query(min_length=1, max_length=4000),
+        company: str | None = Query(default=None, max_length=200),
+        as_of: str | None = Query(default=None, pattern=r"^20\d{2}-\d{2}-\d{2}$"),
+    ) -> dict[str, str]:
+        verified = verified_answer(question, company=company, as_of=as_of)
+        citations = list(getattr(verified, "citations", []) or [])[:20]
+        context_rows = []
+        for citation in citations:
+            report_name = getattr(citation, "report_name", None) or "공시"
+            filed_at = getattr(citation, "filed_at", None) or "일자 미상"
+            filing_id = getattr(citation, "filing_id", None) or "접수번호 미상"
+            context_rows.append(
+                f"공시명={report_name} | 공시일={filed_at} | 접수번호={filing_id}"
+            )
+        retrieved_context = "\n".join(context_rows)[:6000]
+        if bool(getattr(verified, "answerable", False)) and bool(getattr(verified, "verified", False)):
+            trace = "질의 구조화 -> 공시 검색 -> 정정·수치 검증 -> 근거 귀속"
+        else:
+            trace = "질의 구조화 -> 공시 검색 -> 근거 검증 -> 정보한계 판정"
+        return {
+            "question_id": question_id,
+            "question": question,
+            "retrieved_context": retrieved_context,
+            "think_trace": trace,
+            "answer": str(getattr(verified, "answer", "")),
+        }
+
+    app.get("/answer")(official_answer)
 
     @app.post("/v1/query/plan")
     def query_plan(request: QueryRequest) -> dict[str, Any]:

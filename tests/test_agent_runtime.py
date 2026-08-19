@@ -74,6 +74,104 @@ class AgentRuntimeTests(unittest.TestCase):
             self.assertEqual(client.post("/query", json={"question": ""}).status_code, 422)
             self.assertEqual(client.post("/query", json={"question": "가" * 4001}).status_code, 422)
 
+    def test_official_answer_get_returns_bounded_public_trace_and_context(self):
+        from fastapi.testclient import TestClient
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite") as base:
+            class ReadyService:
+                base_database = Path(base.name)
+                overlay_database = None
+                search_database = None
+                attestation = None
+                corpus_revision = "test-revision"
+
+                def company_candidates(self):
+                    return ["테스트"]
+
+            class FakeAgent:
+                evidence_service = ReadyService()
+                provider_configured = False
+
+                def answer(self, question, **kwargs):
+                    return VerifiedAnswer(
+                        answer="검증된 답변",
+                        citation_ids=["ev1"],
+                        verified=True,
+                        answerable=True,
+                        citations=[
+                            CitationRef(
+                                "ev1",
+                                "20250318000001",
+                                report_name="사업보고서",
+                                filed_at="2025-03-18",
+                            )
+                        ],
+                    )
+
+            response = TestClient(create_app(FakeAgent())).get(
+                "/answer",
+                params={"question_id": "Q-001", "question": "테스트 질문"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(
+            set(body),
+            {"question_id", "question", "retrieved_context", "think_trace", "answer"},
+        )
+        self.assertEqual(body["question_id"], "Q-001")
+        self.assertEqual(body["question"], "테스트 질문")
+        self.assertEqual(body["answer"], "검증된 답변")
+        self.assertIn("사업보고서", body["retrieved_context"])
+        self.assertIn("2025-03-18", body["retrieved_context"])
+        self.assertIn("20250318000001", body["retrieved_context"])
+        self.assertIn("질의 구조화", body["think_trace"])
+        self.assertNotIn("chain", body["think_trace"].lower())
+
+    def test_official_answer_get_validates_input_and_reports_abstention(self):
+        from fastapi.testclient import TestClient
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite") as base:
+            class ReadyService:
+                base_database = Path(base.name)
+                overlay_database = None
+                search_database = None
+                attestation = None
+                corpus_revision = "test-revision"
+
+                def company_candidates(self):
+                    return []
+
+            class FakeAgent:
+                evidence_service = ReadyService()
+                provider_configured = False
+
+                def answer(self, question, **kwargs):
+                    return VerifiedAnswer(
+                        answer=UNANSWERABLE_TEXT,
+                        citation_ids=[],
+                        verified=False,
+                        answerable=False,
+                    )
+
+            client = TestClient(create_app(FakeAgent()))
+            self.assertEqual(client.get("/answer", params={"question_id": "Q-1"}).status_code, 422)
+            self.assertEqual(
+                client.get(
+                    "/answer",
+                    params={"question_id": "Q-1", "question": "가" * 4001},
+                ).status_code,
+                422,
+            )
+            body = client.get(
+                "/answer",
+                params={"question_id": "Q-1", "question": "미래 주가를 예측해줘"},
+            ).json()
+
+        self.assertEqual(body["retrieved_context"], "")
+        self.assertIn("정보한계 판정", body["think_trace"])
+        self.assertEqual(body["answer"], UNANSWERABLE_TEXT)
+
     def test_contest_query_returns_503_when_runtime_is_not_ready(self):
         from fastapi.testclient import TestClient
 

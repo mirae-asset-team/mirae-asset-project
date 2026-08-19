@@ -191,3 +191,17 @@ def test_legacy_public_answer_route_uses_the_same_limit(ready_agent) -> None:
     response = client.post("/v1/answer", json={"question": "둘째 질문"})
     assert response.status_code == 429
     assert response.json()["detail"] == "rate_limited"
+
+
+def test_official_get_answer_route_uses_the_same_limit(ready_agent) -> None:
+    from fastapi.testclient import TestClient
+
+    settings = PublicLimitSettings(per_minute=1, per_ip_concurrency=4, global_concurrency=8)
+    client = TestClient(create_app(ready_agent, public_limits=settings))
+
+    first = client.get("/answer", params={"question_id": "Q-1", "question": "첫 질문"})
+    assert first.status_code == 200, first.text
+    response = client.get("/answer", params={"question_id": "Q-2", "question": "둘째 질문"})
+    assert response.status_code == 429
+    assert response.json()["detail"] == "rate_limited"
+    assert response.headers["Retry-After"] == "60"
