@@ -473,7 +473,7 @@ services:
 
 `.env.example` contains D-drive DB path examples, `DISCLOSURE_ATTESTATION_HOST=./data/derived/database_distribution_manifest_semantic_v1.json`, and an empty `CLOVASTUDIO_API_KEY=` only; `.env` remains ignored.
 
-- [ ] **Step 5: Run static tests and build the image**
+- [x] **Step 5: Run static tests and build the image**
 
 Run: `python -m unittest tests.test_deployment_artifacts -v`
 
@@ -541,7 +541,7 @@ foreach ($path in $required) {
 
 `smoke-agent.ps1` waits at most 60 seconds for `ready=true`, posts one answerable fixture and one out-of-scope fixture, asserts `request_id`, `answerable`, `verified`, `evidence`, and exits non-zero on any mismatch. Use `Invoke-RestMethod`; do not log the API key.
 
-- [ ] **Step 5: Run static and local smoke tests**
+- [x] **Step 5: Run static and local smoke tests**
 
 Run: `python -m unittest tests.test_deployment_artifacts -v`
 
@@ -596,7 +596,7 @@ Run: `git diff --check`
 
 Expected: all tests PASS except documented optional skips; compile and diff checks exit 0.
 
-- [ ] **Step 4: Run Docker smoke**
+- [ ] **Step 4: Run Docker smoke** — `BLOCKED_LOCAL_RUNTIME`: `/health` passed, but the D-drive bind-mounted `/query` exceeded 120 seconds; no query gate was marked pass.
 
 Run: `docker compose up -d --build`
 
