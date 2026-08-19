@@ -568,6 +568,54 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertFalse(text_draft.answerable)
         self.assertIn("hcx_unavailable_for_text", text_draft.reason_codes)
 
+    def test_hcx_prose_wrapped_json_is_parsed_without_relaxing_schema(self) -> None:
+        payload = {
+            "answer": "계약금액은 2000원입니다.",
+            "citation_ids": ["ev1"],
+            "numeric_values": ["2000"],
+            "answerable": True,
+        }
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        content = "분석 결과:\n" + json.dumps(payload, ensure_ascii=False) + "\n이상입니다."
+        response.read.return_value = json.dumps({"choices": [{"message": {"content": content}}]}).encode("utf-8")
+        bundle = EvidenceBundle(
+            question="계약금액은 얼마인가?",
+            evidence=[EvidenceRef("ev1", "f1", "s1", "계약금액 2000원")],
+            answerable=True,
+            event_facts=[{"value_numeric": "2000", "evidence_ids": ["ev1"]}],
+        )
+        with patch("disclosure_db.generation.urllib.request.urlopen", return_value=response):
+            draft = HyperClovaGenerator(api_key="key").generate(bundle)
+        self.assertTrue(draft.answerable)
+        self.assertEqual(draft.answer, payload["answer"])
+        self.assertEqual(draft.citation_ids, ["ev1"])
+        self.assertEqual(draft.numeric_values, ["2000"])
+        self.assertNotIn("hcx_fallback", draft.reason_codes)
+
+    def test_hcx_multiple_json_objects_remain_fail_closed(self) -> None:
+        payload = {
+            "answer": "계약금액은 2000원입니다.",
+            "citation_ids": ["ev1"],
+            "numeric_values": ["2000"],
+            "answerable": True,
+        }
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        content = json.dumps(payload, ensure_ascii=False) + "\n" + json.dumps(payload, ensure_ascii=False)
+        response.read.return_value = json.dumps({"choices": [{"message": {"content": content}}]}).encode("utf-8")
+        bundle = EvidenceBundle(
+            question="계약금액은 얼마인가?",
+            evidence=[EvidenceRef("ev1", "f1", "s1", "계약금액 2000원")],
+            answerable=True,
+            event_facts=[{"value_numeric": "2000", "evidence_ids": ["ev1"]}],
+        )
+        with patch("disclosure_db.generation.urllib.request.urlopen", return_value=response):
+            draft = HyperClovaGenerator(api_key="key").generate(bundle)
+        self.assertIn("hcx_fallback", draft.reason_codes)
+
     def test_api_exposes_bounded_event_facts_route_and_stable_answer_metadata(self) -> None:
         class Service:
             base_database = Path("missing.sqlite")

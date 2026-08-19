@@ -33,6 +33,57 @@ def _claim_citation_ids(bundle: EvidenceBundle) -> list[str]:
     return [bundle.evidence[0].evidence_id] if bundle.evidence else []
 
 
+def _parse_hcx_content(content: Any) -> Any:
+    """Parse one JSON object from an HCX response without accepting ambiguity."""
+    if isinstance(content, dict):
+        return content
+    if not isinstance(content, str):
+        raise ValueError("hcx_output_not_json")
+
+    text = content.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    candidates: list[str] = []
+    start: int | None = None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index, character in enumerate(text):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                in_string = False
+            continue
+        if character == '"':
+            in_string = True
+        elif character == "{" and depth == 0:
+            start = index
+            depth = 1
+        elif character == "{" and depth > 0:
+            depth += 1
+        elif character == "}" and depth > 0:
+            depth -= 1
+            if depth == 0 and start is not None:
+                candidates.append(text[start:index + 1])
+                start = None
+    if len(candidates) != 1:
+        raise ValueError("hcx_output_json_ambiguous")
+    return json.loads(candidates[0])
+
+
 class DeterministicGenerator:
     def generate(self, bundle: EvidenceBundle) -> AnswerDraft:
         if not bundle.answerable or not bundle.evidence:
@@ -115,14 +166,7 @@ class HyperClovaGenerator:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
             content = data["choices"][0]["message"]["content"]
-            if isinstance(content, str) and content.strip().startswith("```"):
-                lines = content.strip().splitlines()
-                if lines and lines[0].strip().startswith("```"):
-                    lines = lines[1:]
-                if lines and lines[-1].strip() == "```":
-                    lines = lines[:-1]
-                content = "\n".join(lines)
-            parsed: dict[str, Any] = json.loads(content) if isinstance(content, str) else content
+            parsed: dict[str, Any] = _parse_hcx_content(content)
             required_keys = {"answer", "citation_ids", "numeric_values", "answerable"}
             if not isinstance(parsed, dict) or set(parsed) != required_keys:
                 raise ValueError("hcx_output_schema_mismatch")
