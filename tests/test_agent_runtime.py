@@ -126,6 +126,7 @@ class AgentRuntimeTests(unittest.TestCase):
             search_database = None
             attestation = None
             corpus_revision = "test-revision"
+            company_candidates = Mock(return_value=[])
 
         class FakeAgent:
             evidence_service = Service()
@@ -146,6 +147,7 @@ class AgentRuntimeTests(unittest.TestCase):
                 self.assertTrue(client.get("/health").json()["ready"])
                 self.assertTrue(client.get("/health").json()["ready"])
         self.assertEqual(health_status.call_count, 1)
+        Service.company_candidates.assert_called_once_with()
 
     def test_serving_readonly_connection_uses_immutable_sqlite_uri(self):
         from disclosure_db.evidence_service import _readonly_connection

@@ -156,6 +156,10 @@ def create_app(agent: DisclosureAgent):
         """
         nonlocal startup_health
         startup_health = _health_status(agent.evidence_service)
+        if startup_health.get("ready"):
+            candidates = getattr(agent.evidence_service, "company_candidates", None)
+            if callable(candidates):
+                candidates()
 
     def runtime_health() -> dict[str, Any]:
         nonlocal startup_health
