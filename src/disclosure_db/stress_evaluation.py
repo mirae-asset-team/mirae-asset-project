@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 import hashlib
+import math
 import shutil
 from pathlib import Path
 from typing import Iterable
@@ -151,12 +152,71 @@ def score_metamorphic_group(results: Iterable[dict[str, object]]) -> CaseScore:
     return CaseScore(str(first.get("question_id", "metamorphic")), not failures, failures, classify_failure(failures))
 
 
-def should_skip(case: dict[str, object], git_commit: str, completed: dict[str, object]) -> bool:
-    return (
+def should_skip(
+    case: dict[str, object],
+    git_commit: str,
+    completed: dict[str, object],
+    *,
+    provider_mode: str | None = None,
+    provider_model: str | None = None,
+) -> bool:
+    identity_matches = (
         str(case.get("question_id")) == str(completed.get("case_id"))
         and str(case.get("input_hash")) == str(completed.get("input_hash"))
         and str(git_commit) == str(completed.get("git_commit"))
     )
+    if provider_mode is None:
+        return identity_matches
+    return (
+        identity_matches
+        and completed.get("provider_mode") == provider_mode
+        and completed.get("provider_model") == provider_model
+    )
+
+
+def percentile_95(values: Iterable[float]) -> float | None:
+    ordered = sorted(float(value) for value in values)
+    if not ordered:
+        return None
+    return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
+
+
+def evaluate_provider_gate(
+    summary: dict[str, object],
+    contract: dict[str, object],
+    *,
+    provider_required: bool,
+) -> tuple[bool, list[str]]:
+    if not provider_required:
+        return False, ["provider_not_required"]
+    if not bool(summary.get("provider_configured")):
+        return False, ["provider_not_configured"]
+
+    reasons: list[str] = []
+    expected_count = int(contract.get("case_count", 300))
+    if int(summary.get("completed_count", 0)) != expected_count:
+        reasons.append("provider_incomplete")
+    if int(summary.get("pass_count", 0)) != expected_count:
+        reasons.append("provider_case_failures")
+    if not bool(summary.get("hard_gate_passed")):
+        reasons.append("hard_gate_failed")
+
+    quality = contract.get("quality_gates", {})
+    quality = quality if isinstance(quality, dict) else {}
+    for field, default in (
+        ("answerability_agreement", 0.95),
+        ("numeric_exactness", 1.0),
+        ("citation_precision", 1.0),
+        ("citation_recall", 0.9),
+    ):
+        value = summary.get(field)
+        if value is None or float(value) < float(quality.get(field, default)):
+            reasons.append(field)
+
+    latency = summary.get("provider_end_to_end_p95_ms")
+    if latency is None or float(latency) > 10000.0:
+        reasons.append("provider_end_to_end_p95_ms")
+    return not reasons, reasons
 
 
 def resolve_case_company(case: dict[str, object]) -> str | None:
@@ -212,6 +272,7 @@ def aggregate_scores(scores: Iterable[CaseScore], contract: dict[str, object]) -
         "count": count,
         "pass_count": sum(row.passed for row in rows),
         "error_count": sum("evaluator_error" in row.failures for row in rows),
+        "evaluator_error_count": sum("evaluator_error" in row.failures for row in rows),
         "false_numeric_claim_count": sum(bool(row.metrics.get("false_numeric_claim")) for row in rows),
         "unsafe_answer_count": sum(bool(row.metrics.get("unsafe_answer")) for row in rows),
         "unknown_citation_count": sum(bool(row.metrics.get("unknown_citation")) for row in rows),
@@ -233,6 +294,7 @@ def aggregate_scores(scores: Iterable[CaseScore], contract: dict[str, object]) -
 
 
 __all__ = [
-    "CAUSE_ORDER", "CaseScore", "aggregate_scores", "classify_failure", "run_fault_case",
-    "resolve_case_company", "score_case", "score_metamorphic_group", "should_skip",
+    "CAUSE_ORDER", "CaseScore", "aggregate_scores", "classify_failure", "evaluate_provider_gate",
+    "percentile_95", "run_fault_case", "resolve_case_company", "score_case",
+    "score_metamorphic_group", "should_skip",
 ]

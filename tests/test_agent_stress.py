@@ -14,7 +14,17 @@ from disclosure_db.stress_generation import (
     validate_stress_case,
     validate_stress_cases,
 )
-from disclosure_db.stress_evaluation import resolve_case_company, run_fault_case, score_case, score_metamorphic_group, should_skip
+from disclosure_db.stress_evaluation import (
+    CaseScore,
+    aggregate_scores,
+    evaluate_provider_gate,
+    percentile_95,
+    resolve_case_company,
+    run_fault_case,
+    score_case,
+    score_metamorphic_group,
+    should_skip,
+)
 
 
 def valid_case() -> dict[str, object]:
@@ -162,6 +172,105 @@ class AgentStressContractTests(unittest.TestCase):
         self.assertTrue(should_skip(matching, "g1", completed))
         self.assertFalse(should_skip(changed, "g1", completed))
         self.assertFalse(should_skip(matching, "g2", completed))
+
+    def test_resume_separates_provider_mode_and_model(self) -> None:
+        completed = {
+            "case_id": "c1",
+            "input_hash": "a",
+            "git_commit": "g1",
+            "provider_mode": "required",
+            "provider_model": "HCX-005",
+        }
+        matching = {"question_id": "c1", "input_hash": "a"}
+        self.assertTrue(
+            should_skip(
+                matching,
+                "g1",
+                completed,
+                provider_mode="required",
+                provider_model="HCX-005",
+            )
+        )
+        self.assertFalse(
+            should_skip(
+                matching,
+                "g1",
+                completed,
+                provider_mode="disabled",
+                provider_model=None,
+            )
+        )
+        self.assertFalse(
+            should_skip(
+                matching,
+                "g1",
+                completed,
+                provider_mode="required",
+                provider_model="HCX-DIFFERENT",
+            )
+        )
+
+    def test_provider_gate_requires_configuration_quality_and_latency(self) -> None:
+        contract = {
+            "case_count": 300,
+            "quality_gates": {
+                "answerability_agreement": 0.95,
+                "numeric_exactness": 1.0,
+                "citation_precision": 1.0,
+                "citation_recall": 0.9,
+            },
+        }
+        summary = {
+            "completed_count": 300,
+            "pass_count": 300,
+            "hard_gate_passed": True,
+            "provider_configured": True,
+            "provider_end_to_end_p95_ms": 9999.0,
+            "answerability_agreement": 0.95,
+            "numeric_exactness": 1.0,
+            "citation_precision": 1.0,
+            "citation_recall": 0.9,
+        }
+        passed, reasons = evaluate_provider_gate(summary, contract, provider_required=True)
+        self.assertTrue(passed)
+        self.assertEqual(reasons, [])
+
+        summary["provider_end_to_end_p95_ms"] = 10000.01
+        passed, reasons = evaluate_provider_gate(summary, contract, provider_required=True)
+        self.assertFalse(passed)
+        self.assertEqual(reasons, ["provider_end_to_end_p95_ms"])
+
+        summary["provider_end_to_end_p95_ms"] = 9999.0
+        summary["provider_configured"] = False
+        passed, reasons = evaluate_provider_gate(summary, contract, provider_required=True)
+        self.assertFalse(passed)
+        self.assertEqual(reasons, ["provider_not_configured"])
+
+    def test_provider_gate_never_passes_in_disabled_mode(self) -> None:
+        passed, reasons = evaluate_provider_gate({}, {"case_count": 300}, provider_required=False)
+        self.assertFalse(passed)
+        self.assertEqual(reasons, ["provider_not_required"])
+
+    def test_percentile_95_uses_nearest_rank(self) -> None:
+        self.assertIsNone(percentile_95([]))
+        self.assertEqual(percentile_95([5.0]), 5.0)
+        self.assertEqual(percentile_95([float(value) for value in range(1, 101)]), 95.0)
+
+    def test_evaluator_error_fails_the_hard_gate(self) -> None:
+        score = CaseScore(
+            "broken",
+            False,
+            ["evaluator_error"],
+            "runtime_integrity",
+            {"evaluator_error": 1},
+        )
+        summary = aggregate_scores(
+            [score],
+            {"hard_gates": {"evaluator_error_count": 0}},
+        )
+        self.assertEqual(summary["evaluator_error_count"], 1)
+        self.assertFalse(summary["hard_gate_passed"])
+        self.assertIn("evaluator_error_count", summary["hard_gate_reasons"])
 
     def test_fault_fixture_never_mutates_source_database(self) -> None:
         with TemporaryDirectory() as directory:
