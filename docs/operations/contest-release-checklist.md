@@ -1,6 +1,6 @@
 # Contest server release checklist
 
-Last updated: 2026-08-20 02:38:02 KST
+Last updated: 2026-08-20 03:07:20 KST
 
 This checklist records binary evidence without credentials or raw provider responses. `BLOCKED_EXTERNAL` means the local gate is defined but the required external resource is unavailable; it is not treated as a pass.
 `BLOCKED_LOCAL_RUNTIME` means a local runtime limitation prevented evidence collection; it is not treated as a pass.
@@ -12,8 +12,8 @@ This checklist records binary evidence without credentials or raw provider respo
 | Live overlay SHA-256 | PASS | `92ffe3ce1740153cfec457f5354685535a31cc5fe0d7722d61f1195f2ac1d3ad` |
 | Live search SHA-256/revision | PASS | `e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793` / `safe-search-v1` |
 | Overlay integrity/base attestation | PASS | `integrity_check=ok`, `overlay_matches_base=true`, event facts `1,423` |
-| 300-case manifest | PASS | SHA-256 `1b014f0bfca75c8db6f6306dcdab80fff4cafb80dfb3709bf1e9d3bb8d8dd2a0`; fresh provider-disabled run `20260819T163934Z-1b014f0bfca7`; `300/300` pass; all hard counters `0`; all four quality metrics `1.0` |
-| Full local regression | PASS | `235 passed, 1 skipped, 17 subtests passed` in `28.19s`; compileall passed |
+| 300-case manifest | PASS | SHA-256 `1b014f0bfca75c8db6f6306dcdab80fff4cafb80dfb3709bf1e9d3bb8d8dd2a0`; fresh final provider-disabled run `20260819T174202Z-1b014f0bfca7`; `300/300` pass; evaluator error and all hard counters `0`; all four quality metrics `1.0`; p95 `5193.46ms`; failures `0` bytes; summary SHA-256 `3ab5b0a5823112157a4be4219883bcdba46f4f859d47f5fc2c65b8a0d73230ce` |
+| Full local regression | PASS | `243 passed, 1 skipped, 17 subtests passed` in `28.62s`; compileall passed |
 | Frontend logic regression | PASS | Node `24.14.0`; history/API suites `10/10` passed; this Node release rejects the removed `--experimental-default-type=module` flag, so the equivalent current `node --test` command was used |
 | Wheel web assets | PASS | wheel SHA-256 `78056aee8b9d800dae964ae4624848ec05622a0adb922ff15afbe50f2e2e58f2`; `index.html`, `app.css`, `app.js`, `history.js`, `api.js` present (`5/5`) |
 | Local Docker image/UI smoke | PASS | Docker Engine `29.7.2`; image `sha256:c0adf3adcc07dfb09e2e0fdb8f235b973c1036592c5cc262d3760b6ac1721cd9`; container healthy; web/CSP and three query probes passed |
@@ -27,7 +27,7 @@ This checklist records binary evidence without credentials or raw provider respo
 | Provider 300-case pass | NOT_RUN | Stopped after schema smoke; no provider quality gate was claimed |
 | Provider-required runner | PASS | `--provider-mode required` now fails before cases when unconfigured, isolates checkpoint identity by mode/model, records p95 and explicit gate reasons, and cannot treat disabled fallback as provider evidence |
 | Official example `GET /answer` | PASS_LOCAL | Five-field response contract, bounded public context/trace, abstention and anonymous request limiting passed focused tests; public NCP deployment is not yet performed |
-| Technical proposal source/PDF | PASS | Korean Markdown plus visually inspected 12-page A4 PDF; all required sections, tables and architecture diagram present; PDF SHA-256 `0812179582f69025a508b43e654e8169222117c4dbbe96118d3da726de802829` |
+| Technical proposal source/PDF | PASS | Korean Markdown plus visually inspected 12-page A4 PDF; all required sections, tables and architecture diagram present; invariant build reproduced identical SHA-256 twice: `b238a7d75a5604ea73207dc04c095e4d92ebf5d42750c98a233ba415f17cd0cc` |
 | Evaluation API server specification | PASS_LOCAL | Standalone request/response/error/limit/health/deployment contract for `GET /answer` and `POST /query`; final public endpoint URL remains blocked until the authenticated code-only NCP redeploy |
 | Compose config hash | PASS | `compose.yaml` SHA-256 `eebdcf5a7604ae904fe8ffbb049f508a2f3abe9194bdfad510392e636c4886d1`; anonymous limits render as `120/4/8` |
 | NCP Docker image build/start | PASS | Docker Engine 29.1.3 / Compose 2.40.3; image rebuilt from `3ad8dd8`, container healthy |
@@ -56,4 +56,4 @@ The previous live overlay is preserved at `D:\mirae-asset-project\db\agent\agent
 
 Local deterministic hard gates: GO. Existing public API and its prior restart-recovery evidence: GO. Anonymous public web UI deployment: NO-GO (`BLOCKED_EXTERNAL`). API-only team demo: GO; browser UI team demo: NO-GO until the code-only NCP redeploy and Steps 4-6 are freshly verified.
 
-Final contest submission: NO-GO until a rotated HyperCLOVA X credential is supplied and the bounded provider schema smoke plus 300-case provider pass complete. This missing external gate was not relaxed.
+Final contest submission: NO-GO until a rotated HyperCLOVA X credential passes the bounded schema/provider 300 gate and an authenticated NCP code-only redeploy passes the public UI/`GET /answer`/restart checks. The technical proposal and local API specification are complete; no external gate was relaxed.

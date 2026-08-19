@@ -119,6 +119,7 @@ class ArchitectureDiagram(Flowable):
 
 class ProposalCanvas(pdfcanvas.Canvas):
     def __init__(self, *args, **kwargs):
+        kwargs["invariant"] = 1
         super().__init__(*args, **kwargs)
         self._page_states: list[dict[str, object]] = []
 
