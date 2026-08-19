@@ -11,7 +11,22 @@ agent overlay, sparse search index는 서비스와 운영자가 읽기 전용으
 - `CLOVASTUDIO_API_KEY`는 교체된 credential만 현재 프로세스 또는 무추적 `.env`에 주입한다.
   키를 명령행, Git, 로그, 응답에 넣지 않는다.
 - 서버가 뜨는 것과 공모전 품질 gate 통과는 별개다. `/health.ready=true`만으로 submission
-  ready를 주장하지 않는다.
+ready를 주장하지 않는다.
+
+## Public web UI
+
+서버의 공개 주소 루트(`/`)를 브라우저에서 열면 공시 질문 화면이 표시된다. 별도 로그인은
+없으며 주소를 아는 사용자는 누구나 질문할 수 있다. 질문 결과의 `검증된 답변` 또는
+`답변 보류` 표시와 공시 근거를 함께 확인한다. `준비됨`은 현재 런타임이 질의를 받을 수
+있다는 뜻일 뿐 공모전 최종 제출 준비 완료를 뜻하지 않는다.
+
+대화 목록과 메시지는 서버가 아니라 각 사용자의 브라우저 `localStorage`에만 저장된다.
+같은 주소라도 다른 브라우저·기기·시크릿 창과 기록을 공유하지 않는다. 왼쪽 아래의
+`대화 기록 전체 삭제`를 누르면 해당 브라우저의 기록만 삭제된다. 서버에는 대화 계정,
+로그인 세션, 서버 측 대화 기록을 만들지 않는다.
+
+모바일에서는 `대화 목록` 버튼으로 기록을 연다. `Enter`는 질문 전송,
+`Shift+Enter`는 줄바꿈이다. 예시 질문 버튼은 입력창만 채우며 자동 전송하지 않는다.
 
 ## Local PowerShell
 
@@ -46,6 +61,46 @@ Compose는 base SQLite와 `db\agent`를 `:ro`로 mount하고 `/runtime`만 쓰�
 컨테이너가 unhealthy이면 질문을 보내지 말고 `/health`의 readiness와 attestation 상태를
 확인한다.
 
+## Anonymous request limits
+
+로그인 없는 공개 서비스의 과다 사용은 다음 세 환경 변수로 제한한다. 값은 모두
+`1..10000`만 허용하며 `0`, 음수, 비정수, 10000 초과 값은 시작 단계에서 거부된다.
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `DISCLOSURE_PUBLIC_RATE_PER_MINUTE` | 120 | 연결 IP별 60초 이동 구간 요청 수 |
+| `DISCLOSURE_PUBLIC_PER_IP_CONCURRENCY` | 4 | 연결 IP별 동시 질문 수 |
+| `DISCLOSURE_PUBLIC_GLOBAL_CONCURRENCY` | 8 | 단일 서버 프로세스 전체 동시 질문 수 |
+
+`POST /query`와 호환 경로 `POST /v1/answer`에만 적용된다. `/`, 정적 자산, `/health`는
+적용 대상이 아니다. 분당 또는 IP 동시 제한은 HTTP `429`, 서버 전체 동시 제한은
+HTTP `503`과 `detail=server_busy`를 반환한다. 클라이언트는 `Retry-After` 초 이후에
+재시도한다.
+
+현재 구현은 조작 가능한 `X-Forwarded-For`를 무시하고 직접 연결된 소켓 IP만 신뢰한다.
+따라서 리버스 프록시를 추가하면 모든 사용자가 프록시 IP 하나로 집계된다. 신뢰 프록시와
+헤더 검증 설계를 별도로 완료하기 전에는 forwarded-header 신뢰를 켜지 않는다.
+
+설정 확인은 비밀값이 없는 예시 파일로 렌더링할 수 있다.
+
+```powershell
+docker compose --env-file .env.example config
+```
+
+출력에서 세 제한값과 base/agent/attestation 볼륨의 `read_only: true`를 확인한다.
+
+## Smoke the public experience
+
+서버 시작 후 다음 명령은 공개 HTML/CSP, readiness, 검증 답변, 답변 보류, 프롬프트 주입
+거절을 순서대로 확인한다. 출력은 상태·request ID·latency·boolean만 포함하며 공개 URL,
+원문 공시, credential은 출력하지 않는다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/smoke-agent.ps1 -BaseUrl 'http://127.0.0.1:8000'
+```
+
+웹 화면이 없거나 CSP가 빠졌거나 어느 질문 계약이 깨지면 0이 아닌 종료 코드로 실패한다.
+
 ## NCP deployment
 
 NCP Server에는 최소 80GB 데이터 볼륨을 `/srv/mirae`로 mount한다.
@@ -65,6 +120,10 @@ NCP Server에는 최소 80GB 데이터 볼륨을 `/srv/mirae`로 mount한다.
 
 NCP 계정, public IP, ACG, 데이터 볼륨, 외부 네트워크가 확인되기 전에는 공개 endpoint
 완료나 최종 submission ready를 주장하지 않는다. 임시 tunnel은 팀 demo에만 사용한다.
+
+공개 화면과 로컬 deterministic 스모크가 통과해도 HyperCLOVA X 교체 credential로
+provider smoke와 300-case 평가를 통과하기 전까지 최종 제출 상태는 **NO-GO**다. 이 gate를
+낮추거나 deterministic 결과로 대체하지 않는다.
 
 ## Diagnosis and rollback
 

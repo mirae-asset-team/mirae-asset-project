@@ -40,7 +40,9 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn("-m disclosure_db.cli", start)
         self.assertIn("/health", smoke)
         self.assertIn("/query", smoke)
-        self.assertIn("연결 XI.", smoke)
+        self.assertIn("ConvertFrom-Base64Utf8", smoke)
+        self.assertIn("smoke-answerable", smoke)
+        self.assertIn("smoke-injection", smoke)
 
 
 if __name__ == "__main__":
