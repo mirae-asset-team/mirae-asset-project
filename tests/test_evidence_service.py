@@ -255,6 +255,30 @@ class EvidenceServiceTests(unittest.TestCase):
         self.assertEqual(disposal.fact_domain, "event")
         self.assertIn("treasury_disposal_shares", disposal.predicate_terms)
 
+    def test_insider_purchase_question_routes_to_audited_event_domain(self) -> None:
+        plan = plan_query(
+            "최근 삼성바이오로직스 내부자매수 사례 찾아봐",
+            company_candidates=["삼성바이오로직스"],
+        )
+
+        self.assertEqual(plan.fact_domain, "event")
+        self.assertIn("내부자매수", plan.predicate_terms)
+
+    def test_insider_purchase_question_abstains_without_audited_event_fact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp) / "base.sqlite"
+            seed_search_db(base)
+            service = EvidenceService(base)
+            plan = plan_query(
+                "최근 삼성바이오로직스 내부자매수 사례 찾아봐",
+                company_candidates=["삼성바이오로직스"],
+            )
+
+            bundle = service.search(plan)
+
+        self.assertFalse(bundle.answerable)
+        self.assertIn("validated_event_fact_required", bundle.reason_codes)
+
     def test_event_predicate_terms_expand_from_gold_alias_config(self) -> None:
         service = EvidenceService(Path("missing.sqlite"))
         terms = service._expand_event_terms(["계약금액"])
