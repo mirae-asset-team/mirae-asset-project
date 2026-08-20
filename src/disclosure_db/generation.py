@@ -142,6 +142,8 @@ class HyperClovaGenerator:
     def generate(self, bundle: EvidenceBundle) -> AnswerDraft:
         if not self.api_key:
             return self.fallback.generate(bundle)
+        if not bundle.answerable or not bundle.evidence:
+            return self.fallback.generate(bundle)
         structured = bool(bundle.financial_facts or bundle.event_facts or bundle.calculation is not None)
         payload = {
             "model": self.model,

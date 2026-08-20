@@ -692,6 +692,20 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertIn("hcx_fallback", draft.reason_codes)
         self.assertEqual(draft.numeric_values, ["2000"])
 
+    def test_hcx_never_calls_provider_without_admitted_database_evidence(self) -> None:
+        bundle = EvidenceBundle(
+            question="근거가 없는 질문",
+            evidence=[],
+            answerable=True,
+        )
+        with patch("disclosure_db.generation.urllib.request.urlopen") as urlopen:
+            draft = HyperClovaGenerator(api_key="key").generate(bundle)
+
+        self.assertFalse(draft.answerable)
+        self.assertEqual(draft.answer, UNANSWERABLE_TEXT)
+        self.assertIn("insufficient_evidence", draft.reason_codes)
+        urlopen.assert_not_called()
+
     def test_hcx_provider_failure_abstains_for_generic_text_bundle(self) -> None:
         bundle = EvidenceBundle(
             question="계약 상대방은 누구인가?",
