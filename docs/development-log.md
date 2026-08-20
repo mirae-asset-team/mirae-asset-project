@@ -9,6 +9,7 @@
 - Read-only result: sparse FTS+RRF Recall@20 remained `13/17 = 0.7647058824`, complete-question recall `0.75`, and MRR `0.3449449856`. Hybrid retrieval recovered `17/17`, complete-question recall `1.0`, with routes financial `8`, event `7`, text `2`, service errors `0`, and residual targets `0`.
 - Financial scope: the checked-in validated seed has 8 facts and all 8 exactly match audited Gold. `corpus_wide_complete=false`; no generated candidate was promoted and no broader financial-fact completion is claimed.
 - Decision: the four sparse misses were structured financial table cells, not residual text misses. Paid embeddings, pgvector, and OpenSearch are not justified by the current Gold retrieval gate and remain deferred. Provider execution and any production database/NCP change remain separately gated.
+- Release bookkeeping: no dense-pilot manifest was created because residual text targets are zero. The release checklist records embeddings and PostgreSQL/pgvector/OpenSearch as evidence-based deferrals, not completed infrastructure, and corrects the stale public-UI NO-GO line using the already-recorded successful anonymous deployment/restart evidence.
 - Artifacts: detailed outputs were written only to ignored `tmp/hybrid_retrieval_audit.json` and `tmp/financial_fact_coverage_audit.json`; D-drive artifacts were opened read-only and the deployed service was untouched.
 
 ## 2026-08-19T23:34:18+09:00 / 2026-08-19T14:34:18Z — NCP public deployment and restart verification
