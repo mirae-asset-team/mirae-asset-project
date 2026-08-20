@@ -195,6 +195,16 @@ def create_app(
     app.mount("/static", StaticFiles(directory=web_directory), name="static")
     startup_health: dict[str, Any] | None = None
 
+    def validated_health_snapshot() -> dict[str, Any]:
+        health = _health_status(agent.evidence_service)
+        company_count = 0
+        if health.get("ready"):
+            candidates = getattr(agent.evidence_service, "company_candidates", None)
+            if callable(candidates):
+                company_count = len(candidates())
+        health["company_count"] = company_count
+        return health
+
     @app.get("/", include_in_schema=False)
     def public_web():
         return FileResponse(web_directory / "index.html")
@@ -210,16 +220,12 @@ def create_app(
         result for readiness and health responses.
         """
         nonlocal startup_health
-        startup_health = _health_status(agent.evidence_service)
-        if startup_health.get("ready"):
-            candidates = getattr(agent.evidence_service, "company_candidates", None)
-            if callable(candidates):
-                candidates()
+        startup_health = validated_health_snapshot()
 
     def runtime_health() -> dict[str, Any]:
         nonlocal startup_health
         if startup_health is None:
-            startup_health = _health_status(agent.evidence_service)
+            startup_health = validated_health_snapshot()
         return dict(startup_health)
 
     def envelope(payload: Any, started: float) -> dict[str, Any]:

@@ -224,7 +224,7 @@ class AgentRuntimeTests(unittest.TestCase):
             search_database = None
             attestation = None
             corpus_revision = "test-revision"
-            company_candidates = Mock(return_value=[])
+            company_candidates = Mock(return_value=["삼성전자", "현대자동차", "테스트회사"])
 
         class FakeAgent:
             evidence_service = Service()
@@ -242,10 +242,40 @@ class AgentRuntimeTests(unittest.TestCase):
         }
         with patch("disclosure_db.api._health_status", return_value=snapshot) as health_status:
             with TestClient(create_app(FakeAgent())) as client:
-                self.assertTrue(client.get("/health").json()["ready"])
-                self.assertTrue(client.get("/health").json()["ready"])
+                self.assertEqual(client.get("/health").json()["company_count"], 3)
+                self.assertEqual(client.get("/health").json()["company_count"], 3)
         self.assertEqual(health_status.call_count, 1)
         Service.company_candidates.assert_called_once_with()
+
+    def test_degraded_health_reports_zero_companies_without_scanning_candidates(self):
+        from fastapi.testclient import TestClient
+
+        class Service:
+            base_database = Path("unused.sqlite")
+            overlay_database = None
+            search_database = None
+            attestation = None
+            corpus_revision = "test-revision"
+            company_candidates = Mock(side_effect=AssertionError("candidate scan"))
+
+        class FakeAgent:
+            evidence_service = Service()
+            provider_configured = False
+
+        snapshot = {
+            "status": "degraded",
+            "ready": False,
+            "base_attested": False,
+            "attestation_configured": True,
+            "overlay_configured": True,
+            "overlay_attested": False,
+            "search_index_configured": True,
+            "search_index_ready": False,
+        }
+        with patch("disclosure_db.api._health_status", return_value=snapshot):
+            with TestClient(create_app(FakeAgent())) as client:
+                self.assertEqual(client.get("/health").json()["company_count"], 0)
+        Service.company_candidates.assert_not_called()
 
     def test_serving_readonly_connection_uses_immutable_sqlite_uri(self):
         from disclosure_db.evidence_service import _readonly_connection
