@@ -64,8 +64,8 @@ This checklist records binary evidence without credentials or raw provider respo
 | Local corpus-wide overlay promotion | PASS_LOCAL | atomic rename promotion; new live SHA-256 `a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55`; `quick_check=ok`; FK violations `0`; base identity matched; `1,191` facts |
 | Local corpus-wide post-promotion smoke | PASS_LOCAL | root/static/health/coverage HTTP 200; Samsung FY2025 consolidated revenue `333,605,938 백만원`, filing `20260310002820`, verified with one evidence; request `9ceee5941efb4337bee91bafd07e475d` |
 | Refreshed technical proposal PDF | PASS | 12 pages; pypdf required-value checks and Poppler visual inspection passed; SHA-256 `a77d409c4f0821d9f36431c35f0cb767ae64d2834881408c1d90c39974f71c75` |
-| Corpus-wide NCP deployment | BLOCKED_EXTERNAL | original `mirae-contest-key` PEM is unavailable; no new persistent key or server authentication change was authorized, so remote code/overlay/restart/public checks were not claimed |
-| GitHub corpus-wide branch publication | BLOCKED_EXTERNAL | local commits ready; explicit approval is required before pushing to `ksm12030-sudo/mirae-asset-project`, branch `agent/disclosure-db-foundation` |
+| Corpus-wide NCP deployment | BLOCKED_EXTERNAL | authenticated console session is a subaccount; NCP rejects `서버 인증키 변경` and requires a main account. The stopped server was restored to `운영중` and the prior public UI reloaded successfully; no key or remote artifact changed |
+| GitHub corpus-wide branch publication | PASS | explicit approval received; commits `4bd23bd` through `7467e4f` pushed to `ksm12030-sudo/mirae-asset-project`, branch `agent/disclosure-db-foundation`; remote advanced `df6f64d..7467e4f` |
 
 ## Rollback path
 
@@ -73,6 +73,6 @@ The previous local live overlay is preserved at `D:\mirae-asset-project\db\agent
 
 ## Go/no-go
 
-Local deterministic and corpus-wide financial hard gates: GO. Local atomic promotion: GO. Existing prior-release public API and restart-recovery evidence: GO. Corpus-wide NCP redeployment: BLOCKED_EXTERNAL. GitHub publication: BLOCKED_EXTERNAL.
+Local deterministic and corpus-wide financial hard gates: GO. Local atomic promotion: GO. Existing prior-release public API and restart-recovery evidence: GO. GitHub publication: GO. Corpus-wide NCP redeployment: BLOCKED_EXTERNAL on a main-account session.
 
 Final contest submission: NO-GO until a rotated HyperCLOVA X credential passes the bounded schema/provider 300 gate. The public UI/`GET /answer`/restart checks, technical proposal, and API specification are complete; no external gate was relaxed.
