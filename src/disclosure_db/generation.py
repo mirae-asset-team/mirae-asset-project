@@ -23,7 +23,8 @@ def _claim_citation_ids(bundle: EvidenceBundle) -> list[str]:
     if bundle.calculation is not None:
         return _known_ids(bundle, bundle.calculation.evidence_ids)
     if bundle.financial_facts:
-        return _known_ids(bundle, bundle.financial_facts[0].get("evidence_ids", []))
+        facts = bundle.financial_facts if len(bundle.financial_facts) > 1 else bundle.financial_facts[:1]
+        return _known_ids(bundle, [evidence_id for fact in facts for evidence_id in fact.get("evidence_ids", [])])
     if bundle.event_facts:
         facts = bundle.event_facts if len(bundle.event_facts) > 1 else bundle.event_facts[:1]
         return _known_ids(
@@ -97,13 +98,33 @@ class DeterministicGenerator:
                 reason_codes=list(bundle.reason_codes) + ["claim_evidence_missing"],
             )
         numeric_values: list[str] = []
-        if bundle.calculation and bundle.calculation.value is not None:
+        aggregate_operation = str(bundle.aggregate_result.get("operation") or "")
+        if aggregate_operation in {"list_above", "rank"}:
+            companies = list(bundle.aggregate_result.get("companies", []))
+            numeric_values = [str(item.get("value_numeric")) for item in companies if item.get("value_numeric") is not None]
+            rows = ", ".join(
+                f"{index}. {item.get('listed_name')} ({item.get('fiscal_year')}년, {item.get('value_numeric')}×{item.get('scale')}, {('연결' if item.get('scope') == 'consolidated' else '별도')})"
+                for index, item in enumerate(companies, 1)
+            )
+            label = "순위" if aggregate_operation == "rank" else "기업 목록"
+            answer = f"검증된 전체 기업 기준 {label}은 {rows}입니다."
+        elif bundle.calculation and bundle.calculation.value is not None:
             numeric_values = [str(bundle.calculation.value)]
             answer = f"계산 결과는 {bundle.calculation.value} {bundle.calculation.unit or ''}입니다.".strip()
         elif bundle.financial_facts:
-            fact = bundle.financial_facts[0]
-            numeric_values = [str(fact.get("value_numeric", ""))]
-            answer = f"{fact.get('account_name_raw', '해당 항목')}은(는) {fact.get('value_numeric')} {fact.get('unit_raw') or fact.get('currency') or ''}입니다.".strip()
+            facts = list(bundle.financial_facts)
+            fact = facts[0]
+            numeric_values = [str(item.get("value_numeric", "")) for item in facts]
+            scope = "연결" if fact.get("scope") == "consolidated" else "별도" if fact.get("scope") == "separate" else "범위 미상"
+            if len(facts) > 1:
+                values = ", ".join(
+                    f"{item.get('fiscal_year') or str(item.get('period_end') or item.get('instant_date') or '')[:4]}년 {item.get('value_numeric')} {item.get('unit_raw') or item.get('currency') or ''}".strip()
+                    for item in facts
+                )
+                answer = f"{fact.get('account_name_raw', '해당 항목')} 최근 {len(facts)}개년({scope})은 {values}입니다."
+            else:
+                year = fact.get("fiscal_year") or str(fact.get("period_end") or fact.get("instant_date") or "")[:4]
+                answer = f"{year}년 {fact.get('account_name_raw', '해당 항목')}({scope})은 {fact.get('value_numeric')} {fact.get('unit_raw') or fact.get('currency') or ''}입니다.".strip()
         elif bundle.event_facts:
             facts = list(bundle.event_facts)
             fact = facts[0]

@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from disclosure_db.agent_contracts import AnswerDraft, CitationRef, EvidenceBundle, EvidenceRef, QueryPlan, VerifiedAnswer, to_jsonable
+from disclosure_db.agent_contracts import AnswerDraft, CalculationResult, CitationRef, EvidenceBundle, EvidenceRef, QueryPlan, VerifiedAnswer, to_jsonable
 from disclosure_db.agent import DisclosureAgent
 from disclosure_db.answer_verifier import verify_answer
 from disclosure_db.api import create_app
@@ -16,6 +16,129 @@ from disclosure_db.generation import DeterministicGenerator, HyperClovaGenerator
 
 
 class AgentRuntimeTests(unittest.TestCase):
+    def test_financial_api_exposes_filters_and_coverage(self) -> None:
+        from fastapi.testclient import TestClient
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite") as base, tempfile.NamedTemporaryFile(suffix=".sqlite") as overlay:
+            class ReadyService:
+                base_database = Path(base.name)
+                overlay_database = Path(overlay.name)
+                search_database = None
+                attestation = object()
+                corpus_revision = "test-revision"
+
+                def company_candidates(self):
+                    return ["삼성전자"]
+
+            class FakeAgent:
+                evidence_service = ReadyService()
+
+            with patch("disclosure_db.api._fetch_financial_facts", return_value=[{
+                "account_id": "revenue", "fiscal_year": 2025, "scope": "consolidated",
+            }]) as fetch_facts, patch("disclosure_db.api._fetch_financial_coverage", return_value={
+                "snapshot": {"source_company_count": 70},
+                "metrics": [{"account_id": "revenue", "aggregate_eligible": False}],
+                "companies": [],
+            }) as fetch_coverage:
+                client = TestClient(create_app(FakeAgent()))
+                facts = client.get("/v1/financial-facts", params={
+                    "company": "삼성전자", "account_id": "revenue", "fiscal_year": 2025,
+                    "scope": "consolidated",
+                }).json()
+                coverage = client.get("/v1/financial-coverage", params={"account_id": "revenue"}).json()
+
+        self.assertEqual(facts["facts"][0]["fiscal_year"], 2025)
+        self.assertEqual(coverage["snapshot"]["source_company_count"], 70)
+        self.assertEqual(fetch_facts.call_args.kwargs["fiscal_year"], 2025)
+        self.assertEqual(fetch_facts.call_args.kwargs["scope"], "consolidated")
+        self.assertEqual(fetch_coverage.call_args.kwargs["account_id"], "revenue")
+
+    def test_deterministic_generator_formats_three_financial_periods(self) -> None:
+        bundle = EvidenceBundle(
+            question="삼성전자 최근 3개년 매출액",
+            answerable=True,
+            evidence=[
+                EvidenceRef(f"ev-{year}", "f1", "s1", str(value))
+                for year, value in ((2025, 300), (2024, 200), (2023, 100))
+            ],
+            financial_facts=[
+                {
+                    "account_id": "revenue", "account_name_raw": "매출액",
+                    "fiscal_year": year, "scope": "consolidated", "value_numeric": str(value),
+                    "unit_raw": "원", "evidence_ids": [f"ev-{year}"],
+                }
+                for year, value in ((2025, 300), (2024, 200), (2023, 100))
+            ],
+        )
+
+        draft = DeterministicGenerator().generate(bundle)
+
+        self.assertEqual(draft.numeric_values, ["300", "200", "100"])
+        self.assertEqual(draft.citation_ids, ["ev-2025", "ev-2024", "ev-2023"])
+        self.assertIn("2025년", draft.answer)
+        self.assertIn("연결", draft.answer)
+
+    def test_verified_answer_preserves_financial_context_and_coverage(self) -> None:
+        fact = {
+            "filing_id": "f1", "account_id": "revenue", "account_name_raw": "영업수익",
+            "fiscal_year": 2025, "scope": "consolidated", "value_numeric": "100",
+            "scale": 1_000_000, "unit_raw": "백만원", "evidence_ids": ["ev1"],
+        }
+        coverage = {"snapshot": {"source_company_count": 70}, "metrics": []}
+        aggregate_result = {"operation": "count_above", "company_count": 1}
+        bundle = EvidenceBundle(
+            question="매출액 10억 넘는 기업은 몇 개야?",
+            evidence=[EvidenceRef("ev1", "f1", "s1", "100")],
+            answerable=True,
+            financial_facts=[fact],
+            coverage=coverage,
+            aggregate_result=aggregate_result,
+            calculation=calculate("lookup", [1], unit="개", evidence_ids=["ev1"]),
+        )
+
+        verified = verify_answer(bundle, AnswerDraft("1개입니다.", ["ev1"], ["1"], True))
+
+        self.assertTrue(verified.verified)
+        self.assertEqual(verified.financial_facts[0]["account_name_raw"], "영업수익")
+        self.assertEqual(verified.coverage["snapshot"]["source_company_count"], 70)
+        self.assertEqual(verified.aggregate_result["company_count"], 1)
+
+    def test_corpus_count_answer_does_not_depend_on_provider(self) -> None:
+        fact = {"value_numeric": "200", "scale": 1, "evidence_ids": ["ev1"]}
+        bundle = EvidenceBundle(
+            question="영업이익 10억 넘는 기업은 몇 개야?",
+            evidence=[EvidenceRef("ev1", "f1", "s1", "200")],
+            answerable=True,
+            financial_facts=[fact],
+            calculation=CalculationResult(
+                operation="count_above", value=Decimal(1), unit="개",
+                evidence_ids=["ev1"], operands=[Decimal(200)],
+            ),
+            coverage={"snapshot": {"source_company_count": 1}},
+            aggregate_result={"operation": "count_above", "company_count": 1, "companies": []},
+        )
+
+        class Service:
+            base_database = Path("unused.sqlite")
+            overlay_database = None
+            search_database = None
+            attestation = None
+
+            def company_candidates(self):
+                return []
+
+            def search(self, plan, limit=20):
+                return bundle
+
+        class ProviderMustNotRun:
+            def generate(self, bundle):
+                raise AssertionError("provider called for deterministic aggregate")
+
+        answer = DisclosureAgent(evidence_service=Service(), generator=ProviderMustNotRun()).answer(bundle.question)
+
+        self.assertTrue(answer.verified)
+        self.assertEqual(answer.numeric_values, ["1"])
+        self.assertEqual(answer.coverage["snapshot"]["source_company_count"], 1)
     def test_contest_query_echoes_question_id_and_maps_citations(self):
         from fastapi.testclient import TestClient
 

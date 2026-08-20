@@ -6,12 +6,13 @@ import json
 import os
 import sqlite3
 from contextlib import closing
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable
 
 from .attestation import CorpusAttestation, verify_fast_identity
-from .agent_contracts import EvidenceBundle, EvidenceRef, QueryPlan
-from .financial_overlay import fetch_event_facts, fetch_overlay_facts, overlay_matches_base
+from .agent_contracts import CalculationResult, EvidenceBundle, EvidenceRef, QueryPlan
+from .financial_overlay import fetch_event_facts, fetch_financial_coverage, fetch_overlay_facts, overlay_matches_base
 from .pipeline import query_database
 from .retrieval_evaluation import compile_retrieval_query, retrieval_tokens
 from .reranker import ClovaReranker
@@ -210,6 +211,8 @@ class EvidenceService:
                 answerable=False,
                 reason_codes=list(plan.reason_codes),
             )
+        if plan.operation in {"count_above", "list_above", "rank"}:
+            return self._search_corpus_financial(plan)
         refs: list[EvidenceRef] = []
         financial_facts: list[dict[str, object]] = []
         event_facts: list[dict[str, object]] = []
@@ -245,11 +248,12 @@ class EvidenceService:
                 period_end=plan.period_end if exact_duration else None,
                 period_end_lte=period_end_lte,
                 instant_date=instant_date,
-                account_terms=account_terms,
-                statement_type=plan.statement_type,
+                account_id=plan.account_id,
+                account_terms=[] if plan.account_id else account_terms,
+                statement_type=None if plan.account_id else plan.statement_type,
                 scope=plan.scope,
                 correction_policy=plan.correction_policy,
-                limit=limit,
+                limit=min(limit, max(plan.latest_period_count, 2 if plan.operation in {"growth_rate", "difference", "ratio"} else 1)),
                 attestation=self.attestation,
             )
             financial_facts, structured_refs = self._hydrate_facts(
@@ -393,6 +397,122 @@ class EvidenceService:
             financial_facts=financial_facts,
             event_facts=event_facts,
             retrieval_diagnostics=retrieval_diagnostics,
+        )
+
+    def _search_corpus_financial(self, plan: QueryPlan) -> EvidenceBundle:
+        reasons = list(plan.reason_codes)
+        if (
+            self.overlay_database is None
+            or not self.overlay_database.exists()
+            or self.attestation is None
+            or not overlay_matches_base(self.base_database, self.overlay_database, attestation=self.attestation)
+            or plan.account_id is None
+            or (plan.operation in {"count_above", "list_above"} and plan.threshold_value is None)
+        ):
+            reasons.append("financial_coverage_not_available")
+            return EvidenceBundle(question=plan.question, answerable=False, reason_codes=reasons)
+        coverage = fetch_financial_coverage(
+            self.base_database,
+            self.overlay_database,
+            account_id=plan.account_id,
+            attestation=self.attestation,
+        )
+        metrics = list(coverage.get("metrics", [])) if coverage else []  # type: ignore[arg-type]
+        metric = metrics[0] if len(metrics) == 1 else None
+        if not metric or not bool(metric.get("aggregate_eligible")):
+            reasons.append("corpus_wide_financial_coverage_incomplete")
+            return EvidenceBundle(
+                question=plan.question,
+                answerable=False,
+                reason_codes=reasons,
+                coverage=coverage,
+            )
+        source_count = int(coverage["snapshot"]["source_company_count"])  # type: ignore[index]
+        facts = fetch_overlay_facts(
+            self.base_database,
+            self.overlay_database,
+            account_id=plan.account_id,
+            limit=max(source_count * 3, source_count),
+            attestation=self.attestation,
+        )
+        latest_by_company: dict[str, dict[str, object]] = {}
+        for fact in facts:
+            corp_code = str(fact.get("issuer_corp_code") or "")
+            if corp_code and corp_code not in latest_by_company:
+                latest_by_company[corp_code] = fact
+        if len(latest_by_company) != source_count:
+            reasons.append("corpus_wide_financial_runtime_count_mismatch")
+            return EvidenceBundle(question=plan.question, answerable=False, reason_codes=reasons, coverage=coverage)
+        latest = list(latest_by_company.values())
+        hydrated_facts, refs = self._hydrate_facts(latest)
+        if len(hydrated_facts) != source_count:
+            reasons.append("corpus_wide_financial_evidence_incomplete")
+            return EvidenceBundle(question=plan.question, answerable=False, reason_codes=reasons, coverage=coverage)
+        normalized: list[tuple[dict[str, object], Decimal]] = []
+        try:
+            for fact in hydrated_facts:
+                value = Decimal(str(fact["value_numeric"])) * Decimal(int(fact.get("scale") or 1))
+                if not value.is_finite():
+                    raise InvalidOperation
+                normalized.append((fact, value))
+        except (InvalidOperation, KeyError, TypeError, ValueError):
+            reasons.append("corpus_wide_financial_value_invalid")
+            return EvidenceBundle(question=plan.question, answerable=False, reason_codes=reasons, coverage=coverage)
+        threshold = plan.threshold_value
+        matches = sorted(
+            (
+                (fact, value)
+                for fact, value in normalized
+                if threshold is None
+                or value > threshold
+                or (plan.threshold_inclusive and value == threshold)
+            ),
+            key=lambda item: (-item[1], str(item[0].get("listed_name") or item[0].get("issuer_name") or "")),
+        )
+        selected = matches[:plan.top_n] if plan.operation == "rank" else matches
+        unique_refs: list[EvidenceRef] = []
+        seen: set[str] = set()
+        for ref in refs:
+            if ref.evidence_id not in seen:
+                seen.add(ref.evidence_id)
+                unique_refs.append(ref)
+        evidence_ids = [ref.evidence_id for ref in unique_refs]
+        calculation = None
+        if plan.operation == "count_above":
+            calculation = CalculationResult(
+                operation="count_above",
+                value=Decimal(len(matches)),
+                unit="개",
+                evidence_ids=evidence_ids,
+                operands=[value for _, value in normalized],
+            )
+        aggregate_result = {
+            "operation": plan.operation,
+            "account_id": plan.account_id,
+            "threshold_value": str(plan.threshold_value) if plan.threshold_value is not None else None,
+            "company_count": len(selected),
+            "companies": [
+                {
+                    "issuer_corp_code": fact.get("issuer_corp_code"),
+                    "listed_name": fact.get("listed_name") or fact.get("issuer_name"),
+                    "fiscal_year": fact.get("fiscal_year"),
+                    "value_numeric": fact.get("value_numeric"),
+                    "scale": fact.get("scale"),
+                    "scope": fact.get("scope"),
+                    "filing_id": fact.get("filing_id"),
+                }
+                for fact, _ in selected
+            ],
+        }
+        return EvidenceBundle(
+            question=plan.question,
+            evidence=unique_refs,
+            answerable=True,
+            reason_codes=reasons,
+            financial_facts=hydrated_facts,
+            calculation=calculation,
+            coverage=coverage,
+            aggregate_result=aggregate_result,
         )
 
     def _hydrate_facts(

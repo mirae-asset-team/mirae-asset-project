@@ -939,6 +939,7 @@ def fetch_overlay_facts(
     period_end: str | None = None,
     period_end_lte: str | None = None,
     instant_date: str | None = None,
+    fiscal_year: int | None = None,
     limit: int = 100,
     attestation: CorpusAttestation | None = None,
 ) -> list[dict[str, object]]:
@@ -992,6 +993,9 @@ def fetch_overlay_facts(
     if instant_date is not None:
         where.append("ff.instant_date=?")
         params.append(instant_date)
+    if fiscal_year is not None:
+        where.append("CAST(substr(COALESCE(ff.period_end,ff.instant_date),1,4) AS INTEGER)=?")
+        params.append(fiscal_year)
     if correction_policy == "corrected":
         where.append("f.is_correction=1")
     params.append(limit)
@@ -1001,7 +1005,7 @@ def fetch_overlay_facts(
         connection.execute("PRAGMA query_only=ON")
         connection.execute("ATTACH DATABASE ? AS overlay", (str(Path(overlay_database).resolve()),))
         rows = connection.execute(
-            f"""SELECT ff.*,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,
+            f"""SELECT ff.*,f.issuer_corp_code,f.stock_code,f.listed_name,f.issuer_name,{reporter_select},f.report_name_raw,f.filed_at,
                        v.lineage_status,v.is_current,s.detected_format,s.coverage_json,
                        group_concat(DISTINCT ffe.evidence_id) evidence_ids,
                        json_group_array(DISTINCT c.text_raw) evidence_texts
@@ -1012,7 +1016,11 @@ def fetch_overlay_facts(
                   JOIN main.table_cell c ON c.evidence_id=ffe.evidence_id
                   JOIN main.source_document s ON s.source_id=c.source_id
                  WHERE {' AND '.join(where)}
-                 GROUP BY ff.financial_fact_id ORDER BY ff.financial_fact_id LIMIT ?""",
+                 GROUP BY ff.financial_fact_id
+                 ORDER BY COALESCE(ff.period_end,ff.instant_date) DESC,
+                          CASE ff.scope WHEN 'consolidated' THEN 0 WHEN 'separate' THEN 1 ELSE 2 END,
+                          ff.financial_fact_id
+                 LIMIT ?""",
             params,
         ).fetchall()
     result: list[dict[str, object]] = []
@@ -1025,8 +1033,54 @@ def fetch_overlay_facts(
             item["evidence_texts"] = json.loads(str(item.get("evidence_texts") or "[]"))
         except json.JSONDecodeError:
             item["evidence_texts"] = []
+        period_date = str(item.get("period_end") or item.get("instant_date") or "")
+        item["fiscal_year"] = int(period_date[:4]) if re.fullmatch(r"\d{4}-\d{2}-\d{2}", period_date) else None
         result.append(item)
     return result
+
+
+def fetch_financial_coverage(
+    base_database: Path,
+    overlay_database: Path,
+    *,
+    account_id: str | None = None,
+    attestation: CorpusAttestation | None = None,
+) -> dict[str, object]:
+    """Return the attested coverage snapshot used to gate corpus-wide queries."""
+    if not Path(overlay_database).exists() or not overlay_matches_base(
+        Path(base_database), Path(overlay_database), attestation=attestation,
+    ):
+        return {}
+    with closing(sqlite3.connect(f"file:{Path(overlay_database).resolve().as_posix()}?mode=ro&immutable=1", uri=True)) as connection:
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+        snapshot_row = connection.execute("SELECT * FROM financial_coverage_snapshot LIMIT 1").fetchone()
+        if snapshot_row is None:
+            return {}
+        metric_sql = "SELECT * FROM financial_metric_coverage"
+        metric_params: tuple[object, ...] = ()
+        if account_id is not None:
+            metric_sql += " WHERE account_id=?"
+            metric_params = (account_id,)
+        metric_rows = connection.execute(metric_sql + " ORDER BY account_id", metric_params).fetchall()
+        company_rows = connection.execute(
+            "SELECT * FROM financial_company_coverage ORDER BY listed_name,issuer_corp_code"
+        ).fetchall()
+    snapshot = dict(snapshot_row)
+    snapshot["aggregate_hard_gate_passed"] = bool(snapshot["aggregate_hard_gate_passed"])
+    metrics: list[dict[str, object]] = []
+    for row in metric_rows:
+        item = dict(row)
+        item["aggregate_eligible"] = bool(item["aggregate_eligible"])
+        item["three_period_aggregate_eligible"] = bool(item["three_period_aggregate_eligible"])
+        item["missing_companies"] = json.loads(str(item.pop("missing_companies_json")))
+        metrics.append(item)
+    companies: list[dict[str, object]] = []
+    for row in company_rows:
+        item = dict(row)
+        item["missing"] = json.loads(str(item.pop("missing_json")))
+        companies.append(item)
+    return {"snapshot": snapshot, "metrics": metrics, "companies": companies}
 
 
 def fetch_event_facts(

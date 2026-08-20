@@ -81,3 +81,10 @@ Each implementation task records its RED failure, GREEN verification, full regre
 - Coverage is independently reconciled against the admitted seed and immutable base before the temporary SQLite file is created. Trust tiers are preserved; only the original explicit `human_validated` legacy seed receives compatibility mapping to `human_verified`.
 - The staged candidate has 1,191 financial and 1,423 event facts, passes SQLite quick/FK checks, has no duplicate financial grain, and has no missing or cross-filing evidence. A repeat build produced the same semantic digest after excluding creation time and random reject build ID.
 - Task 5 does not promote or deploy the candidate. Promotion remains a recoverable rename operation after Task 6-8 query, API, evaluation, concurrency, and public smoke gates pass.
+
+## Task 6 measured query/API boundary
+
+- Canonical metric planning now decouples user wording from raw disclosure labels. Latest annual lookup returns one descending-period row; an explicit recent-three-year request returns all three comparative rows from the same selected current filing.
+- Detailed responses expose the admitted financial facts and attested coverage used for the decision. Public financial-fact and coverage endpoints support canonical account, fiscal year, and scope without changing the official contest `/answer` schema.
+- Corpus-wide count, list, and rank operations share one coverage-first path. They reconstruct the legal-company denominator from the overlay snapshot, apply unit scale with Decimal, and fail closed before fetching values when the metric is incomplete. HyperCLOVA is bypassed for these structured aggregates.
+- The primary Samsung regression now passes against the staging overlay. Corpus-wide operating-income aggregation remains intentionally unavailable at 67/70; this is a data-completeness result, not a query limitation or reduced gate.

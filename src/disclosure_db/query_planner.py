@@ -4,8 +4,35 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from decimal import Decimal
 
 from .agent_contracts import QueryPlan
+
+
+_ACCOUNT_ALIASES = {
+    "revenue": ("매출액", "매출", "영업수익"),
+    "operating_income": ("영업이익", "영업손익"),
+    "net_income": ("당기순이익", "당기순손익", "순이익"),
+    "total_assets": ("자산총계", "자산 합계"),
+    "total_liabilities": ("부채총계", "부채 합계"),
+    "total_equity": ("자본총계", "자본 합계"),
+}
+
+
+def _financial_account(text: str) -> tuple[str | None, list[str]]:
+    for account_id, aliases in _ACCOUNT_ALIASES.items():
+        matched = [alias for alias in aliases if alias in text]
+        if matched:
+            return account_id, matched
+    return None, []
+
+
+def _threshold_krw(text: str) -> Decimal | None:
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(조|억|만)?\s*(?:원)?\s*(?:넘|초과|이상)", text)
+    if not match:
+        return None
+    multipliers = {None: Decimal(1), "만": Decimal(10_000), "억": Decimal(100_000_000), "조": Decimal(1_000_000_000_000)}
+    return Decimal(match.group(1)) * multipliers[match.group(2)]
 
 
 def _resolve_company(question: str, candidates: Iterable[str]) -> str | None:
@@ -53,7 +80,21 @@ def plan_query(
             period_start = f"{year_match.group(1)}-01-01"
             period_end = f"{year_match.group(1)}-12-31"
             reason_codes.append("explicit_year")
-    if "증가율" in text or "성장률" in text or "증감률" in text:
+    account_id, account_terms = _financial_account(text)
+    threshold_value = _threshold_krw(text)
+    asks_company_universe = any(term in text for term in ("기업", "회사"))
+    asks_company_count = any(
+        term in text for term in ("몇 개", "몇개", "몇 곳", "몇곳", "기업 수", "기업수", "회사 수", "회사수")
+    )
+    asks_company_list = any(term in text for term in ("목록", "어떤 기업", "어느 기업", "어떤 회사", "어느 회사"))
+    asks_rank = any(term in text for term in ("순위", "랭킹", "상위", "하위"))
+    if account_id and company is None and asks_company_universe and asks_rank:
+        operation = "rank"
+    elif account_id and threshold_value is not None and asks_company_universe and asks_company_count:
+        operation = "count_above"
+    elif account_id and threshold_value is not None and asks_company_universe and asks_company_list:
+        operation = "list_above"
+    elif "증가율" in text or "성장률" in text or "증감률" in text:
         operation = "growth_rate"
     elif "차이" in text or "증감액" in text:
         operation = "difference"
@@ -69,10 +110,8 @@ def plan_query(
         correction_policy = "both"
     elif "정정" in text:
         correction_policy = "corrected"
-    account_terms = []
-    for term in ("매출액", "영업이익", "당기순이익", "자산총계", "부채총계", "자본총계", "현금및현금성자산"):
-        if term in text:
-            account_terms.append(term)
+    if "현금및현금성자산" in text:
+        account_terms.append("현금및현금성자산")
     statement_type = "IS" if any(term in text for term in ("매출", "영업이익", "순이익")) else (
         "BS" if any(term in text for term in ("자산", "부채", "자본", "현금및현금성자산")) else None
     )
@@ -122,15 +161,14 @@ def plan_query(
         target_periods.append({"period_type": "instant", "start": None, "end": None, "instant": instant_date})
     elif period_start or period_end:
         target_periods.append({"period_type": "duration", "start": period_start, "end": period_end, "instant": None})
-    requires_complete = operation in {"growth_rate", "difference", "ratio", "sum"}
-    asks_company_universe = any(term in text for term in ("기업", "회사"))
-    asks_company_count = any(
-        term in text for term in ("몇 개", "몇개", "몇 곳", "몇곳", "기업 수", "기업수", "회사 수", "회사수")
-    )
-    if account_terms and company is None and asks_company_universe and asks_company_count:
+    latest_period_count = 3 if re.search(r"(?:최근\s*)?3\s*개?년", text) or "3개년" in text else 1
+    requires_complete = operation in {"growth_rate", "difference", "ratio", "sum", "count_above", "list_above", "rank"}
+    if account_terms and company is None and asks_company_universe and operation in {"count_above", "list_above", "rank"}:
         reason_codes.append("corpus_wide_financial_coverage_required")
-    if company is None:
+    if company is None and operation not in {"count_above", "list_above", "rank"}:
         reason_codes.append("company_unresolved")
+    top_match = re.search(r"(?:상위|하위)?\s*(\d+)\s*개", text)
+    top_n = max(1, min(int(top_match.group(1)), 70)) if top_match else 10
     return QueryPlan(
         question=text, company=company, as_of=resolved_as_of, as_of_source=as_of_source,
         period_start=period_start,
@@ -140,4 +178,9 @@ def plan_query(
         reason_codes=reason_codes, fact_domain=fact_domain, predicate_terms=event_terms,
         target_periods=target_periods, requires_complete_evidence_set=requires_complete,
         filing_date=filing_date,
+        account_id=account_id,
+        latest_period_count=latest_period_count,
+        threshold_value=threshold_value,
+        threshold_inclusive="이상" in text,
+        top_n=top_n,
     )

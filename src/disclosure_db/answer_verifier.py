@@ -25,6 +25,8 @@ def _canonical_failure(
     citations: list[CitationRef],
     reason_codes: list[str],
     calculation: CalculationResult | None,
+    coverage: dict,
+    aggregate_result: dict,
 ) -> VerifiedAnswer:
     """Build the one safe shape used by every failed or unanswerable result."""
     return VerifiedAnswer(
@@ -36,6 +38,8 @@ def _canonical_failure(
         numeric_values=[],
         citations=citations,
         calculation=calculation,
+        coverage=coverage,
+        aggregate_result=aggregate_result,
     )
 
 
@@ -153,6 +157,8 @@ def verify_answer(bundle: EvidenceBundle, draft: AnswerDraft) -> VerifiedAnswer:
             citations=citations,
             reason_codes=stable_reasons,
             calculation=bundle.calculation,
+            coverage=dict(bundle.coverage),
+            aggregate_result=dict(bundle.aggregate_result),
         )
     return VerifiedAnswer(
         answer=draft.answer,
@@ -163,4 +169,7 @@ def verify_answer(bundle: EvidenceBundle, draft: AnswerDraft) -> VerifiedAnswer:
         numeric_values=list(draft.numeric_values),
         citations=citations,
         calculation=bundle.calculation,
+        financial_facts=[dict(fact) for fact in bundle.financial_facts],
+        coverage=dict(bundle.coverage),
+        aggregate_result=dict(bundle.aggregate_result),
     )

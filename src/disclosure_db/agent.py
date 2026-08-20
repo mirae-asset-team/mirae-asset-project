@@ -95,12 +95,15 @@ class DisclosureAgent:
         if query_plan.operation in {"growth_rate", "difference", "ratio", "sum"} and bundle.calculation is None:
             bundle.answerable = False
             bundle.reason_codes.append("calculation_required")
-        draft = self.generator.generate(bundle)  # type: ignore[union-attr]
+        if query_plan.operation in {"count_above", "list_above", "rank"}:
+            draft = DeterministicGenerator().generate(bundle)
+        else:
+            draft = self.generator.generate(bundle)  # type: ignore[union-attr]
         return verify_answer(bundle, draft)
 
     @staticmethod
     def _attach_calculation(bundle, operation: str) -> None:
-        if operation == "lookup" or len(bundle.financial_facts) < 2:
+        if bundle.calculation is not None or operation in {"lookup", "count_above", "list_above", "rank"} or len(bundle.financial_facts) < 2:
             return
         first = bundle.financial_facts[0]
         grain = tuple(first.get(key) for key in ("account_name_raw", "statement_type", "scope", "period_type"))

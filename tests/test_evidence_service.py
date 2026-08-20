@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from disclosure_db.attestation import load_distribution_attestation
-from disclosure_db.agent_contracts import QueryPlan
+from disclosure_db.agent_contracts import EvidenceRef, QueryPlan
 from disclosure_db.reranker import RerankResult
 from disclosure_db.schema import create_schema, create_indexes
 from disclosure_db.evidence_service import EvidenceService
@@ -274,7 +274,100 @@ class EvidenceServiceTests(unittest.TestCase):
                 self.assertEqual(plan.fact_domain, "financial")
                 self.assertIsNone(plan.company)
                 self.assertIn("corpus_wide_financial_coverage_required", plan.reason_codes)
-                self.assertIn("company_unresolved", plan.reason_codes)
+                self.assertNotIn("company_unresolved", plan.reason_codes)
+
+    def test_query_planner_normalizes_metric_latest_periods_and_threshold(self) -> None:
+        latest = plan_query(
+            "삼성전자의 최근 사업보고서 기준 매출액을 알려줘",
+            company_candidates=["삼성전자"],
+        )
+        history = plan_query(
+            "삼성전자 최근 3개년 영업이익을 비교해줘",
+            company_candidates=["삼성전자"],
+        )
+        aggregate = plan_query(
+            "영업이익 10억 넘는 기업은 몇 개야?",
+            company_candidates=["삼성전자", "현대자동차"],
+        )
+
+        self.assertEqual(latest.account_id, "revenue")
+        self.assertEqual(latest.latest_period_count, 1)
+        self.assertEqual(history.account_id, "operating_income")
+        self.assertEqual(history.latest_period_count, 3)
+        self.assertEqual(aggregate.operation, "count_above")
+        self.assertEqual(str(aggregate.threshold_value), "1000000000")
+        self.assertNotIn("company_unresolved", aggregate.reason_codes)
+
+        company_list = plan_query("매출액 1조 이상 기업 목록", company_candidates=[])
+        ranking = plan_query("영업이익 상위 5개 기업 순위", company_candidates=[])
+        self.assertEqual(company_list.operation, "list_above")
+        self.assertEqual(ranking.operation, "rank")
+        self.assertEqual(ranking.top_n, 5)
+        self.assertNotIn("company_unresolved", ranking.reason_codes)
+
+    def test_corpus_aggregate_refuses_incomplete_metric_coverage(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "overlay.sqlite"
+            base.touch()
+            overlay.touch()
+            service = EvidenceService(base, overlay, attestation=Mock())
+            plan = plan_query("영업이익 10억 넘는 기업은 몇 개야?", company_candidates=[])
+            coverage = {
+                "snapshot": {"source_company_count": 70},
+                "metrics": [{
+                    "account_id": "operating_income", "aggregate_eligible": False,
+                    "latest_validated_company_count": 67,
+                    "missing_companies": ["KB금융", "하나금융지주", "한화솔루션"],
+                }],
+                "companies": [],
+            }
+            with patch.object(service, "_base_identity_valid", return_value=True), patch(
+                "disclosure_db.evidence_service.overlay_matches_base", return_value=True,
+            ), patch("disclosure_db.evidence_service.fetch_financial_coverage", return_value=coverage), patch(
+                "disclosure_db.evidence_service.fetch_overlay_facts"
+            ) as fetch_facts:
+                bundle = service.search(plan)
+
+        self.assertFalse(bundle.answerable)
+        self.assertIn("corpus_wide_financial_coverage_incomplete", bundle.reason_codes)
+        self.assertEqual(bundle.coverage["metrics"][0]["latest_validated_company_count"], 67)
+        fetch_facts.assert_not_called()
+
+    def test_corpus_count_above_uses_complete_latest_metric_and_scale(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "overlay.sqlite"
+            base.touch()
+            overlay.touch()
+            service = EvidenceService(base, overlay, attestation=Mock())
+            plan = plan_query("영업이익 10억 넘는 기업은 몇 개야?", company_candidates=[])
+            coverage = {
+                "snapshot": {"source_company_count": 2},
+                "metrics": [{
+                    "account_id": "operating_income", "aggregate_eligible": True,
+                    "latest_validated_company_count": 2, "missing_companies": [],
+                }],
+                "companies": [],
+            }
+            facts = [
+                {"issuer_corp_code": "1", "listed_name": "A", "fiscal_year": 2025,
+                 "value_numeric": "900", "scale": 1_000_000, "evidence_ids": ["ev-a"]},
+                {"issuer_corp_code": "2", "listed_name": "B", "fiscal_year": 2025,
+                 "value_numeric": "11", "scale": 100_000_000, "evidence_ids": ["ev-b"]},
+            ]
+            refs = [EvidenceRef("ev-a", "f-a", "s-a", "900"), EvidenceRef("ev-b", "f-b", "s-b", "11")]
+            with patch.object(service, "_base_identity_valid", return_value=True), patch(
+                "disclosure_db.evidence_service.overlay_matches_base", return_value=True,
+            ), patch("disclosure_db.evidence_service.fetch_financial_coverage", return_value=coverage), patch(
+                "disclosure_db.evidence_service.fetch_overlay_facts", return_value=facts,
+            ), patch.object(service, "_hydrate_facts", return_value=(facts, refs)):
+                bundle = service.search(plan)
+
+        self.assertTrue(bundle.answerable)
+        self.assertEqual(bundle.calculation.value, 1)
+        self.assertEqual(bundle.aggregate_result["companies"][0]["listed_name"], "B")
+        self.assertEqual(len(bundle.financial_facts), 2)
 
     def test_insider_purchase_question_abstains_without_audited_event_fact(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

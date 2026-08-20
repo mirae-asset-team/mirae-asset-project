@@ -34,6 +34,8 @@ def _fetch_financial_facts(
     filing_id: str | None = None,
     company: str | None = None,
     account_id: str | None = None,
+    fiscal_year: int | None = None,
+    scope: str | None = None,
     as_of: str | None = None,
     limit: int = 100,
 ) -> list[dict[str, object]]:
@@ -46,8 +48,22 @@ def _fetch_financial_facts(
         filing_id=filing_id,
         company=company,
         account_id=account_id,
+        fiscal_year=fiscal_year,
+        scope=scope,
         as_of=as_of,
         limit=limit,
+        attestation=getattr(service, "attestation", None),
+    )
+
+
+def _fetch_financial_coverage(service: Any, *, account_id: str | None = None) -> dict[str, object]:
+    if not getattr(service, "overlay_database", None) or getattr(service, "attestation", None) is None:
+        return {}
+    from .financial_overlay import fetch_financial_coverage
+    return fetch_financial_coverage(
+        service.base_database,
+        service.overlay_database,
+        account_id=account_id,
         attestation=getattr(service, "attestation", None),
     )
 
@@ -332,8 +348,17 @@ def create_app(
         plan = plan_query(request.question, company_candidates=agent.evidence_service.company_candidates(), company_hint=request.company, as_of=request.as_of)
         return envelope(agent.evidence_service.search(plan, limit=request.limit), started)
 
+    @app.get("/financial-facts", include_in_schema=False)
     @app.get("/v1/financial-facts")
-    def financial_facts(filing_id: str | None = None, company: str | None = None, account_id: str | None = None, as_of: str | None = None, limit: int = Query(default=100, ge=1, le=100)) -> dict[str, Any]:
+    def financial_facts(
+        filing_id: str | None = None,
+        company: str | None = None,
+        account_id: str | None = None,
+        fiscal_year: int | None = Query(default=None, ge=1900, le=2200),
+        scope: str | None = Query(default=None, pattern=r"^(consolidated|separate|unknown)$"),
+        as_of: str | None = None,
+        limit: int = Query(default=100, ge=1, le=100),
+    ) -> dict[str, Any]:
         started = perf_counter()
         service = agent.evidence_service
         if not getattr(service, "overlay_database", None):
@@ -343,10 +368,24 @@ def create_app(
             filing_id=filing_id,
             company=company,
             account_id=account_id,
+            fiscal_year=fiscal_year,
+            scope=scope,
             as_of=as_of,
             limit=limit,
         )
         return envelope({"facts": facts}, started)
+
+    @app.get("/financial-coverage", include_in_schema=False)
+    @app.get("/v1/financial-coverage")
+    def financial_coverage(account_id: str | None = None) -> dict[str, Any]:
+        started = perf_counter()
+        service = agent.evidence_service
+        if not getattr(service, "overlay_database", None):
+            return envelope({"snapshot": {}, "metrics": [], "companies": [], "reason": "overlay_not_configured"}, started)
+        coverage = _fetch_financial_coverage(service, account_id=account_id)
+        if not coverage:
+            return envelope({"snapshot": {}, "metrics": [], "companies": [], "reason": "coverage_not_available"}, started)
+        return envelope(coverage, started)
 
     @app.get("/v1/event-facts")
     def event_facts(

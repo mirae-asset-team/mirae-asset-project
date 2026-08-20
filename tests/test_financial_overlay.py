@@ -16,6 +16,7 @@ from disclosure_db.financial_overlay import (
     FinancialOverlay,
     build_agent_overlay,
     fetch_event_facts,
+    fetch_financial_coverage,
     import_seed,
     fetch_overlay_facts,
     overlay_matches_base,
@@ -161,6 +162,50 @@ def seed_composite_event_base(path: Path, *, ambiguous: bool = False) -> str:
 
 
 class FinancialOverlayTests(unittest.TestCase):
+    def test_financial_fact_fetch_orders_latest_and_filters_fiscal_year(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay, seed = root / "base.sqlite", root / "overlay.sqlite", root / "seed.jsonl"
+            seed_base(base)
+            rows = []
+            for year, value in ((2021, "800"), (2023, "1000"), (2022, "900")):
+                row = financial_seed_row()
+                row.update({
+                    "financial_fact_id": f"ff-{year}", "fiscal_year": year,
+                    "period_start": f"{year}-01-01", "period_end": f"{year}-12-31",
+                    "value_numeric": value,
+                })
+                rows.append(row)
+            seed.write_text("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows), encoding="utf-8")
+            import_seed(base, overlay, seed)
+
+            latest_first = fetch_overlay_facts(base, overlay, company="테스트", account_id="revenue")
+            only_2022 = fetch_overlay_facts(
+                base, overlay, company="테스트", account_id="revenue", fiscal_year=2022,
+            )
+
+            self.assertEqual([row["fiscal_year"] for row in latest_first], [2023, 2022, 2021])
+            self.assertEqual([row["value_numeric"] for row in only_2022], ["900"])
+            self.assertEqual(only_2022[0]["scope"], "consolidated")
+
+    def test_financial_coverage_reader_returns_metric_and_rejected_company(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates, coverage_path = root / "seed.jsonl", root / "predicates.json", root / "coverage.json"
+            seed_base(base)
+            seed.write_text(json.dumps(financial_seed_row(), ensure_ascii=False) + "\n", encoding="utf-8")
+            predicates.write_text('{"predicates": []}\n', encoding="utf-8")
+            coverage = financial_coverage(source_sha256=hashlib.sha256(base.read_bytes()).hexdigest())
+            coverage_path.write_text(json.dumps(coverage, ensure_ascii=False), encoding="utf-8")
+            build_agent_overlay(base, overlay, seed, predicates, financial_coverage=coverage_path)
+
+            result = fetch_financial_coverage(base, overlay, account_id="revenue")
+
+            self.assertEqual(result["snapshot"]["source_company_count"], 1)
+            self.assertEqual(result["metrics"][0]["account_id"], "revenue")
+            self.assertEqual(result["companies"][0]["listed_name"], "테스트")
+
     def test_agent_audited_financial_seed_preserves_trust_tier(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

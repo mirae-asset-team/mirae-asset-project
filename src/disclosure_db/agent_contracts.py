@@ -38,6 +38,11 @@ class QueryPlan:
     target_periods: list[dict[str, str | None]] = field(default_factory=list)
     requires_complete_evidence_set: bool = False
     filing_date: str | None = None
+    account_id: str | None = None
+    latest_period_count: int = 1
+    threshold_value: Decimal | None = None
+    threshold_inclusive: bool = False
+    top_n: int = 10
 
 
 @dataclass(slots=True)
@@ -65,6 +70,8 @@ class EvidenceBundle:
     event_facts: list[dict[str, Any]] = field(default_factory=list)
     retrieval_diagnostics: dict[str, Any] = field(default_factory=dict)
     calculation: "CalculationResult | None" = None
+    coverage: dict[str, Any] = field(default_factory=dict)
+    aggregate_result: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -96,6 +103,9 @@ class VerifiedAnswer:
     numeric_values: list[str] = field(default_factory=list)
     citations: list[CitationRef] = field(default_factory=list)
     calculation: "CalculationResult | None" = None
+    financial_facts: list[dict[str, Any]] = field(default_factory=list)
+    coverage: dict[str, Any] = field(default_factory=dict)
+    aggregate_result: dict[str, Any] = field(default_factory=dict)
 
 
 def to_jsonable(value: Any) -> Any:
