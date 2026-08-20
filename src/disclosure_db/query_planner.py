@@ -123,6 +123,12 @@ def plan_query(
     elif period_start or period_end:
         target_periods.append({"period_type": "duration", "start": period_start, "end": period_end, "instant": None})
     requires_complete = operation in {"growth_rate", "difference", "ratio", "sum"}
+    asks_company_universe = any(term in text for term in ("기업", "회사"))
+    asks_company_count = any(
+        term in text for term in ("몇 개", "몇개", "몇 곳", "몇곳", "기업 수", "기업수", "회사 수", "회사수")
+    )
+    if account_terms and company is None and asks_company_universe and asks_company_count:
+        reason_codes.append("corpus_wide_financial_coverage_required")
     if company is None:
         reason_codes.append("company_unresolved")
     return QueryPlan(

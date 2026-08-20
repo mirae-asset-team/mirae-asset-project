@@ -264,6 +264,18 @@ class EvidenceServiceTests(unittest.TestCase):
         self.assertEqual(plan.fact_domain, "event")
         self.assertIn("내부자매수", plan.predicate_terms)
 
+    def test_query_planner_marks_corpus_wide_financial_counts_as_incomplete(self) -> None:
+        for question in (
+            "영업이익 10억 넘는 기업은 몇 개야?",
+            "매출액 1조 이상 회사 수",
+        ):
+            with self.subTest(question=question):
+                plan = plan_query(question, company_candidates=["삼성전자", "현대자동차"])
+                self.assertEqual(plan.fact_domain, "financial")
+                self.assertIsNone(plan.company)
+                self.assertIn("corpus_wide_financial_coverage_required", plan.reason_codes)
+                self.assertIn("company_unresolved", plan.reason_codes)
+
     def test_insider_purchase_question_abstains_without_audited_event_fact(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp) / "base.sqlite"

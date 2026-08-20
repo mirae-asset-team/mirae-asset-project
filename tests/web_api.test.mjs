@@ -2,12 +2,28 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  answerText,
   askDisclosure,
   classifyAnswer,
   classifyFailure,
   classifyTransportFailure,
   evidenceLabel,
 } from "../src/disclosure_db/web/api.js";
+
+test("explains incomplete corpus-wide financial counts without changing other answers", () => {
+  assert.equal(
+    answerText({
+      answer: "검증에 실패하여 답변을 보류합니다.",
+      reason_codes: ["company_unresolved", "corpus_wide_financial_coverage_required"],
+    }),
+    "현재 검증된 재무 데이터가 전체 기업을 포괄하지 않아 기업 수 집계를 제공할 수 없습니다.",
+  );
+  assert.equal(answerText({answer: "검증된 답변", reason_codes: []}), "검증된 답변");
+  assert.equal(
+    answerText({answer: "일반 보류", reason_codes: ["company_unresolved"]}),
+    "일반 보류",
+  );
+});
 
 test("distinguishes verified and abstained answers", () => {
   assert.equal(classifyAnswer({answerable: true, verified: true}), "verified");

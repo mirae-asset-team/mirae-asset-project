@@ -2,6 +2,16 @@ export function classifyAnswer(body) {
   return body.answerable === true && body.verified === true ? "verified" : "abstained";
 }
 
+export function answerText(body) {
+  if (
+    Array.isArray(body.reason_codes)
+    && body.reason_codes.includes("corpus_wide_financial_coverage_required")
+  ) {
+    return "현재 검증된 재무 데이터가 전체 기업을 포괄하지 않아 기업 수 집계를 제공할 수 없습니다.";
+  }
+  return body.answer;
+}
+
 export function classifyFailure(status, detail) {
   if (status === 429) {
     return {
