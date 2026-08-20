@@ -2,6 +2,15 @@
 
 이 문서는 append-only 실행 기록입니다. 시간은 KST와 UTC를 함께 적고, credential·API key·개인 경로의 비밀값은 기록하지 않습니다.
 
+## 2026-08-20T10:28:59+09:00 / 2026-08-20T01:28:59Z — Financial-fact inventory and hybrid retrieval audit
+
+- Intent: determine whether the four approved-Gold sparse misses require embeddings or are already covered by the structured agent path, without mutating the D-drive base, live overlay, live index, or NCP release.
+- TDD implementation: added strict seed-to-Gold coverage checks for question/fact identity, filing, numeric value, scale, and exact evidence set; added an independent hybrid evaluator over the real deterministic planner and `EvidenceService`; added fail-closed CLI configuration requiring overlay plus attestation.
+- Read-only result: sparse FTS+RRF Recall@20 remained `13/17 = 0.7647058824`, complete-question recall `0.75`, and MRR `0.3449449856`. Hybrid retrieval recovered `17/17`, complete-question recall `1.0`, with routes financial `8`, event `7`, text `2`, service errors `0`, and residual targets `0`.
+- Financial scope: the checked-in validated seed has 8 facts and all 8 exactly match audited Gold. `corpus_wide_complete=false`; no generated candidate was promoted and no broader financial-fact completion is claimed.
+- Decision: the four sparse misses were structured financial table cells, not residual text misses. Paid embeddings, pgvector, and OpenSearch are not justified by the current Gold retrieval gate and remain deferred. Provider execution and any production database/NCP change remain separately gated.
+- Artifacts: detailed outputs were written only to ignored `tmp/hybrid_retrieval_audit.json` and `tmp/financial_fact_coverage_audit.json`; D-drive artifacts were opened read-only and the deployed service was untouched.
+
 ## 2026-08-19T23:34:18+09:00 / 2026-08-19T14:34:18Z — NCP public deployment and restart verification
 
 - Intent: finish the public contest-server execution plan on the approved NCP account while keeping the D-drive base, live overlay, and live search index read-only and without lowering any release gate.

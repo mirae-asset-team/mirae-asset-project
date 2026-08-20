@@ -13,9 +13,32 @@ from disclosure_db.retrieval_evaluation import (
     evaluate_hybrid_retrieval,
     evaluate_retrieval,
 )
+from scripts.evaluate_retrieval import parse_args
 
 
 class RetrievalEvaluationTests(unittest.TestCase):
+    def test_retrieval_cli_rejects_partial_structured_configuration(self) -> None:
+        with self.assertRaises(SystemExit):
+            parse_args(["--overlay", "overlay.sqlite"])
+        with self.assertRaises(SystemExit):
+            parse_args(["--attestation", "attestation.json"])
+        with self.assertRaises(SystemExit):
+            parse_args(["--search-index", "search.sqlite"])
+
+    def test_retrieval_cli_accepts_complete_hybrid_and_inventory_configuration(self) -> None:
+        args = parse_args([
+            "--database", "base.sqlite", "--gold", "gold.jsonl",
+            "--overlay", "overlay.sqlite", "--attestation", "attestation.json",
+            "--search-index", "search.sqlite", "--financial-seed", "seed.jsonl",
+            "--inventory-output", "inventory.json", "--output", "result.json",
+        ])
+
+        self.assertEqual(args.overlay, Path("overlay.sqlite"))
+        self.assertEqual(args.attestation, Path("attestation.json"))
+        self.assertEqual(args.search_index, Path("search.sqlite"))
+        self.assertEqual(args.financial_seed, Path("seed.jsonl"))
+        self.assertEqual(args.inventory_output, Path("inventory.json"))
+
     def test_hybrid_evaluation_preserves_sparse_metrics_and_attributes_actual_routes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             gold = Path(directory) / "gold.jsonl"

@@ -125,6 +125,33 @@ curl.exe -G "https://<team-endpoint>/answer" `
 추론을 노출하지 않고 시스템의 공개 처리 단계만 표시한다. 답변할 근거가 없으면 context는
 빈 문자열이고 trace는 `정보한계 판정`으로 끝난다.
 
+## Sparse and hybrid retrieval audit
+
+기존 sparse FTS+RRF 지표를 유지하면서 실제 에이전트의 구조화 fact 경로를 함께 평가하려면
+아래 명령을 사용한다. base, overlay, search index는 모두 read-only 입력이며 출력은 저장소의
+ignored `tmp` 아래에만 쓴다.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path 'src').Path
+python scripts/evaluate_retrieval.py `
+  --database 'D:\mirae-asset-project\db\semantic-v1_129f5b0\disclosure_corpus_semantic_v1.sqlite' `
+  --gold 'data\derived\gold_qa.agent_audited.jsonl' `
+  --overlay 'D:\mirae-asset-project\db\agent\agent_overlay.sqlite' `
+  --attestation 'data\derived\database_distribution_manifest_semantic_v1.json' `
+  --search-index 'D:\mirae-asset-project\db\agent\agent_search.sqlite' `
+  --financial-seed 'data\derived\financial_fact_gold_seed.jsonl' `
+  --inventory-output 'tmp\financial_fact_coverage_audit.json' `
+  --output 'tmp\hybrid_retrieval_audit.json' `
+  --limit 20
+```
+
+2026-08-20 read-only 실행에서 sparse Recall@20은 `13/17`(`0.7647`)로 그대로였고 hybrid는
+`17/17`(`1.0`)이었다. hybrid 경로 귀속은 `structured_financial=8`,
+`structured_event=7`, `sparse_text=2`이며 service error와 residual target은 0이었다.
+검증 seed는 8/8 Gold 일치지만 이는 **checked-in seed 범위**일 뿐 full-corpus
+`financial_fact` 완성을 뜻하지 않는다. sparse 지표를 hybrid 값으로 대체하거나 hard gate를
+낮추지 않는다.
+
 ## Provider-required 300-case gate
 
 기본 300문항 실행은 `--provider-mode disabled`이며 비용 없이 결정론적 회귀를 검증한다.
