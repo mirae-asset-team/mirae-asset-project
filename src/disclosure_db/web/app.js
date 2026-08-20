@@ -26,6 +26,7 @@ const providerMode = document.querySelector("#provider-mode");
 const corpusRevision = document.querySelector("#corpus-revision");
 const sidebar = document.querySelector("#sidebar");
 const sidebarToggle = document.querySelector("#sidebar-toggle");
+const sidebarClose = document.querySelector("#sidebar-close");
 const newChat = document.querySelector("#new-chat");
 const clearHistory = document.querySelector("#clear-history");
 const historySearch = document.querySelector("#history-search");
@@ -374,6 +375,8 @@ sidebarToggle.addEventListener("click", () => {
     sidebarToggle.focus();
   }
 });
+
+sidebarClose.addEventListener("click", () => closeSidebar(true));
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && sidebar.classList.contains("sidebar-open")) {

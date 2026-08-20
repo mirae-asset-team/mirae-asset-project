@@ -9,9 +9,10 @@
   <body>
     <div class="app-shell">
       <aside id="sidebar" class="sidebar" aria-label="대화 기록">
-        <div class="sidebar-brand" aria-hidden="true">
-          <span class="brand-mark">M</span>
-          <span>공시 리서치</span>
+        <div class="sidebar-brand">
+          <span class="brand-mark" aria-hidden="true">M</span>
+          <span aria-hidden="true">공시 리서치</span>
+          <button id="sidebar-close" class="sidebar-close" type="button" aria-label="대화 목록 닫기">×</button>
         </div>
         <button id="new-chat" class="new-chat" type="button"><span aria-hidden="true">＋</span> 새 대화</button>
         <label class="sr-only" for="history-search">대화 검색</label>

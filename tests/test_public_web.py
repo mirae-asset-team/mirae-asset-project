@@ -51,6 +51,7 @@ def test_root_serves_accessible_web_shell(ready_agent) -> None:
         "conversation-list",
         "clear-history",
         "sidebar-toggle",
+        "sidebar-close",
         "messages",
         "question-input",
         "send-question",

@@ -81,6 +81,10 @@ summary {
   color: #aeb9cc;
 }
 
+.sidebar-close {
+  display: none;
+}
+
 .brand-mark {
   display: grid;
   width: 1.65rem;
@@ -628,6 +632,21 @@ summary:focus-visible {
     border-radius: 0.55rem;
     color: #28344a;
     background: #fff;
+  }
+
+  .sidebar-close {
+    display: inline-grid;
+    width: 2rem;
+    height: 2rem;
+    margin-left: auto;
+    place-items: center;
+    padding: 0;
+    border: 1px solid #445069;
+    border-radius: 0.5rem;
+    color: #edf1f8;
+    background: #1d2940;
+    font-size: 1.25rem;
+    line-height: 1;
   }
 
   .chat-header h1 {
