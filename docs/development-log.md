@@ -2,6 +2,14 @@
 
 이 문서는 append-only 실행 기록입니다. 시간은 KST와 UTC를 함께 적고, credential·API key·개인 경로의 비밀값은 기록하지 않습니다.
 
+## 2026-08-20T12:43:54+09:00 / 2026-08-20T03:43:54Z — Insider-purchase query fail-closed regression
+
+- Production reproduction: `최근 삼성바이오로직스 내부자매수 사례 찾아봐` returned an unrelated table row (`신설사업부문 최근 사업연도 매출액(원) | -`) as `verified=true`. The cited filing was corpus-owned, but the generic-text path did not require an audited event fact or semantic claim match.
+- Root cause: the deterministic planner did not classify `내부자매수` as an event predicate. Retrieval therefore admitted a company-matching text row, the deterministic generator echoed the first row, and citation verification could not detect the question/evidence intent mismatch.
+- RED/GREEN: two regression tests first failed with `fact_domain='text'` and no `validated_event_fact_required`; commit `917f15f` minimally routes the term to the audited event domain, where absent audited facts fail closed. The exact real-corpus local query then returned `verified=false`, `answerable=false`, no citations, and reason `validated_event_fact_required`.
+- Fresh verification: `PYTHONPATH=src python -m pytest -q` passed `255`, skipped `1`, and passed `17` subtests; Node web suites passed `10/10`; `compileall` and `git diff --check` passed. Base, overlay, and search artifacts were opened read-only only.
+- GitHub: the feature branch and existing PR `#1` were updated. Public NCP code-only redeployment remains `BLOCKED_EXTERNAL` because the authenticated console session expired; the live endpoint still serves the previous image until re-login and re-attestation/restart checks complete.
+
 ## 2026-08-20T10:28:59+09:00 / 2026-08-20T01:28:59Z — Financial-fact inventory and hybrid retrieval audit
 
 - Intent: determine whether the four approved-Gold sparse misses require embeddings or are already covered by the structured agent path, without mutating the D-drive base, live overlay, live index, or NCP release.
