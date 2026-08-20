@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make verified financial questions useful for all 76 searchable companies without weakening the existing evidence, lineage, citation, or read-only gates. The first release covers six canonical metrics from each company's latest current annual report and up to three periods displayed in that report.
+Make verified financial questions useful for every legal issuer in the corpus without weakening the existing evidence, lineage, citation, or read-only gates. The source contains 70 issuer corporation codes and 76 searchable name aliases; aliases must never be counted as separate companies. The first release covers six canonical metrics from each answer-safe latest current annual report and up to three periods displayed in that report.
 
 ## Observed failure and baseline
 
@@ -15,8 +15,10 @@ Make verified financial questions useful for all 76 searchable companies without
 
 ### Universe and filing selection
 
-- Freeze the 76 searchable companies into a deterministic manifest with stable company identifier, display name, stock code, selected filing ID, report name, filing date, fiscal year, correction lineage, and source database attestation.
+- Freeze the 70 legal issuers and their 76 searchable aliases into a deterministic manifest with stable company identifier, display name, stock code, selected filing ID, report name, filing date, fiscal year, correction lineage, and source database attestation.
 - Select the latest fiscal-year annual report (`사업보고서`) whose current lineage is answer-safe. For a corrected chain, use the current resolved filing. Preserve the original and selected filing identifiers in the audit output.
+- If the latest annual filing is not answer-safe, reject that issuer instead of silently substituting an older report. The 2026-08-21 source currently admits 69 issuers and rejects Hanwha Solutions because its 2025 annual filing is `missing_original`.
+- Statement scope discovery is deferred to the extraction pass so the 1.5-million-row table corpus is not scanned twice. The universe records `pending_extraction` until Task 3 establishes consolidated availability.
 - A manifest build must be order-independent and produce the same canonical JSON and SHA-256 for the same source database.
 
 ### Metrics and periods
@@ -32,7 +34,7 @@ Make verified financial questions useful for all 76 searchable companies without
 - Automatic admission requires an answer-safe filing lineage, parse-success textual table evidence, deterministic statement/scope/period/unit recognition, an explicit metric alias, one unambiguous numeric cell, and no conflicting duplicate at the same company/metric/period/scope grain.
 - Automatic values use `agent_audited`. `human_verified` is reserved for an actual named human approval; model consensus is never human approval.
 - Ambiguous, conflicting, missing-unit, missing-period, visual-only, cross-filing, or unresolved-lineage candidates are rejected into an auditable review queue. Unresolved review rows never enter the serving overlay.
-- Individual questions may use any admitted fact. Corpus-wide counts/ranks require a complete 76-company snapshot for the requested canonical metric and comparison slot; missing facts fail closed with coverage metadata.
+- Individual questions may use any admitted fact. Corpus-wide counts/ranks require a complete 70-legal-issuer snapshot for the requested canonical metric and comparison slot; missing facts fail closed with coverage metadata. The current `missing_original` issuer therefore blocks corpus-wide aggregation until its lineage/data gap is repaired.
 
 ## Storage and serving design
 
@@ -53,7 +55,7 @@ Make verified financial questions useful for all 76 searchable companies without
 ## Release gates
 
 - Zero unsafe answers, false numeric claims, unknown/cross-filing citations, evaluator errors, or source/live database mutations.
-- Exact structured answers and evidence for every admitted regression case; no claim of 76-company completeness unless the generated coverage report proves 76/76 for that metric snapshot.
+- Exact structured answers and evidence for every admitted regression case; no claim of corpus-wide completeness unless the generated coverage report proves 70/70 legal issuers for that metric snapshot. Search aliases are reported separately.
 - New overlay passes source attestation, foreign-key checks, `quick_check`, duplicate/grain checks, and repeat-build determinism before recoverable promotion.
 - SQLite remains the final serving choice if a 20-concurrent-request test has zero errors and p95 at or below two seconds. Otherwise record evidence and plan a separate PostgreSQL/OpenSearch migration.
 

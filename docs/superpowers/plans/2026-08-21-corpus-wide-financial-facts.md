@@ -14,9 +14,9 @@
 
 **Files:** new financial extraction module and CLI, focused tests, generated manifest/report
 
-1. RED: test deterministic 76-company snapshot behavior using small real SQLite fixtures, including latest annual report, corrected lineage, and stable ordering/hash.
+1. RED: test deterministic legal-issuer snapshot behavior using small real SQLite fixtures, including latest annual report, corrected lineage, alias separation, and stable ordering/hash.
 2. GREEN: implement a query-only manifest builder and CLI. Reject unresolved or missing annual-report selections rather than guessing.
-3. Run against the attested D-drive base, writing only repository output. Verify expected 76 companies, deterministic repeat output, and unchanged source metadata.
+3. Run against the attested D-drive base, writing only repository output. Verify the observed 70 legal issuers/76 raw aliases, every answer-safe selection/reject, deterministic repeat output, and unchanged source metadata. Do not substitute an older filing for an unsafe latest report.
 4. Update the development log and commit `feat: build financial filing universe`.
 
 ## Task 3: Extract six metrics and three periods
@@ -34,7 +34,7 @@
 
 1. RED: require exact evidence/filing alignment, answer-safe lineage, parse-success textual cells, finite Decimal values, complete period/unit/scope, unique grain, and honest trust tiers.
 2. GREEN: emit admitted `agent_audited` seed rows and deterministic review/reject/coverage reports. Never self-label human approval.
-3. Review every exception against table context; unresolved rows remain excluded. Record per-company/metric/period coverage and whether each 76-company aggregate snapshot is complete.
+3. Review every exception against table context; unresolved rows remain excluded. Record per-company/metric/period coverage and whether each 70-legal-issuer aggregate snapshot is complete.
 4. Run full regression and commit `feat: validate corpus-wide financial facts`.
 
 ## Task 5: Build a staged overlay
