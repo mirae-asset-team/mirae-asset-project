@@ -1,0 +1,1358 @@
+{
+  "aggregate_hard_gate_passed": false,
+  "companies": [
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00102858",
+      "listed_name": "고려아연",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260601001725",
+      "stock_code": "010130",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00105855",
+      "listed_name": "LS ELECTRIC",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001243",
+      "stock_code": "010120",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00105961",
+      "listed_name": "LG이노텍",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260312001270",
+      "stock_code": "011070",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00106641",
+      "listed_name": "기아",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260312001224",
+      "stock_code": "000270",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00106669",
+      "listed_name": "세아베스틸지주",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260316001503",
+      "stock_code": "001430",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00111704",
+      "listed_name": "한화오션",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260317000644",
+      "stock_code": "042660",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00111722",
+      "listed_name": "미래에셋증권",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260515002972",
+      "stock_code": "006800",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00124540",
+      "listed_name": "대우건설",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001029",
+      "stock_code": "047040",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00126256",
+      "listed_name": "삼성생명",
+      "missing": [
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        }
+      ],
+      "missing_count": 3,
+      "selected_filing_id": "20260331004244",
+      "stock_code": "032830",
+      "validated_count": 15
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00126308",
+      "listed_name": "삼성E&A",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260311003927",
+      "stock_code": "028050",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00126362",
+      "listed_name": "삼성SDI",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260310002954",
+      "stock_code": "006400",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00126371",
+      "listed_name": "삼성전기",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260310003071",
+      "stock_code": "009150",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00126380",
+      "listed_name": "삼성전자",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260310002820",
+      "stock_code": "005930",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00126478",
+      "listed_name": "삼성중공업",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260312001037",
+      "stock_code": "010140",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00126566",
+      "listed_name": "한화에어로스페이스",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260316001112",
+      "stock_code": "012450",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00139214",
+      "listed_name": "삼성화재",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260312001399",
+      "stock_code": "000810",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00139834",
+      "listed_name": "LG씨엔에스",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260316000832",
+      "stock_code": "064400",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00145880",
+      "listed_name": "현대제철",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001506",
+      "stock_code": "004020",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00148896",
+      "listed_name": "OCI홀딩스",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318000617",
+      "stock_code": "010060",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00155319",
+      "listed_name": "POSCO홀딩스",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260311004517",
+      "stock_code": "005490",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00159023",
+      "listed_name": "SK텔레콤",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318000532",
+      "stock_code": "017670",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00159209",
+      "listed_name": "한전기술",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260326001003",
+      "stock_code": "052690",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00159616",
+      "listed_name": "두산에너빌리티",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260320001246",
+      "stock_code": "034020",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00161383",
+      "listed_name": "한미반도체",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260312001230",
+      "stock_code": "042700",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": null,
+      "issuer_corp_code": "00162461",
+      "listed_name": "한화솔루션",
+      "missing": [
+        {
+          "account_id": "revenue",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "operating_income",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "operating_income",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "operating_income",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "net_income",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "net_income",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "net_income",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "total_assets",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "total_assets",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "total_assets",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "total_liabilities",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "total_liabilities",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "total_liabilities",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "total_equity",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "total_equity",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        },
+        {
+          "account_id": "total_equity",
+          "fiscal_year": null,
+          "reason_codes": [
+            "answer_safe_annual_report_missing"
+          ]
+        }
+      ],
+      "missing_count": 18,
+      "selected_filing_id": null,
+      "stock_code": "",
+      "validated_count": 0
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00164478",
+      "listed_name": "현대건설",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001395",
+      "stock_code": "000720",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00164645",
+      "listed_name": "HMM",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001444",
+      "stock_code": "011200",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00164742",
+      "listed_name": "현대차",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001394",
+      "stock_code": "005380",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00164779",
+      "listed_name": "SK하이닉스",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260317000635",
+      "stock_code": "000660",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00164788",
+      "listed_name": "현대모비스",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260309001878",
+      "stock_code": "012330",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00190321",
+      "listed_name": "KT",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260323001553",
+      "stock_code": "030200",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00231044",
+      "listed_name": "우리기술",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260323001668",
+      "stock_code": "032820",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00231363",
+      "listed_name": "LG유플러스",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260313000442",
+      "stock_code": "032640",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00258689",
+      "listed_name": "JYP Ent",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001519",
+      "stock_code": "035900",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00258801",
+      "listed_name": "카카오",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001423",
+      "stock_code": "035720",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00260930",
+      "listed_name": "에스엠",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260317000781",
+      "stock_code": "041510",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00261443",
+      "listed_name": "엔씨소프트",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001448",
+      "stock_code": "036570",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00266961",
+      "listed_name": "NAVER",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260313001021",
+      "stock_code": "035420",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00302926",
+      "listed_name": "현대로템",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260319001275",
+      "stock_code": "064350",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00309503",
+      "listed_name": "한국항공우주",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001461",
+      "stock_code": "047810",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00356370",
+      "listed_name": "LG생활건강",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260316000985",
+      "stock_code": "051900",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00360595",
+      "listed_name": "현대글로비스",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001205",
+      "stock_code": "086280",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00362441",
+      "listed_name": "현대오토에버",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001324",
+      "stock_code": "307950",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00382199",
+      "listed_name": "신한지주",
+      "missing": [
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        }
+      ],
+      "missing_count": 3,
+      "selected_filing_id": "20260318000826",
+      "stock_code": "055550",
+      "validated_count": 15
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00413046",
+      "listed_name": "셀트리온",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260316001415",
+      "stock_code": "068270",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00503668",
+      "listed_name": "LIG넥스원",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260323001211",
+      "stock_code": "079550",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00547583",
+      "listed_name": "하나금융지주",
+      "missing": [
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "operating_income",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "operating_income",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "operating_income",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "net_income",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "net_income",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "net_income",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_assets",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_assets",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_assets",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_liabilities",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_liabilities",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_liabilities",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_equity",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_equity",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_equity",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        }
+      ],
+      "missing_count": 18,
+      "selected_filing_id": "20260316001292",
+      "stock_code": "086790",
+      "validated_count": 0
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00583424",
+      "listed_name": "아모레퍼시픽",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318000785",
+      "stock_code": "090430",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00613318",
+      "listed_name": "와이지엔터테인먼트",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260323001610",
+      "stock_code": "122870",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00635134",
+      "listed_name": "CJ제일제당",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260316001116",
+      "stock_code": "097950",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00688996",
+      "listed_name": "KB금융",
+      "missing": [
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "operating_income",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "operating_income",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "operating_income",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "net_income",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "net_income",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "net_income",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_assets",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_assets",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_assets",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_liabilities",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_liabilities",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_liabilities",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_equity",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_equity",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "total_equity",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        }
+      ],
+      "missing_count": 18,
+      "selected_filing_id": "20260619000667",
+      "stock_code": "105560",
+      "validated_count": 0
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00760971",
+      "listed_name": "크래프톤",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260515002689",
+      "stock_code": "259960",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00828497",
+      "listed_name": "한미약품",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260320001130",
+      "stock_code": "128940",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00860332",
+      "listed_name": "메리츠금융지주",
+      "missing": [
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        }
+      ],
+      "missing_count": 3,
+      "selected_filing_id": "20260331004202",
+      "stock_code": "138040",
+      "validated_count": 15
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00872984",
+      "listed_name": "이마트",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001024",
+      "stock_code": "139480",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00877059",
+      "listed_name": "삼성바이오로직스",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260515001658",
+      "stock_code": "207940",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00970453",
+      "listed_name": "파마리서치",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260319001417",
+      "stock_code": "214450",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "00989619",
+      "listed_name": "알테오젠",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260323001596",
+      "stock_code": "196170",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01105153",
+      "listed_name": "두산로보틱스",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001562",
+      "stock_code": "454910",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01160363",
+      "listed_name": "에코프로비엠",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001622",
+      "stock_code": "247540",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01204056",
+      "listed_name": "하이브",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260320000802",
+      "stock_code": "352820",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01205851",
+      "listed_name": "HD현대일렉트릭",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260316000940",
+      "stock_code": "267260",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01261644",
+      "listed_name": "레인보우로보틱스",
+      "missing": [
+        {
+          "account_id": "net_income",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing",
+            "metric_value_unparseable"
+          ]
+        },
+        {
+          "account_id": "net_income",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing",
+            "metric_value_unparseable"
+          ]
+        },
+        {
+          "account_id": "net_income",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing",
+            "metric_value_unparseable"
+          ]
+        }
+      ],
+      "missing_count": 3,
+      "selected_filing_id": "20260320000803",
+      "stock_code": "277810",
+      "validated_count": 15
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01316245",
+      "listed_name": "효성중공업",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260323001004",
+      "stock_code": "298040",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01350869",
+      "listed_name": "우리금융지주",
+      "missing": [
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2025,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2024,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        },
+        {
+          "account_id": "revenue",
+          "fiscal_year": 2023,
+          "reason_codes": [
+            "metric_period_missing"
+          ]
+        }
+      ],
+      "missing_count": 3,
+      "selected_filing_id": "20260313001235",
+      "stock_code": "316140",
+      "validated_count": 15
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01376715",
+      "listed_name": "디앤디파마텍",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260320001088",
+      "stock_code": "347850",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01384787",
+      "listed_name": "시프트업",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001672",
+      "stock_code": "462870",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01390344",
+      "listed_name": "HD현대중공업",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260320000859",
+      "stock_code": "329180",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01412725",
+      "listed_name": "두산퓨얼셀",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260318001264",
+      "stock_code": "336260",
+      "validated_count": 18
+    },
+    {
+      "expected_count": 18,
+      "fiscal_year": 2025,
+      "issuer_corp_code": "01515323",
+      "listed_name": "LG에너지솔루션",
+      "missing": [],
+      "missing_count": 0,
+      "selected_filing_id": "20260312000217",
+      "stock_code": "373220",
+      "validated_count": 18
+    }
+  ],
+  "expected_grain_count": 1260,
+  "manifest_rejected_company_count": 1,
+  "metrics": {
+    "net_income": {
+      "aggregate_eligible": false,
+      "expected_company_count": 70,
+      "latest_validated_company_count": 66,
+      "missing_companies": [
+        "KB금융",
+        "레인보우로보틱스",
+        "하나금융지주",
+        "한화솔루션"
+      ],
+      "three_period_aggregate_eligible": false,
+      "three_period_validated_company_count": 66
+    },
+    "operating_income": {
+      "aggregate_eligible": false,
+      "expected_company_count": 70,
+      "latest_validated_company_count": 67,
+      "missing_companies": [
+        "KB금융",
+        "하나금융지주",
+        "한화솔루션"
+      ],
+      "three_period_aggregate_eligible": false,
+      "three_period_validated_company_count": 67
+    },
+    "revenue": {
+      "aggregate_eligible": false,
+      "expected_company_count": 70,
+      "latest_validated_company_count": 63,
+      "missing_companies": [
+        "KB금융",
+        "메리츠금융지주",
+        "삼성생명",
+        "신한지주",
+        "우리금융지주",
+        "하나금융지주",
+        "한화솔루션"
+      ],
+      "three_period_aggregate_eligible": false,
+      "three_period_validated_company_count": 63
+    },
+    "total_assets": {
+      "aggregate_eligible": false,
+      "expected_company_count": 70,
+      "latest_validated_company_count": 67,
+      "missing_companies": [
+        "KB금융",
+        "하나금융지주",
+        "한화솔루션"
+      ],
+      "three_period_aggregate_eligible": false,
+      "three_period_validated_company_count": 67
+    },
+    "total_equity": {
+      "aggregate_eligible": false,
+      "expected_company_count": 70,
+      "latest_validated_company_count": 67,
+      "missing_companies": [
+        "KB금융",
+        "하나금융지주",
+        "한화솔루션"
+      ],
+      "three_period_aggregate_eligible": false,
+      "three_period_validated_company_count": 67
+    },
+    "total_liabilities": {
+      "aggregate_eligible": false,
+      "expected_company_count": 70,
+      "latest_validated_company_count": 67,
+      "missing_companies": [
+        "KB금융",
+        "하나금융지주",
+        "한화솔루션"
+      ],
+      "three_period_aggregate_eligible": false,
+      "three_period_validated_company_count": 67
+    }
+  },
+  "missing_grain_count": 69,
+  "review_resolution_count": 3,
+  "schema_version": "financial-coverage-v1",
+  "searchable_alias_count": 75,
+  "selected_filing_company_count": 69,
+  "source_company_count": 70,
+  "source_database_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563",
+  "validated_grain_count": 1191
+}
