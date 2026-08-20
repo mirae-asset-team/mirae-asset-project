@@ -74,3 +74,10 @@ Each implementation task records its RED failure, GREEN verification, full regre
 - Independent source reconstruction admits 1,191 of 1,260 legal-company/metric/period grains. All admitted rows are `agent_audited`; none claims human review. The tracked SK Telecom duplicate decision resolves three equal-value grains, while conflicting or source-incomplete cases remain excluded.
 - Revenue is complete for 63/70 legal issuers, operating income/assets/liabilities/equity for 67/70, and net income for 66/70. Therefore every corpus-wide count, rank, and complete-company-list operation remains fail-closed. This is an observed coverage result, not a reduced denominator or gate.
 - The canonical seed, machine-readable coverage, unresolved review queue, and human-readable report are repository artifacts. Task 5 may stage them in an overlay only if it preserves `agent_audited`, source attestation, evidence alignment, and aggregate coverage metadata.
+
+## Task 5 measured staging boundary
+
+- The overlay schema stores one attested annual snapshot, six canonical metric coverage rows, and all 70 legal-company rows, including the one manifest reject with null selected filing/year. The serving denominator therefore cannot silently shrink from 70 to 69.
+- Coverage is independently reconciled against the admitted seed and immutable base before the temporary SQLite file is created. Trust tiers are preserved; only the original explicit `human_validated` legacy seed receives compatibility mapping to `human_verified`.
+- The staged candidate has 1,191 financial and 1,423 event facts, passes SQLite quick/FK checks, has no duplicate financial grain, and has no missing or cross-filing evidence. A repeat build produced the same semantic digest after excluding creation time and random reject build ID.
+- Task 5 does not promote or deploy the candidate. Promotion remains a recoverable rename operation after Task 6-8 query, API, evaluation, concurrency, and public smoke gates pass.

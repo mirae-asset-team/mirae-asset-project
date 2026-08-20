@@ -107,6 +107,7 @@ def _agent_parser() -> argparse.ArgumentParser:
     agent_overlay.add_argument("--database", type=Path, required=True)
     agent_overlay.add_argument("--overlay", type=Path, required=True)
     agent_overlay.add_argument("--financial-seed", type=Path, required=True)
+    agent_overlay.add_argument("--financial-coverage", type=Path)
     agent_overlay.add_argument("--predicate-config", type=Path, required=True)
     agent_overlay.add_argument("--attestation", type=Path)
     agent_overlay.add_argument("--report", type=Path, required=True)
@@ -158,7 +159,9 @@ def agent_main() -> None:
             args.financial_seed,
             args.predicate_config,
             attestation=attestation,
+            financial_coverage=args.financial_coverage,
         )
+        args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(
             json.dumps(to_jsonable(result), ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

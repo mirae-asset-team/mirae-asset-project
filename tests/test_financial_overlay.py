@@ -67,6 +67,68 @@ def seed_base(path: Path) -> None:
     connection.close()
 
 
+def financial_seed_row(*, trust_tier: str | None = "agent_audited") -> dict[str, object]:
+    row: dict[str, object] = {
+        "financial_fact_id": "ff1", "filing_id": "f1", "account_id": "revenue",
+        "account_name_raw": "매출액", "statement_type": "IS", "scope": "consolidated",
+        "period_type": "duration", "period_start": "2023-01-01", "period_end": "2023-12-31",
+        "value_numeric": "1000", "currency": "KRW", "scale": 1, "unit_raw": "원",
+        "extraction_method": "agent_audited_annual_statement_rule_v1",
+        "validation_status": "validated", "evidence_ids": ["c1"],
+        "issuer_corp_code": "00000001", "issuer_name": "테스트", "listed_name": "테스트",
+        "stock_code": "000001", "fiscal_year": 2023,
+    }
+    if trust_tier is not None:
+        row["trust_tier"] = trust_tier
+    return row
+
+
+def financial_coverage(*, source_sha256: str) -> dict[str, object]:
+    missing = [
+        {"account_id": account_id, "fiscal_year": year, "reason_codes": ["fixture_missing"]}
+        for account_id in (
+            "revenue", "operating_income", "net_income", "total_assets",
+            "total_liabilities", "total_equity",
+        )
+        for year in (2023, 2022, 2021)
+        if not (account_id == "revenue" and year == 2023)
+    ]
+    metrics = {}
+    for account_id in (
+        "revenue", "operating_income", "net_income", "total_assets",
+        "total_liabilities", "total_equity",
+    ):
+        complete = account_id == "revenue"
+        metrics[account_id] = {
+            "expected_company_count": 1,
+            "latest_validated_company_count": 1 if complete else 0,
+            "three_period_validated_company_count": 0,
+            "aggregate_eligible": complete,
+            "three_period_aggregate_eligible": False,
+            "missing_companies": [] if complete else ["테스트"],
+        }
+    return {
+        "schema_version": "financial-coverage-v1",
+        "source_database_sha256": source_sha256,
+        "source_company_count": 1,
+        "searchable_alias_count": 1,
+        "selected_filing_company_count": 1,
+        "manifest_rejected_company_count": 0,
+        "expected_grain_count": 18,
+        "validated_grain_count": 1,
+        "missing_grain_count": 17,
+        "review_resolution_count": 0,
+        "aggregate_hard_gate_passed": False,
+        "companies": [{
+            "issuer_corp_code": "00000001", "stock_code": "000001", "listed_name": "테스트",
+            "selected_filing_id": "f1", "fiscal_year": 2023,
+            "expected_count": 18, "validated_count": 1, "missing_count": 17,
+            "missing": missing,
+        }],
+        "metrics": metrics,
+    }
+
+
 def seed_composite_event_base(path: Path, *, ambiguous: bool = False) -> str:
     seed_base(path)
     numeric_evidence_id = "event_numeric_cell"
@@ -99,6 +161,124 @@ def seed_composite_event_base(path: Path, *, ambiguous: bool = False) -> str:
 
 
 class FinancialOverlayTests(unittest.TestCase):
+    def test_agent_audited_financial_seed_preserves_trust_tier(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay, seed = root / "base.sqlite", root / "overlay.sqlite", root / "seed.jsonl"
+            seed_base(base)
+            seed.write_text(json.dumps(financial_seed_row(), ensure_ascii=False) + "\n", encoding="utf-8")
+
+            result = import_seed(base, overlay, seed)
+
+            self.assertEqual(result.financial_imported, 1)
+            with closing(sqlite3.connect(overlay)) as connection:
+                self.assertEqual(
+                    connection.execute("SELECT trust_tier FROM financial_fact").fetchone()[0],
+                    "agent_audited",
+                )
+
+    def test_non_human_seed_without_explicit_trust_tier_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay, seed = root / "base.sqlite", root / "overlay.sqlite", root / "seed.jsonl"
+            seed_base(base)
+            seed.write_text(json.dumps(financial_seed_row(trust_tier=None), ensure_ascii=False) + "\n", encoding="utf-8")
+
+            result = import_seed(base, overlay, seed)
+
+            self.assertEqual(result.financial_imported, 0)
+            self.assertIn("trust_tier", result.reasons[0])
+
+    def test_agent_overlay_imports_attested_coverage_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates, coverage = root / "financial.jsonl", root / "predicates.json", root / "coverage.json"
+            seed_base(base)
+            seed.write_text(json.dumps(financial_seed_row(), ensure_ascii=False) + "\n", encoding="utf-8")
+            predicates.write_text('{"predicates": []}\n', encoding="utf-8")
+            coverage.write_text(
+                json.dumps(financial_coverage(source_sha256=hashlib.sha256(base.read_bytes()).hexdigest()), ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            result = build_agent_overlay(base, overlay, seed, predicates, financial_coverage=coverage)
+
+            self.assertEqual(result.financial_imported, 1)
+            self.assertTrue(result.coverage_sha256)
+            with closing(sqlite3.connect(overlay)) as connection:
+                connection.row_factory = sqlite3.Row
+                snapshot = connection.execute("SELECT * FROM financial_coverage_snapshot").fetchone()
+                revenue = connection.execute(
+                    "SELECT * FROM financial_metric_coverage WHERE account_id='revenue'"
+                ).fetchone()
+                company = connection.execute("SELECT * FROM financial_company_coverage").fetchone()
+            self.assertEqual(snapshot["validated_grain_count"], 1)
+            self.assertEqual(snapshot["aggregate_hard_gate_passed"], 0)
+            self.assertEqual(revenue["aggregate_eligible"], 1)
+            self.assertEqual(company["selected_filing_id"], "f1")
+
+    def test_bad_coverage_fails_before_replacing_existing_overlay(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates, coverage = root / "financial.jsonl", root / "predicates.json", root / "coverage.json"
+            seed_base(base)
+            seed.write_text(json.dumps(financial_seed_row(), ensure_ascii=False) + "\n", encoding="utf-8")
+            predicates.write_text('{"predicates": []}\n', encoding="utf-8")
+            valid = financial_coverage(source_sha256=hashlib.sha256(base.read_bytes()).hexdigest())
+            coverage.write_text(json.dumps(valid, ensure_ascii=False), encoding="utf-8")
+            build_agent_overlay(base, overlay, seed, predicates, financial_coverage=coverage)
+            before = overlay.read_bytes()
+            valid["validated_grain_count"] = 2
+            coverage.write_text(json.dumps(valid, ensure_ascii=False), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "validated_grain_count"):
+                build_agent_overlay(base, overlay, seed, predicates, financial_coverage=coverage)
+
+            self.assertEqual(overlay.read_bytes(), before)
+
+    def test_coverage_keeps_manifest_rejected_company_without_selected_filing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "agent.sqlite"
+            seed, predicates, coverage_path = root / "financial.jsonl", root / "predicates.json", root / "coverage.json"
+            seed_base(base)
+            seed.write_text(json.dumps(financial_seed_row(), ensure_ascii=False) + "\n", encoding="utf-8")
+            predicates.write_text('{"predicates": []}\n', encoding="utf-8")
+            coverage = financial_coverage(source_sha256=hashlib.sha256(base.read_bytes()).hexdigest())
+            coverage["source_company_count"] = 2
+            coverage["manifest_rejected_company_count"] = 1
+            coverage["expected_grain_count"] = 36
+            coverage["missing_grain_count"] = 35
+            coverage["companies"].append({
+                "issuer_corp_code": "00000002", "stock_code": "", "listed_name": "거절기업",
+                "selected_filing_id": None, "fiscal_year": None,
+                "expected_count": 18, "validated_count": 0, "missing_count": 18,
+                "missing": [
+                    {"account_id": account_id, "fiscal_year": None, "reason_codes": ["missing_original"]}
+                    for account_id in (
+                        "revenue", "operating_income", "net_income", "total_assets",
+                        "total_liabilities", "total_equity",
+                    )
+                    for _ in range(3)
+                ],
+            })
+            for metric in coverage["metrics"].values():
+                metric["expected_company_count"] = 2
+                metric["aggregate_eligible"] = False
+                metric["missing_companies"].append("거절기업")
+            coverage_path.write_text(json.dumps(coverage, ensure_ascii=False), encoding="utf-8")
+
+            result = build_agent_overlay(base, overlay, seed, predicates, financial_coverage=coverage_path)
+
+            self.assertEqual(result.financial_imported, 1)
+            with closing(sqlite3.connect(overlay)) as connection:
+                rejected = connection.execute(
+                    "SELECT selected_filing_id,fiscal_year,missing_count FROM financial_company_coverage WHERE issuer_corp_code='00000002'"
+                ).fetchone()
+            self.assertEqual(rejected, (None, None, 18))
+
     def test_agent_overlay_resolves_numeric_value_from_labeled_sibling_cell(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

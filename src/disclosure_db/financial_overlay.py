@@ -37,7 +37,8 @@ CREATE TABLE overlay_revision(
     overlay_revision TEXT PRIMARY KEY,
     source_database_sha256 TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    seed_sha256 TEXT NOT NULL
+    seed_sha256 TEXT NOT NULL,
+    coverage_sha256 TEXT
 );
 CREATE TABLE financial_fact(
     financial_fact_id TEXT PRIMARY KEY,
@@ -90,6 +91,45 @@ CREATE TABLE build_reject(
     PRIMARY KEY(build_id,candidate_id,reason_code)
 );
 CREATE INDEX overlay_event_predicate ON event_fact(predicate_id,filing_id);
+CREATE TABLE financial_coverage_snapshot(
+    snapshot_id TEXT PRIMARY KEY,
+    schema_version TEXT NOT NULL,
+    source_database_sha256 TEXT NOT NULL,
+    source_company_count INTEGER NOT NULL,
+    searchable_alias_count INTEGER NOT NULL,
+    selected_filing_company_count INTEGER NOT NULL,
+    manifest_rejected_company_count INTEGER NOT NULL,
+    expected_grain_count INTEGER NOT NULL,
+    validated_grain_count INTEGER NOT NULL,
+    missing_grain_count INTEGER NOT NULL,
+    review_resolution_count INTEGER NOT NULL,
+    aggregate_hard_gate_passed INTEGER NOT NULL CHECK(aggregate_hard_gate_passed IN (0,1)),
+    coverage_sha256 TEXT NOT NULL
+);
+CREATE TABLE financial_metric_coverage(
+    snapshot_id TEXT NOT NULL REFERENCES financial_coverage_snapshot(snapshot_id),
+    account_id TEXT NOT NULL,
+    expected_company_count INTEGER NOT NULL,
+    latest_validated_company_count INTEGER NOT NULL,
+    three_period_validated_company_count INTEGER NOT NULL,
+    aggregate_eligible INTEGER NOT NULL CHECK(aggregate_eligible IN (0,1)),
+    three_period_aggregate_eligible INTEGER NOT NULL CHECK(three_period_aggregate_eligible IN (0,1)),
+    missing_companies_json TEXT NOT NULL,
+    PRIMARY KEY(snapshot_id,account_id)
+);
+CREATE TABLE financial_company_coverage(
+    snapshot_id TEXT NOT NULL REFERENCES financial_coverage_snapshot(snapshot_id),
+    issuer_corp_code TEXT NOT NULL,
+    stock_code TEXT,
+    listed_name TEXT NOT NULL,
+    selected_filing_id TEXT,
+    fiscal_year INTEGER,
+    expected_count INTEGER NOT NULL,
+    validated_count INTEGER NOT NULL,
+    missing_count INTEGER NOT NULL,
+    missing_json TEXT NOT NULL,
+    PRIMARY KEY(snapshot_id,issuer_corp_code)
+);
 """
 
 
@@ -102,6 +142,7 @@ class OverlayImportResult:
     reasons: list[str] = field(default_factory=list)
     source_database_sha256: str = ""
     seed_sha256: str = ""
+    coverage_sha256: str = ""
     quick_check: str = ""
 
 
@@ -236,6 +277,8 @@ def _write_overlay_atomically(
     financial_rows: list[dict[str, Any]],
     event_rows: list[dict[str, Any]],
     rejects: list[tuple[str, str, dict[str, Any]]],
+    coverage: dict[str, Any] | None = None,
+    coverage_sha: str = "",
 ) -> tuple[int, str]:
     overlay_database.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -283,9 +326,48 @@ def _write_overlay_atomically(
                 [(build_id, candidate_id, reason, json.dumps(details, ensure_ascii=False, sort_keys=True))
                  for candidate_id, reason, details in rejects],
             )
+            if coverage is not None:
+                snapshot_id = "annual-latest-v1"
+                overlay.execute(
+                    """INSERT INTO financial_coverage_snapshot VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        snapshot_id, coverage["schema_version"], coverage["source_database_sha256"],
+                        coverage["source_company_count"], coverage["searchable_alias_count"],
+                        coverage["selected_filing_company_count"], coverage["manifest_rejected_company_count"],
+                        coverage["expected_grain_count"], coverage["validated_grain_count"],
+                        coverage["missing_grain_count"], coverage["review_resolution_count"],
+                        int(coverage["aggregate_hard_gate_passed"]), coverage_sha,
+                    ),
+                )
+                overlay.executemany(
+                    """INSERT INTO financial_metric_coverage VALUES(?,?,?,?,?,?,?,?)""",
+                    [
+                        (
+                            snapshot_id, account_id, metric["expected_company_count"],
+                            metric["latest_validated_company_count"],
+                            metric["three_period_validated_company_count"],
+                            int(metric["aggregate_eligible"]),
+                            int(metric["three_period_aggregate_eligible"]),
+                            json.dumps(metric["missing_companies"], ensure_ascii=False, sort_keys=True),
+                        )
+                        for account_id, metric in sorted(coverage["metrics"].items())
+                    ],
+                )
+                overlay.executemany(
+                    """INSERT INTO financial_company_coverage VALUES(?,?,?,?,?,?,?,?,?,?)""",
+                    [
+                        (
+                            snapshot_id, company["issuer_corp_code"], company.get("stock_code"),
+                            company["listed_name"], company["selected_filing_id"], company["fiscal_year"],
+                            company["expected_count"], company["validated_count"], company["missing_count"],
+                            json.dumps(company["missing"], ensure_ascii=False, sort_keys=True),
+                        )
+                        for company in coverage["companies"]
+                    ],
+                )
             overlay.execute(
-                "INSERT INTO overlay_revision VALUES(?,?,datetime('now'),?)",
-                ("semantic-v1-agent-overlay", source_sha, seed_sha),
+                "INSERT INTO overlay_revision VALUES(?,?,datetime('now'),?,?)",
+                ("semantic-v1-agent-overlay", source_sha, seed_sha, coverage_sha or None),
             )
             overlay.commit()
             quick_check = str(overlay.execute("PRAGMA quick_check").fetchone()[0])
@@ -302,6 +384,8 @@ def _write_overlay_atomically(
 
 def _load_financial_seed(base: sqlite3.Connection, seed_path: Path, result: OverlayImportResult) -> list[dict[str, Any]]:
     validated_rows: list[dict[str, Any]] = []
+    fact_ids: set[str] = set()
+    grains: set[tuple[str, str, int, str]] = set()
     for line_no, line in enumerate(seed_path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
@@ -310,12 +394,143 @@ def _load_financial_seed(base: sqlite3.Connection, seed_path: Path, result: Over
             if not isinstance(row, dict):
                 raise ValueError("row is not an object")
             _validate_seed_row(base, row)
-            row["trust_tier"] = "human_verified"
+            trust_tier = row.get("trust_tier")
+            if trust_tier is None and row.get("extraction_method") == "human_validated":
+                # Backward compatibility for the original, explicitly human-reviewed seed.
+                trust_tier = "human_verified"
+            if trust_tier not in {"human_verified", "agent_audited"}:
+                raise ValueError("trust_tier must be explicit for non-human seed rows")
+            row["trust_tier"] = trust_tier
+            fact_id = str(row["financial_fact_id"])
+            if fact_id in fact_ids:
+                raise ValueError(f"duplicate financial_fact_id: {fact_id}")
+            fact_ids.add(fact_id)
+            if all(key in row for key in ("issuer_corp_code", "account_id", "fiscal_year", "scope")):
+                grain = (
+                    str(row["issuer_corp_code"]), str(row["account_id"]),
+                    int(row["fiscal_year"]), str(row["scope"]),
+                )
+                if grain in grains:
+                    raise ValueError(f"duplicate financial fact grain: {grain}")
+                grains.add(grain)
             validated_rows.append(row)
         except (ValueError, KeyError, TypeError, InvalidOperation, sqlite3.Error) as exc:
             result.rejected += 1
             result.reasons.append(f"line {line_no}: {exc}")
     return validated_rows
+
+
+_CORE_ACCOUNTS = {
+    "revenue", "operating_income", "net_income", "total_assets",
+    "total_liabilities", "total_equity",
+}
+
+
+def _load_financial_coverage(
+    base: sqlite3.Connection,
+    coverage_path: Path,
+    *,
+    source_sha: str,
+    financial_rows: list[dict[str, Any]],
+) -> tuple[dict[str, Any], str]:
+    coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+    if not isinstance(coverage, dict) or coverage.get("schema_version") != "financial-coverage-v1":
+        raise ValueError("unsupported financial coverage schema")
+    if str(coverage.get("source_database_sha256", "")).lower() != source_sha.lower():
+        raise ValueError("coverage source_database_sha256 does not match immutable base")
+    for field_name in (
+        "source_company_count", "searchable_alias_count", "selected_filing_company_count",
+        "manifest_rejected_company_count", "expected_grain_count", "validated_grain_count",
+        "missing_grain_count", "review_resolution_count",
+    ):
+        if not isinstance(coverage.get(field_name), int) or int(coverage[field_name]) < 0:
+            raise ValueError(f"invalid coverage field: {field_name}")
+    source_company_count = int(coverage["source_company_count"])
+    if int(coverage["expected_grain_count"]) != source_company_count * len(_CORE_ACCOUNTS) * 3:
+        raise ValueError("expected_grain_count does not match 6 metrics x 3 periods")
+    if int(coverage["validated_grain_count"]) != len(financial_rows):
+        raise ValueError("validated_grain_count does not match financial seed")
+    if int(coverage["missing_grain_count"]) != int(coverage["expected_grain_count"]) - len(financial_rows):
+        raise ValueError("missing_grain_count does not reconcile")
+
+    companies = coverage.get("companies")
+    metrics = coverage.get("metrics")
+    if not isinstance(companies, list) or not isinstance(metrics, dict) or set(metrics) != _CORE_ACCOUNTS:
+        raise ValueError("coverage companies/metrics contract is invalid")
+    selected_companies = [company for company in companies if company.get("selected_filing_id")]
+    rejected_companies = [company for company in companies if not company.get("selected_filing_id")]
+    if int(coverage["selected_filing_company_count"]) != len(selected_companies):
+        raise ValueError("selected_filing_company_count does not match selected companies")
+    if int(coverage["manifest_rejected_company_count"]) != len(rejected_companies):
+        raise ValueError("manifest_rejected_company_count does not match rejected companies")
+    if source_company_count != len(companies):
+        raise ValueError("source company counts do not reconcile")
+
+    company_by_code: dict[str, dict[str, Any]] = {}
+    rows_by_company: dict[str, list[dict[str, Any]]] = {}
+    for row in financial_rows:
+        corp_code = str(row.get("issuer_corp_code", ""))
+        if not corp_code or not row.get("account_id") or not isinstance(row.get("fiscal_year"), int):
+            raise ValueError("coverage seed rows require issuer_corp_code, account_id, and fiscal_year")
+        rows_by_company.setdefault(corp_code, []).append(row)
+    for company in companies:
+        corp_code = str(company.get("issuer_corp_code", ""))
+        if not corp_code or corp_code in company_by_code:
+            raise ValueError("company coverage issuer_corp_code must be unique")
+        company_by_code[corp_code] = company
+        filing_value = company.get("selected_filing_id")
+        filing_id = str(filing_value) if filing_value else ""
+        company_rows = rows_by_company.get(corp_code, [])
+        if filing_id:
+            filing = base.execute(
+                """SELECT f.issuer_corp_code,v.lineage_status
+                     FROM filing f JOIN filing_version v ON v.filing_id=f.filing_id
+                    WHERE f.filing_id=?""",
+                (filing_id,),
+            ).fetchone()
+            if filing is None or str(filing[0]) != corp_code or str(filing[1]) not in {"root", "resolved"}:
+                raise ValueError(f"company coverage selected filing is not answer-safe: {corp_code}")
+            if any(str(row["filing_id"]) != filing_id for row in company_rows):
+                raise ValueError(f"financial seed filing differs from coverage: {corp_code}")
+        elif company_rows:
+            raise ValueError(f"rejected company has financial seed rows: {corp_code}")
+        if int(company.get("expected_count", -1)) != len(_CORE_ACCOUNTS) * 3:
+            raise ValueError(f"company expected_count is invalid: {corp_code}")
+        if int(company.get("validated_count", -1)) != len(company_rows):
+            raise ValueError(f"company validated_count does not match seed: {corp_code}")
+        if int(company.get("missing_count", -1)) != int(company["expected_count"]) - len(company_rows):
+            raise ValueError(f"company missing_count does not reconcile: {corp_code}")
+        if not isinstance(company.get("missing"), list) or len(company["missing"]) != int(company["missing_count"]):
+            raise ValueError(f"company missing list does not reconcile: {corp_code}")
+    if set(rows_by_company) - set(company_by_code):
+        raise ValueError("financial seed contains a company outside coverage")
+
+    hard_gate = True
+    for account_id, metric in metrics.items():
+        years_by_company: dict[str, set[int]] = {}
+        for row in financial_rows:
+            if str(row["account_id"]) == account_id:
+                years_by_company.setdefault(str(row["issuer_corp_code"]), set()).add(int(row["fiscal_year"]))
+        latest_count = len(years_by_company)
+        three_count = sum(len(years) >= 3 for years in years_by_company.values())
+        if int(metric.get("expected_company_count", -1)) != source_company_count:
+            raise ValueError(f"metric expected_company_count is invalid: {account_id}")
+        if int(metric.get("latest_validated_company_count", -1)) != latest_count:
+            raise ValueError(f"metric latest_validated_company_count does not match seed: {account_id}")
+        if int(metric.get("three_period_validated_company_count", -1)) != three_count:
+            raise ValueError(f"metric three_period_validated_company_count does not match seed: {account_id}")
+        aggregate_eligible = latest_count == source_company_count
+        three_period_eligible = three_count == source_company_count
+        if bool(metric.get("aggregate_eligible")) != aggregate_eligible:
+            raise ValueError(f"metric aggregate_eligible is dishonest: {account_id}")
+        if bool(metric.get("three_period_aggregate_eligible")) != three_period_eligible:
+            raise ValueError(f"metric three_period_aggregate_eligible is dishonest: {account_id}")
+        if not isinstance(metric.get("missing_companies"), list) or len(metric["missing_companies"]) != source_company_count - latest_count:
+            raise ValueError(f"metric missing_companies does not reconcile: {account_id}")
+        hard_gate = hard_gate and aggregate_eligible and three_period_eligible
+    if bool(coverage.get("aggregate_hard_gate_passed")) != hard_gate:
+        raise ValueError("aggregate_hard_gate_passed is dishonest")
+    return coverage, sha256_file(coverage_path)
 
 
 def import_seed(base_database: Path, overlay_database: Path, seed_path: Path) -> OverlayImportResult:
@@ -597,9 +812,11 @@ def build_agent_overlay(
     predicate_config: Path,
     *,
     attestation: CorpusAttestation | None = None,
+    financial_coverage: Path | None = None,
 ) -> OverlayImportResult:
     base_database, overlay_database = Path(base_database), Path(overlay_database)
     financial_seed, predicate_config = Path(financial_seed), Path(predicate_config)
+    financial_coverage = Path(financial_coverage) if financial_coverage is not None else None
     if attestation is not None:
         if not verify_fast_identity(base_database, attestation):
             raise ValueError("database does not match corpus attestation")
@@ -614,6 +831,15 @@ def build_agent_overlay(
     rejects: list[tuple[str, str, dict[str, Any]]] = []
     with closing(_read_base(base_database)) as base:
         financial_rows = _load_financial_seed(base, financial_seed, result)
+        coverage: dict[str, Any] | None = None
+        coverage_sha = ""
+        if financial_coverage is not None:
+            coverage, coverage_sha = _load_financial_coverage(
+                base,
+                financial_coverage,
+                source_sha=source_sha,
+                financial_rows=financial_rows,
+            )
         allowlist = _load_predicate_allowlist(predicate_config)
         candidates: list[dict[str, Any]] = []
         for row in _event_candidates(base, allowlist):
@@ -642,11 +868,14 @@ def build_agent_overlay(
                 continue
             event_rows.extend(group)
     _, result.quick_check = _write_overlay_atomically(
-        base_database, overlay_database, source_sha, seed_sha, financial_rows, event_rows, rejects
+        base_database, overlay_database, source_sha, seed_sha, financial_rows, event_rows, rejects,
+        coverage=coverage,
+        coverage_sha=coverage_sha,
     )
     result.financial_imported = len(financial_rows)
     result.event_imported = len(event_rows)
     result.imported = result.financial_imported + result.event_imported
+    result.coverage_sha256 = coverage_sha
     return result
 
 
