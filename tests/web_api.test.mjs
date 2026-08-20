@@ -7,7 +7,11 @@ import {
   classifyAnswer,
   classifyFailure,
   classifyTransportFailure,
+  dartUrl,
   evidenceLabel,
+  healthLabel,
+  locatorLabel,
+  providerLabel,
 } from "../src/disclosure_db/web/api.js";
 
 test("explains incomplete corpus-wide financial counts without changing other answers", () => {
@@ -23,6 +27,33 @@ test("explains incomplete corpus-wide financial counts without changing other an
     answerText({answer: "일반 보류", reason_codes: ["company_unresolved"]}),
     "일반 보류",
   );
+});
+
+test("formats research readiness and provider mode without false warnings", () => {
+  assert.equal(
+    healthLabel({ready: true, company_count: 76}),
+    "공시 DB 준비됨 · 76개 기업",
+  );
+  assert.equal(healthLabel({ready: false, company_count: 76}), "공시 DB 준비 중");
+  assert.equal(
+    providerLabel(false),
+    "검증형 기본 엔진 사용 · HyperCLOVA X 설명 미사용",
+  );
+  assert.equal(providerLabel(true), "HyperCLOVA X 설명 연결됨");
+});
+
+test("formats corpus locators and allows only valid DART receipt links", () => {
+  assert.equal(
+    locatorLabel({kind: "table_row", table: 7, row: 16}),
+    "표 7 · 행 16",
+  );
+  assert.equal(locatorLabel({kind: "page", page: 3}), "3쪽");
+  assert.equal(
+    dartUrl("20250822000109"),
+    "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20250822000109",
+  );
+  assert.equal(dartUrl("f1"), null);
+  assert.equal(dartUrl("20250822000109&x=1"), null);
 });
 
 test("distinguishes verified and abstained answers", () => {

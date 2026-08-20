@@ -1,4 +1,13 @@
-import {askDisclosure, classifyAnswer, evidenceLabel} from "/static/api.js";
+import {
+  answerText,
+  askDisclosure,
+  classifyAnswer,
+  dartUrl,
+  evidenceLabel,
+  healthLabel,
+  locatorLabel,
+  providerLabel,
+} from "/static/api.js";
 import {
   appendMessage,
   clearConversations,
@@ -13,6 +22,8 @@ const STORAGE_KEY = "mirae-disclosure-agent-history-v1";
 const REQUEST_TIMEOUT_MS = 30_000;
 
 const status = document.querySelector("#service-status");
+const providerMode = document.querySelector("#provider-mode");
+const corpusRevision = document.querySelector("#corpus-revision");
 const sidebar = document.querySelector("#sidebar");
 const sidebarToggle = document.querySelector("#sidebar-toggle");
 const newChat = document.querySelector("#new-chat");
@@ -29,6 +40,7 @@ let store = loadStore();
 let selectedConversationId = store.conversations[0]?.id ?? null;
 let transientFailure = null;
 let requestPending = false;
+let healthSnapshot = null;
 
 function loadStore() {
   try {
@@ -72,28 +84,31 @@ function renderEvidence(parent, evidence) {
   if (!Array.isArray(evidence) || evidence.length === 0) {
     return;
   }
-  const section = document.createElement("section");
+  const section = document.createElement("details");
   section.className = "evidence-section";
-  addText(section, "h3", "evidence-heading", "공시 근거");
+  addText(section, "summary", "evidence-heading", `공시 근거 ${evidence.length}건`);
 
   const list = document.createElement("ol");
   list.className = "evidence-list";
   for (const item of evidence) {
     const evidenceItem = document.createElement("li");
     addText(evidenceItem, "strong", "evidence-label", evidenceLabel(item) || "공시 근거");
-    if (item.locator && typeof item.locator === "object") {
-      const locatorList = document.createElement("dl");
-      locatorList.className = "locator-list";
-      for (const [key, value] of Object.entries(item.locator)) {
-        addText(locatorList, "dt", "locator-key", key);
-        addText(
-          locatorList,
-          "dd",
-          "locator-value",
-          typeof value === "string" ? value : JSON.stringify(value),
-        );
-      }
-      evidenceItem.append(locatorList);
+    if (typeof item.excerpt === "string" && item.excerpt.trim()) {
+      addText(evidenceItem, "p", "evidence-excerpt", item.excerpt.trim());
+    }
+    const location = locatorLabel(item.locator);
+    if (location) {
+      addText(evidenceItem, "p", "evidence-meta", location);
+    }
+    const filingUrl = dartUrl(item.receipt_no);
+    if (filingUrl) {
+      const link = document.createElement("a");
+      link.className = "evidence-link";
+      link.href = filingUrl;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = "DART 원문 열기";
+      evidenceItem.append(link);
     }
     list.append(evidenceItem);
   }
@@ -127,7 +142,7 @@ function renderMessage(message) {
   const item = document.createElement("li");
   item.className = `message message-${message.role}`;
   if (message.role === "assistant") {
-    const badgeText = message.answer_state === "verified" ? "검증된 답변" : "답변 보류";
+    const badgeText = message.answer_state === "verified" ? "근거 확인됨" : "답변 보류";
     addText(item, "span", `answer-badge answer-${message.answer_state || "abstained"}`, badgeText);
   }
   addText(item, "p", "message-text", message.text);
@@ -158,11 +173,41 @@ function renderFailure() {
   messages.append(item);
 }
 
+function renderEmptyState() {
+  const item = document.createElement("li");
+  item.className = "empty-message";
+  addText(item, "p", "empty-kicker", "DISCLOSURE RESEARCH");
+  addText(item, "h2", "", "기업 공시를 근거와 함께 살펴보세요");
+  addText(
+    item,
+    "p",
+    "",
+    "회사명과 궁금한 항목을 함께 입력하면 검증 가능한 공시만 찾아 답합니다.",
+  );
+  const facts = document.createElement("div");
+  facts.id = "corpus-facts";
+  facts.className = "corpus-facts";
+  facts.setAttribute("aria-label", "공시 데이터 특징");
+  const companyFact = addText(
+    facts,
+    "span",
+    "",
+    healthSnapshot?.ready === true
+      ? `${healthSnapshot.company_count ?? 0}개 기업 검색 가능`
+      : "검색 가능한 기업 확인 중",
+  );
+  companyFact.id = "company-count-fact";
+  addText(facts, "span", "", "정정 공시 계보 확인");
+  addText(facts, "span", "", "인용 근거 열람");
+  item.append(facts);
+  messages.append(item);
+}
+
 function renderMessages() {
   messages.replaceChildren();
   const conversation = selectedConversation();
   if (!conversation) {
-    addText(messages, "li", "empty-message", "새 질문을 입력하면 이 브라우저에 대화가 저장됩니다.");
+    renderEmptyState();
     return;
   }
   for (const message of conversation.messages) {
@@ -251,7 +296,7 @@ async function submitQuestion(question, appendUser = true) {
     const body = await askDisclosure(text, {signal: controller.signal});
     store = appendMessage(store, conversationId, {
       role: "assistant",
-      text: body.answer,
+      text: answerText(body),
       created_at: new Date().toISOString(),
       answer_state: classifyAnswer(body),
       evidence: Array.isArray(body.evidence) ? body.evidence : [],
@@ -279,18 +324,21 @@ async function refreshHealth() {
   try {
     const response = await fetch("/health", {headers: {Accept: "application/json"}});
     const body = response.ok ? await response.json() : {};
-    if (body.ready === true) {
-      status.textContent = body.provider_configured === true
-        ? "준비됨"
-        : "준비됨 · HyperCLOVA X 미연결";
-      status.dataset.state = body.provider_configured === true ? "ready" : "warning";
-    } else {
-      status.textContent = "준비 중";
-      status.dataset.state = "waiting";
+    healthSnapshot = body;
+    status.textContent = healthLabel(body);
+    status.dataset.state = body.ready === true ? "ready" : "waiting";
+    providerMode.textContent = providerLabel(body.provider_configured === true);
+    corpusRevision.textContent = typeof body.corpus_revision === "string"
+      ? body.corpus_revision
+      : "확인 불가";
+    if (!selectedConversation()) {
+      renderMessages();
     }
   } catch {
     status.textContent = "상태 확인 불가";
     status.dataset.state = "warning";
+    providerMode.textContent = "답변 엔진 상태 확인 불가";
+    corpusRevision.textContent = "확인 불가";
   }
 }
 

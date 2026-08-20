@@ -12,6 +12,52 @@ export function answerText(body) {
   return body.answer;
 }
 
+export function healthLabel(body) {
+  if (body.ready !== true) {
+    return "공시 DB 준비 중";
+  }
+  const count = Number.isInteger(body.company_count) && body.company_count >= 0
+    ? body.company_count
+    : 0;
+  return `공시 DB 준비됨 · ${count}개 기업`;
+}
+
+export function providerLabel(configured) {
+  return configured === true
+    ? "HyperCLOVA X 설명 연결됨"
+    : "검증형 기본 엔진 사용 · HyperCLOVA X 설명 미사용";
+}
+
+export function locatorLabel(locator) {
+  if (!locator || typeof locator !== "object") {
+    return "";
+  }
+  const parts = [];
+  if (locator.table !== undefined && locator.table !== null) {
+    parts.push(`표 ${locator.table}`);
+  }
+  if (locator.row !== undefined && locator.row !== null) {
+    parts.push(`행 ${locator.row}`);
+  }
+  if (parts.length > 0) {
+    return parts.join(" · ");
+  }
+  if (locator.page !== undefined && locator.page !== null) {
+    return `${locator.page}쪽`;
+  }
+  if (typeof locator.sheet === "string" && locator.sheet) {
+    return locator.sheet;
+  }
+  return "";
+}
+
+export function dartUrl(receiptNo) {
+  if (typeof receiptNo !== "string" || !/^\d{14}$/.test(receiptNo)) {
+    return null;
+  }
+  return `https://dart.fss.or.kr/dsaf001/main.do?rcpNo=${receiptNo}`;
+}
+
 export function classifyFailure(status, detail) {
   if (status === 429) {
     return {

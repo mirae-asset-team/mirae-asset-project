@@ -454,19 +454,49 @@ summary {
 }
 
 .evidence-heading {
-  margin: 0 0 0.5rem;
+  padding: 0.15rem 0;
+  list-style-position: inside;
+  color: #31415e;
   font-size: 0.9rem;
 }
 
 .evidence-list {
   display: grid;
   gap: 0.6rem;
-  margin: 0;
+  margin: 0.7rem 0 0;
   padding-left: 1.25rem;
+}
+
+.evidence-list li {
+  padding: 0.65rem 0.7rem;
+  border: 1px solid #e3e0d9;
+  border-radius: 0.65rem;
+  background: #faf9f6;
 }
 
 .evidence-label {
   font-size: 0.85rem;
+}
+
+.evidence-excerpt {
+  margin-top: 0.55rem !important;
+  color: #394354;
+  font-size: 0.86rem;
+  line-height: 1.65;
+}
+
+.evidence-meta {
+  margin-top: 0.45rem !important;
+  color: #727886;
+  font-size: 0.76rem;
+}
+
+.evidence-link {
+  display: inline-block;
+  margin-top: 0.45rem;
+  color: #2d4bb4;
+  font-size: 0.78rem;
+  text-underline-offset: 0.18rem;
 }
 
 .locator-list,
