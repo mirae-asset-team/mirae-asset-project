@@ -18,7 +18,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install project
-        run: python -m pip install -e ".[agent]" pytest
+        run: python -m pip install -e ".[agent]" pytest httpx
       - name: Compile Python
         run: python -m compileall -q src scripts tests
       - name: Validate JSON contracts

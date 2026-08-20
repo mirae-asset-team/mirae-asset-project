@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import threading
 from contextlib import contextmanager
@@ -66,9 +67,12 @@ def fake_agent(*, include_ui: bool) -> Iterator[str]:
 
 
 def run_smoke(base_url: str) -> subprocess.CompletedProcess[str]:
+    executable = shutil.which("powershell") or shutil.which("pwsh")
+    if executable is None:
+        raise RuntimeError("PowerShell is required to run the deployment smoke test")
     return subprocess.run(
         [
-            "powershell",
+            executable,
             "-NoProfile",
             "-ExecutionPolicy",
             "Bypass",
