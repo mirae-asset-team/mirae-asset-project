@@ -277,7 +277,10 @@ class EvidenceService:
                 event_facts, as_of=version_as_of, correction_policy=plan.correction_policy,
             )
             refs.extend(structured_refs)
-        if len(refs) < limit:
+        # One admitted structured fact already carries exact table-cell evidence.
+        # Filling the remaining generic limit would reopen and integrity-scan the
+        # entire search index without contributing to the structured claim.
+        if len(refs) < limit and not (structured_domain and refs):
             index_used = False
             index_available = False
             if self.search_database is not None:

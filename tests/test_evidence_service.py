@@ -89,6 +89,34 @@ class EvidenceServiceTests(unittest.TestCase):
             self.assertFalse(bundle.retrieval_diagnostics["reranker_used_provider"])
             self.assertEqual(bundle.retrieval_diagnostics["reranker_reason_codes"], ["reranker_structured_bypass"])
 
+    def test_admitted_structured_fact_does_not_open_generic_search_index(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay, search = root / "base.sqlite", root / "overlay.sqlite", root / "search.sqlite"
+            seed_search_db(base)
+            overlay.touch()
+            search.touch()
+            service = EvidenceService(base, overlay, attestation=Mock(), search_database=search)
+            plan = QueryPlan(
+                "삼성전자 매출액", company="삼성전자", fact_domain="financial",
+                account_id="revenue", account_terms=["매출액"],
+            )
+            facts = [{"value_numeric": "100", "evidence_ids": ["ev1"]}]
+            refs = [EvidenceRef("ev1", "f1", "s1", "100")]
+            with patch.object(service, "_base_identity_valid", return_value=True), patch(
+                "disclosure_db.evidence_service.overlay_matches_base", return_value=True,
+            ), patch(
+                "disclosure_db.evidence_service.fetch_overlay_facts", return_value=facts,
+            ), patch.object(
+                service, "_hydrate_facts", return_value=(facts, refs),
+            ), patch("disclosure_db.search_index.SafeSearchIndex") as search_index:
+                search_index.return_value.search.return_value = []
+                bundle = service.search(plan, limit=8)
+
+            search_index.assert_not_called()
+            self.assertTrue(bundle.answerable)
+            self.assertEqual(bundle.financial_facts[0]["value_numeric"], "100")
+
     def test_search_returns_safe_evidence_refs_and_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp) / "base.sqlite"

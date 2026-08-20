@@ -1,6 +1,6 @@
 # Contest server release checklist
 
-Last updated: 2026-08-20 10:28:59 KST
+Last updated: 2026-08-21 01:52:05 KST
 
 This checklist records binary evidence without credentials or raw provider responses. `BLOCKED_EXTERNAL` means the local gate is defined but the required external resource is unavailable; it is not treated as a pass.
 `BLOCKED_LOCAL_RUNTIME` means a local runtime limitation prevented evidence collection; it is not treated as a pass.
@@ -59,6 +59,8 @@ This checklist records binary evidence without credentials or raw provider respo
 | Insider-purchase regression after UI release | PASS_LOCAL | the Samsung Biologics insider-purchase query remained unanswerable with validated_event_fact_required |
 | Local font packaging | PASS | pinned unmodified font-kopubworld@1.0.3; three WOFF2 files plus license present in the wheel; no runtime CDN |
 | Public research UI v2 NCP deployment | PENDING | code-only deployment, restart recovery, anonymous browser/evidence expansion, provider mode, and read-only remote mount/hash checks must pass before promotion |
+| Corpus-wide financial release evaluation | PASS_LOCAL | staging overlay: 856/856 exact cases; latest 456, three-year 397, incomplete count/list/rank refusals 3; false numeric and ungrounded verified answers 0; Samsung regression passed |
+| SQLite 20-request concurrency | PASS_LOCAL | synchronized 20-request wave; errors 0; p95 86.94ms; fixed gate <=2,000ms, so PostgreSQL/OpenSearch remains deferred |
 
 ## Rollback path
 

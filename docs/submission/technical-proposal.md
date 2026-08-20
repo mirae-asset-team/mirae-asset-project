@@ -169,8 +169,11 @@ HyperCLOVA X는 공시 지식을 외워 답하는 권위자가 아니다. 검색
 
 | 검증 | 결과 |
 |---|---:|
-| Python 전체 회귀 | 297 passed, 1 skipped, 19 subtests |
+| Python 전체 회귀 | 304 passed, 1 skipped |
 | Frontend Node 테스트 | 16/16 passed |
+| 76개 검색명 재무 출시 평가 | 856/856 passed |
+| 최신값 / 3개년 / 집계 거절 | 456 / 397 / 3 passed |
+| SQLite 20개 동시 요청 | 오류 0, p95 86.94ms |
 | 결정론적 stress | 300/300 passed |
 | 허위 숫자 | 0 |
 | 안전하지 않은 답변 | 0 |
@@ -182,7 +185,7 @@ HyperCLOVA X는 공시 지식을 외워 답하는 권위자가 아니다. 검색
 | Citation precision / recall | 1.0 / 1.0 |
 | 실제 브라우저 XSS | literal text, DOM image 0, dialog 0 |
 
-대표 로컬 직접 실행 질의는 약 4.8초였고, 기존 NCP API-only 배포의 대표 정정 질문은 외부 Windows 네트워크에서 약 2.09초에 두 값과 두 근거를 반환했다. Windows Docker Desktop의 D-drive bind mount에서는 192~208초가 측정돼 기능은 통과했지만 성능 기준으로 사용하지 않았다. Linux NCP의 기존 API-only 배포에서는 내부 질의가 약 1.66~1.71초였다.
+구조화 재무 경로의 overlay-first 조회와 불필요한 범용 검색 초기화를 제거한 뒤, 856개 출시 평가의 직접 p95는 10.357ms였고 20개 동시 요청 p95는 86.94ms였다. 따라서 2초 기준을 넉넉히 충족해 SQLite를 유지한다. Windows Docker Desktop의 D-drive bind mount에서 과거 측정한 192~208초는 호스트 마운트 환경 경고이며 현재 구조화 경로 성능 기준으로 사용하지 않는다.
 
 ### 해석에 필요한 한계
 

@@ -162,6 +162,49 @@ def seed_composite_event_base(path: Path, *, ambiguous: bool = False) -> str:
 
 
 class FinancialOverlayTests(unittest.TestCase):
+    def test_financial_fact_fetch_does_not_scan_unrelated_source_documents(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay, seed = root / "base.sqlite", root / "overlay.sqlite", root / "seed.jsonl"
+            seed_base(base)
+            with closing(sqlite3.connect(base)) as connection:
+                rows = [
+                    (
+                        f"decoy-{index}", "f1", "attachment", f"decoy-{index}.xml", ".xml",
+                        "dart_xml", "utf-8", "utf-8", f"{index:064x}", 1,
+                        "2024-03-01T00:00:00Z", "test", "1", "success", 1, 0, "[]", "{}",
+                    )
+                    for index in range(20_000)
+                ]
+                connection.executemany(
+                    "INSERT INTO source_document VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    rows,
+                )
+                connection.execute("ANALYZE")
+                connection.commit()
+            seed.write_text(json.dumps(financial_seed_row(), ensure_ascii=False) + "\n", encoding="utf-8")
+            import_seed(base, overlay, seed)
+
+            def limited_read(path: Path) -> sqlite3.Connection:
+                connection = sqlite3.connect(
+                    f"file:{Path(path).resolve().as_posix()}?mode=ro&immutable=1", uri=True,
+                )
+                connection.row_factory = sqlite3.Row
+                callbacks = 0
+
+                def stop_long_scan() -> int:
+                    nonlocal callbacks
+                    callbacks += 1
+                    return int(callbacks > 50)
+
+                connection.set_progress_handler(stop_long_scan, 100)
+                return connection
+
+            with patch("disclosure_db.financial_overlay._read_base", side_effect=limited_read):
+                facts = fetch_overlay_facts(base, overlay, company="테스트", account_id="revenue")
+
+            self.assertEqual([fact["financial_fact_id"] for fact in facts], ["ff1"])
+
     def test_financial_fact_fetch_orders_latest_and_filters_fiscal_year(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

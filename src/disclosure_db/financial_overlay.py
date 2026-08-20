@@ -1010,11 +1010,11 @@ def fetch_overlay_facts(
                        group_concat(DISTINCT ffe.evidence_id) evidence_ids,
                        json_group_array(DISTINCT c.text_raw) evidence_texts
                   FROM overlay.financial_fact ff
-                  JOIN main.filing f ON f.filing_id=ff.filing_id
-                  JOIN main.filing_version v ON v.filing_id=ff.filing_id
-                  JOIN overlay.financial_fact_evidence ffe ON ffe.financial_fact_id=ff.financial_fact_id
-                  JOIN main.table_cell c ON c.evidence_id=ffe.evidence_id
-                  JOIN main.source_document s ON s.source_id=c.source_id
+                  CROSS JOIN main.filing f ON f.filing_id=ff.filing_id
+                  CROSS JOIN main.filing_version v ON v.filing_id=ff.filing_id
+                  CROSS JOIN overlay.financial_fact_evidence ffe ON ffe.financial_fact_id=ff.financial_fact_id
+                  CROSS JOIN main.table_cell c ON c.evidence_id=ffe.evidence_id
+                  CROSS JOIN main.source_document s ON s.source_id=c.source_id
                  WHERE {' AND '.join(where)}
                  GROUP BY ff.financial_fact_id
                  ORDER BY COALESCE(ff.period_end,ff.instant_date) DESC,
