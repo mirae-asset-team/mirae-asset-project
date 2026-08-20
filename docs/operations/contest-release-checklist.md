@@ -1,6 +1,6 @@
 # Contest server release checklist
 
-Last updated: 2026-08-21 01:52:05 KST
+Last updated: 2026-08-21 KST
 
 This checklist records binary evidence without credentials or raw provider responses. `BLOCKED_EXTERNAL` means the local gate is defined but the required external resource is unavailable; it is not treated as a pass.
 `BLOCKED_LOCAL_RUNTIME` means a local runtime limitation prevented evidence collection; it is not treated as a pass.
@@ -9,7 +9,7 @@ This checklist records binary evidence without credentials or raw provider respo
 |---|---|---|
 | Runtime image source commit | PASS | exact code-only `git archive` from `dcf44b8`; archive SHA-256 `5e75b7b9e4e86c7d70e93761fb90a6f8f292c23df8835546dba53c006b182cdb`; no `.env`, database, key, or runtime file |
 | Immutable base size/SHA-256 | PASS | `38,773,280,768` bytes / `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563` |
-| Live overlay SHA-256 | PASS | `92ffe3ce1740153cfec457f5354685535a31cc5fe0d7722d61f1195f2ac1d3ad` |
+| NCP live overlay SHA-256 | PASS_PRIOR_RELEASE | `92ffe3ce1740153cfec457f5354685535a31cc5fe0d7722d61f1195f2ac1d3ad`; corpus-wide overlay is not yet deployed remotely |
 | Live search SHA-256/revision | PASS | `e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793` / `safe-search-v1` |
 | Overlay integrity/base attestation | PASS | `integrity_check=ok`, `overlay_matches_base=true`, event facts `1,423` |
 | Validated financial-fact seed coverage | PASS_SCOPE_LIMITED | Strict seed-to-audited-Gold match `8/8`, all trust tier `agent_audited`; exact question/fact ID, filing, value, scale, and evidence set; `corpus_wide_complete=false` |
@@ -18,8 +18,8 @@ This checklist records binary evidence without credentials or raw provider respo
 | Dense embedding/vector pilot | DEFERRED_NO_EVIDENCE | Residual text targets `0`; no paid embedding call or dense manifest was created because the current Gold gate shows no eligible miss |
 | PostgreSQL/pgvector/OpenSearch serving | DEFERRED_NO_EVIDENCE | SQLite remains attested SSOT/rollback; no serving sidecar or OpenSearch resource is justified by current residual evidence, provisioned, or claimed complete |
 | 300-case manifest | PASS | SHA-256 `1b014f0bfca75c8db6f6306dcdab80fff4cafb80dfb3709bf1e9d3bb8d8dd2a0`; fresh final provider-disabled run `20260819T174202Z-1b014f0bfca7`; `300/300` pass; evaluator error and all hard counters `0`; all four quality metrics `1.0`; p95 `5193.46ms`; failures `0` bytes; summary SHA-256 `3ab5b0a5823112157a4be4219883bcdba46f4f859d47f5fc2c65b8a0d73230ce` |
-| Full local regression | PASS | latest review-hardened hybrid-closure run `253 passed, 1 skipped, 17 subtests passed`; compileall passed |
-| Frontend logic regression | PASS | Node `24.14.0`; history/API suites `10/10` passed; this Node release rejects the removed `--experimental-default-type=module` flag, so the equivalent current `node --test` command was used |
+| Full local regression | PASS | corpus-wide final run `304 passed, 1 skipped, 19 subtests passed`; compileall passed |
+| Frontend logic regression | PASS | history/API suites `16/16` passed with the bundled Node runtime |
 | Wheel web assets | PASS | wheel SHA-256 `78056aee8b9d800dae964ae4624848ec05622a0adb922ff15afbe50f2e2e58f2`; `index.html`, `app.css`, `app.js`, `history.js`, `api.js` present (`5/5`) |
 | Local Docker image/UI smoke | PASS | Docker Engine `29.7.2`; image `sha256:c0adf3adcc07dfb09e2e0fdb8f235b973c1036592c5cc262d3760b6ac1721cd9`; container healthy; web/CSP and three query probes passed |
 | Local Docker request IDs | PASS | health `3029125d830a488ca62743bc4e0f71a3`; verified `84799fc1e0304306a9ee230d68ace408`; abstention `d5838369907941b4b0bb520eaea6e0b6`; injection `104d496d9b014b328720d37fe174b9ee` |
@@ -61,13 +61,18 @@ This checklist records binary evidence without credentials or raw provider respo
 | Public research UI v2 NCP deployment | PENDING | code-only deployment, restart recovery, anonymous browser/evidence expansion, provider mode, and read-only remote mount/hash checks must pass before promotion |
 | Corpus-wide financial release evaluation | PASS_LOCAL | staging overlay: 856/856 exact cases; latest 456, three-year 397, incomplete count/list/rank refusals 3; false numeric and ungrounded verified answers 0; Samsung regression passed |
 | SQLite 20-request concurrency | PASS_LOCAL | synchronized 20-request wave; errors 0; p95 86.94ms; fixed gate <=2,000ms, so PostgreSQL/OpenSearch remains deferred |
+| Local corpus-wide overlay promotion | PASS_LOCAL | atomic rename promotion; new live SHA-256 `a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55`; `quick_check=ok`; FK violations `0`; base identity matched; `1,191` facts |
+| Local corpus-wide post-promotion smoke | PASS_LOCAL | root/static/health/coverage HTTP 200; Samsung FY2025 consolidated revenue `333,605,938 백만원`, filing `20260310002820`, verified with one evidence; request `9ceee5941efb4337bee91bafd07e475d` |
+| Refreshed technical proposal PDF | PASS | 12 pages; pypdf required-value checks and Poppler visual inspection passed; SHA-256 `a77d409c4f0821d9f36431c35f0cb767ae64d2834881408c1d90c39974f71c75` |
+| Corpus-wide NCP deployment | BLOCKED_EXTERNAL | original `mirae-contest-key` PEM is unavailable; no new persistent key or server authentication change was authorized, so remote code/overlay/restart/public checks were not claimed |
+| GitHub corpus-wide branch publication | BLOCKED_EXTERNAL | local commits ready; explicit approval is required before pushing to `ksm12030-sudo/mirae-asset-project`, branch `agent/disclosure-db-foundation` |
 
 ## Rollback path
 
-The previous live overlay is preserved at `D:\mirae-asset-project\db\agent\agent_overlay.20260819-061500.previous.sqlite`. The immutable base and live search index were not modified by the overlay promotion.
+The previous local live overlay is preserved at `D:\mirae-asset-project\db\agent\agent_overlay.20260821-015205.pre-corpus-wide.sqlite`. Its SHA-256 is `92ffe3ce1740153cfec457f5354685535a31cc5fe0d7722d61f1195f2ac1d3ad`. The immutable base and live search index were not modified by the promotion. The remote NCP service has not yet received the corpus-wide overlay.
 
 ## Go/no-go
 
-Local deterministic hard gates: GO. Existing public API and restart-recovery evidence: GO. Anonymous public web UI deployment: GO. API and browser UI team demos: GO.
+Local deterministic and corpus-wide financial hard gates: GO. Local atomic promotion: GO. Existing prior-release public API and restart-recovery evidence: GO. Corpus-wide NCP redeployment: BLOCKED_EXTERNAL. GitHub publication: BLOCKED_EXTERNAL.
 
 Final contest submission: NO-GO until a rotated HyperCLOVA X credential passes the bounded schema/provider 300 gate. The public UI/`GET /answer`/restart checks, technical proposal, and API specification are complete; no external gate was relaxed.

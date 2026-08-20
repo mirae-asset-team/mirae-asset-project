@@ -318,7 +318,7 @@ def cover_story(styles: dict[str, ParagraphStyle]) -> list[Flowable]:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
     ]))
     facts = Table([
-        ["38.8GB", "300/300", "0건", "243 tests"],
+        ["38.8GB", "300/300", "0건", "304 tests"],
         ["immutable corpus", "deterministic stress", "hard safety failures", "Python regression"],
     ], colWidths=[38.75 * mm] * 4)
     facts.setStyle(TableStyle([
@@ -353,7 +353,7 @@ def cover_story(styles: dict[str, ParagraphStyle]) -> list[Flowable]:
             styles["body"],
         ),
         Spacer(1, 10 * mm),
-        Paragraph("작성 기준일 2026-08-20", styles["small"]),
+        Paragraph("작성 기준일 2026-08-21", styles["small"]),
         PageBreak(),
     ]
 
