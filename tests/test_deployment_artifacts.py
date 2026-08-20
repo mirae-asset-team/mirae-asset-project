@@ -36,6 +36,11 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn('"web/fonts/*.woff2"', text)
         self.assertIn('"web/fonts/LICENSE.md"', text)
 
+    def test_ci_installs_public_api_test_dependencies_and_runs_pytest(self):
+        text = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn('python -m pip install -e ".[agent]" pytest', text)
+        self.assertIn("python -m pytest -q", text)
+
     def test_windows_scripts_validate_read_only_inputs_and_smoke_query(self):
         start = Path("scripts/start-agent.ps1").read_text(encoding="utf-8")
         smoke = Path("scripts/smoke-agent.ps1").read_text(encoding="utf-8")
