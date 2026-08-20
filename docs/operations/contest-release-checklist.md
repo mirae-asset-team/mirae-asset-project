@@ -52,6 +52,13 @@ This checklist records binary evidence without credentials or raw provider respo
 | Container restart recovery | PASS | New image returned healthy after `docker restart`; read-only mounts and public root/health/q005 passed; request `36b4782a214c49f98220b131b9eaacdf` returned both values and two evidence records |
 | Host reboot recovery | PASS | A real outage and recovery were observed; `/srv/mirae` auto-mounted, four immutable artifacts remained `0444` with all SHA-256 values unchanged, the new image auto-started healthy, public health recovered, and the browser UI/history reloaded successfully |
 | External second-network test | PASS | Public health 90.82ms; four public queries 1.74–1.99s; schema, evidence mapping, abstention, and injection behavior passed after reboot and ACG cleanup |
+| Public research UI v2 local gate | PASS_LOCAL | 224px desktop rail, 880px reading column, 390px responsive view without horizontal overflow; removed subtitle; title uses KoPubWorld Dotum and all other visible text uses KoPubWorld Batang |
+| Searchable company count contract | PASS_LOCAL | real read-only runtime returned company_count=76; UI labels this as searchable companies and does not imply corpus-wide financial completeness |
+| Verified evidence excerpt contract | PASS_LOCAL | verifier-owned normalized excerpts are bounded to 600 characters, omitted on abstention, rendered with textContent, and paired with a DART link only for 14-digit receipts |
+| Incomplete aggregate explanation | PASS_LOCAL | the operating-profit threshold-count query remained unanswerable with corpus_wide_financial_coverage_required; no partial count was emitted |
+| Insider-purchase regression after UI release | PASS_LOCAL | the Samsung Biologics insider-purchase query remained unanswerable with validated_event_fact_required |
+| Local font packaging | PASS | pinned unmodified font-kopubworld@1.0.3; three WOFF2 files plus license present in the wheel; no runtime CDN |
+| Public research UI v2 NCP deployment | PENDING | code-only deployment, restart recovery, anonymous browser/evidence expansion, provider mode, and read-only remote mount/hash checks must pass before promotion |
 
 ## Rollback path
 
