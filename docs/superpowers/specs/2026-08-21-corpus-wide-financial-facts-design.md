@@ -62,3 +62,9 @@ Make verified financial questions useful for every legal issuer in the corpus wi
 ## Audit trail
 
 Each implementation task records its RED failure, GREEN verification, full regression, input/output hashes, reject counts, decision rationale, and commit in `docs/development-log.md`. Stable manifests and aggregate coverage reports are tracked; credentials, raw provider responses, large databases, checkpoints, and runtime logs are not.
+
+## Task 3 measured extraction boundary
+
+- The deterministic rule pass generated 1,188 candidates from 1,242 expected grains across the 69 answer-safe selected filings. It discovered consolidated main statements for 68 companies; the source contains no real separate-only case in this universe, although the fallback is fixture-tested.
+- Reviewed direct aliases recover standard `수익(매출액)`, `연결당기순이익(손실)`, `자산 합계`, and `부채 합계` variants. Component finance income rows are not summed into revenue. Equal duplicate totals, blank totals, missing units, and current corrections without current-filing statement cells remain review items.
+- Task 3 candidates are not serving facts. Task 4 must independently validate evidence/source/lineage and emit the admitted `agent_audited` seed. In particular, KB Financial's original-filing attachment statements cannot satisfy current-only serving until effective correction-lineage behavior is implemented and verified; Hana Financial's malformed attached unit metadata cannot be inferred without source-backed review.
