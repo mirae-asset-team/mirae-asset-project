@@ -4,6 +4,7 @@ import json
 import re
 import sqlite3
 from contextlib import closing
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,85 @@ STOPWORDS = {
     "각각", "해당", "현재", "원", "몇", "후", "전", "및",
 }
 PARTICLE_SUFFIXES = ("에서는", "에서", "으로", "에게", "까지", "부터", "에는", "은", "는", "이", "가", "을", "를", "의", "에")
+
+
+def _audited_financial_gold(record: dict[str, Any]) -> bool:
+    audit = record.get("audit") if isinstance(record.get("audit"), dict) else {}
+    review = record.get("review") if isinstance(record.get("review"), dict) else {}
+    return bool(
+        record.get("answerability") == "answerable"
+        and (
+            audit.get("state") in {"agent_audited", "human_verified"}
+            or review.get("status") == "approved"
+        )
+    )
+
+
+def _decimal_equal(left: object, right: object) -> bool:
+    try:
+        return Decimal(str(left)) == Decimal(str(right))
+    except InvalidOperation:
+        return False
+
+
+def audit_financial_fact_coverage(*, seed_path: Path, gold_path: Path) -> dict[str, Any]:
+    """Compare checked-in validated financial seeds with audited Gold, without promotion."""
+    seed_rows = [row for row in load_jsonl(seed_path) if row.get("validation_status") == "validated"]
+    gold_by_question: dict[str, list[dict[str, Any]]] = {}
+    for record in load_jsonl(gold_path):
+        if _audited_financial_gold(record):
+            gold_by_question.setdefault(str(record.get("question_id") or ""), []).append(record)
+
+    facts: list[dict[str, Any]] = []
+    for seed in sorted(seed_rows, key=lambda row: str(row.get("financial_fact_id") or "")):
+        fact_id = str(seed.get("financial_fact_id") or "")
+        question_id = f"agent_financial_{fact_id}"
+        candidates = gold_by_question.get(question_id, [])
+        reasons: list[str] = []
+        if not candidates:
+            reasons.append("missing_gold")
+        else:
+            if len(candidates) != 1:
+                reasons.append("duplicate_gold")
+            record = candidates[0]
+            if [str(item) for item in record.get("candidate_filing_ids", [])] != [str(seed.get("filing_id") or "")]:
+                reasons.append("filing_mismatch")
+            answer = record.get("answer") if isinstance(record.get("answer"), dict) else {}
+            if answer.get("kind") != "numeric" or not _decimal_equal(answer.get("value"), seed.get("value_numeric")):
+                reasons.append("value_mismatch")
+            try:
+                scale_matches = int(answer.get("scale")) == int(seed.get("scale"))
+            except (TypeError, ValueError):
+                scale_matches = False
+            if not scale_matches:
+                reasons.append("scale_mismatch")
+            gold_evidence = {
+                str(item.get("evidence_id"))
+                for item in record.get("evidence", [])
+                if isinstance(item, dict) and item.get("evidence_id")
+            }
+            seed_evidence = {str(item) for item in seed.get("evidence_ids", [])}
+            if gold_evidence != seed_evidence:
+                reasons.append("evidence_mismatch")
+        facts.append(
+            {
+                "financial_fact_id": fact_id,
+                "question_id": question_id,
+                "status": "covered" if not reasons else "gap",
+                "reason_codes": sorted(reasons),
+            }
+        )
+
+    covered = sum(item["status"] == "covered" for item in facts)
+    return {
+        "scope": "checked_in_validated_seed_vs_audited_gold",
+        "validated_seed_count": len(facts),
+        "covered_seed_count": covered,
+        "gap_seed_count": len(facts) - covered,
+        "coverage": (covered / len(facts)) if facts else None,
+        "corpus_wide_complete": False,
+        "facts": facts,
+    }
 
 
 def retrieval_tokens(question: str, *, company_names: list[str] | None = None) -> list[str]:

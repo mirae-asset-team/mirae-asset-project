@@ -7,10 +7,72 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from disclosure_db.retrieval_evaluation import evaluate_retrieval
+from disclosure_db.retrieval_evaluation import audit_financial_fact_coverage, evaluate_retrieval
 
 
 class RetrievalEvaluationTests(unittest.TestCase):
+    def test_financial_fact_coverage_requires_exact_gold_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = root / "seed.jsonl"
+            gold = root / "gold.jsonl"
+            seed_rows = [
+                {
+                    "financial_fact_id": "ff1", "filing_id": "f1", "value_numeric": "1000",
+                    "scale": 1, "evidence_ids": ["ev1"], "validation_status": "validated",
+                },
+                {
+                    "financial_fact_id": "ff2", "filing_id": "f2", "value_numeric": "2000",
+                    "scale": 1, "evidence_ids": ["ev2"], "validation_status": "validated",
+                },
+            ]
+            gold_rows = [{
+                "question_id": "agent_financial_ff1", "answerability": "answerable",
+                "candidate_filing_ids": ["f1"],
+                "answer": {"kind": "numeric", "value": "1000", "scale": 1},
+                "evidence": [{"evidence_id": "ev1"}],
+                "audit": {"state": "agent_audited"},
+            }]
+            seed.write_text("\n".join(json.dumps(row) for row in seed_rows) + "\n", encoding="utf-8")
+            gold.write_text("\n".join(json.dumps(row) for row in gold_rows) + "\n", encoding="utf-8")
+
+            result = audit_financial_fact_coverage(seed_path=seed, gold_path=gold)
+
+        self.assertEqual(result["scope"], "checked_in_validated_seed_vs_audited_gold")
+        self.assertEqual(result["validated_seed_count"], 2)
+        self.assertEqual(result["covered_seed_count"], 1)
+        self.assertEqual(result["gap_seed_count"], 1)
+        self.assertEqual(result["coverage"], 0.5)
+        self.assertFalse(result["corpus_wide_complete"])
+        self.assertEqual(result["facts"][0]["status"], "covered")
+        self.assertEqual(result["facts"][1]["reason_codes"], ["missing_gold"])
+
+    def test_financial_fact_coverage_rejects_duplicates_and_field_mismatches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = root / "seed.jsonl"
+            gold = root / "gold.jsonl"
+            seed.write_text(json.dumps({
+                "financial_fact_id": "ff1", "filing_id": "f1", "value_numeric": "1000.00",
+                "scale": 1, "evidence_ids": ["ev1", "ev2"], "validation_status": "validated",
+            }) + "\n", encoding="utf-8")
+            bad = {
+                "question_id": "agent_financial_ff1", "answerability": "answerable",
+                "candidate_filing_ids": ["other"],
+                "answer": {"kind": "numeric", "value": "999", "scale": 1000},
+                "evidence": [{"evidence_id": "wrong"}],
+                "audit": {"state": "agent_audited"},
+            }
+            gold.write_text(json.dumps(bad) + "\n" + json.dumps(bad) + "\n", encoding="utf-8")
+
+            result = audit_financial_fact_coverage(seed_path=seed, gold_path=gold)
+
+        self.assertEqual(result["covered_seed_count"], 0)
+        self.assertEqual(
+            result["facts"][0]["reason_codes"],
+            ["duplicate_gold", "evidence_mismatch", "filing_mismatch", "scale_mismatch", "value_mismatch"],
+        )
+
     def test_metrics_use_distinct_evidence_and_question_denominators(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
