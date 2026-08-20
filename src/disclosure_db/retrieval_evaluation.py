@@ -327,3 +327,136 @@ def evaluate_retrieval(
         "post_rerank_failure_reasons": reasons,
         "evaluations": evaluations,
     }
+
+
+def _fact_evidence_ids(facts: object) -> set[str]:
+    if not isinstance(facts, list):
+        return set()
+    return {
+        str(evidence_id)
+        for fact in facts
+        if isinstance(fact, dict)
+        for evidence_id in fact.get("evidence_ids", [])
+    }
+
+
+def evaluate_hybrid_retrieval(
+    *,
+    database: Path,
+    gold_path: Path,
+    evidence_service: object,
+    limit: int = 20,
+    reranker: object | None = None,
+) -> dict[str, Any]:
+    """Preserve sparse metrics and separately measure the agent's safe evidence path."""
+    from .query_planner import plan_query
+
+    sparse = evaluate_retrieval(
+        database=database,
+        gold_path=gold_path,
+        limit=limit,
+        reranker=reranker,
+    )
+    evaluations: list[dict[str, Any]] = []
+    route_counts: dict[str, int] = {}
+    reason_counts: dict[str, int] = {}
+    residual_targets: list[dict[str, str]] = []
+    answerable_count = 0
+    service_error_count = 0
+
+    for record in load_jsonl(gold_path):
+        if record.get("answerability") != "answerable" or not record.get("evidence"):
+            continue
+        company = record.get("company_resolution") if isinstance(record.get("company_resolution"), dict) else {}
+        company_hint = company.get("issuer_name") or company.get("stock_code") or company.get("corp_code")
+        plan = plan_query(
+            str(record["question"]),
+            company_hint=str(company_hint) if company_hint else None,
+            as_of=record.get("as_of"),
+        )
+        try:
+            bundle = evidence_service.search(plan, limit=limit)  # type: ignore[attr-defined]
+        except Exception:
+            bundle = None
+            service_error_count += 1
+            reason_counts["hybrid_service_error"] = reason_counts.get("hybrid_service_error", 0) + 1
+
+        evidence_ids: list[str] = []
+        financial_ids: set[str] = set()
+        event_ids: set[str] = set()
+        answerable = False
+        reasons: list[str] = ["hybrid_service_error"] if bundle is None else []
+        if bundle is not None:
+            evidence_ids = [
+                str(item.evidence_id)
+                for item in getattr(bundle, "evidence", [])
+                if getattr(item, "evidence_id", None)
+            ]
+            financial_ids = _fact_evidence_ids(getattr(bundle, "financial_facts", []))
+            event_ids = _fact_evidence_ids(getattr(bundle, "event_facts", []))
+            answerable = bool(getattr(bundle, "answerable", False))
+            reasons = sorted({str(item) for item in getattr(bundle, "reason_codes", [])})
+            for reason in reasons:
+                reason_counts[reason] = reason_counts.get(reason, 0) + 1
+        if answerable:
+            answerable_count += 1
+
+        rank_map = {evidence_id: rank for rank, evidence_id in enumerate(evidence_ids, start=1)}
+        targets: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for raw in record["evidence"]:
+            evidence_id = str(raw["evidence_id"])
+            if evidence_id in seen:
+                continue
+            seen.add(evidence_id)
+            rank = rank_map.get(evidence_id)
+            if rank is None:
+                route = "missed"
+                residual_targets.append(
+                    {
+                        "question_id": str(record["question_id"]),
+                        "evidence_id": evidence_id,
+                        "expected_route": str(plan.fact_domain),
+                    }
+                )
+            elif evidence_id in financial_ids:
+                route = "structured_financial"
+            elif evidence_id in event_ids:
+                route = "structured_event"
+            else:
+                route = "sparse_text"
+            if route != "missed":
+                route_counts[route] = route_counts.get(route, 0) + 1
+            targets.append({"evidence_id": evidence_id, "rank": rank, "route": route})
+        evaluations.append(
+            {
+                "question_id": record["question_id"],
+                "answerable": answerable,
+                "reason_codes": reasons,
+                "targets": targets,
+            }
+        )
+
+    target_rows = [target for item in evaluations for target in item["targets"]]
+    found = [target for target in target_rows if target["rank"] is not None]
+    complete = sum(all(target["rank"] is not None for target in item["targets"]) for item in evaluations)
+    hybrid = {
+        "status": "ok" if service_error_count == 0 else "failed_closed",
+        "eligible_questions": len(evaluations),
+        "target_evidence_count": len(target_rows),
+        "target_recall_at_k": (len(found) / len(target_rows)) if target_rows else None,
+        "question_complete_recall_at_k": (complete / len(evaluations)) if evaluations else None,
+        "answerable_count": answerable_count,
+        "abstained_count": len(evaluations) - answerable_count,
+        "service_error_count": service_error_count,
+        "route_counts": dict(sorted(route_counts.items())),
+        "reason_code_counts": dict(sorted(reason_counts.items())),
+        "residual_targets": sorted(
+            residual_targets,
+            key=lambda item: (item["question_id"], item["evidence_id"]),
+        ),
+        "evaluations": evaluations,
+    }
+    result = dict(sparse)
+    result["hybrid"] = hybrid
+    return result

@@ -5,12 +5,83 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
-from disclosure_db.retrieval_evaluation import audit_financial_fact_coverage, evaluate_retrieval
+from disclosure_db.retrieval_evaluation import (
+    audit_financial_fact_coverage,
+    evaluate_hybrid_retrieval,
+    evaluate_retrieval,
+)
 
 
 class RetrievalEvaluationTests(unittest.TestCase):
+    def test_hybrid_evaluation_preserves_sparse_metrics_and_attributes_actual_routes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            gold = Path(directory) / "gold.jsonl"
+            rows = [
+                {
+                    "question_id": "q-fin", "question": "회사 2025년 연결 매출액은 얼마인가?",
+                    "question_type": "table_cell", "answerability": "answerable",
+                    "company_resolution": {"issuer_name": "회사"},
+                    "candidate_filing_ids": ["f1"], "evidence": [{"evidence_id": "ev-fin"}],
+                },
+                {
+                    "question_id": "q-text", "question": "회사 공시 제목은 무엇인가?",
+                    "question_type": "single_filing_fact", "answerability": "answerable",
+                    "company_resolution": {"issuer_name": "회사"},
+                    "candidate_filing_ids": ["f2"], "evidence": [{"evidence_id": "ev-text"}],
+                },
+            ]
+            gold.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+            class Service:
+                def search(self, plan, *, limit):
+                    evidence_id = "ev-fin" if "매출액" in plan.question else "ev-text"
+                    return SimpleNamespace(
+                        evidence=[SimpleNamespace(evidence_id=evidence_id)], answerable=True,
+                        reason_codes=[],
+                        financial_facts=[{"evidence_ids": ["ev-fin"]}] if evidence_id == "ev-fin" else [],
+                        event_facts=[],
+                    )
+
+            sparse = {"target_recall_at_k": 0.5, "evaluations": [{"question_id": "sparse-kept"}]}
+            with patch("disclosure_db.retrieval_evaluation.evaluate_retrieval", return_value=sparse):
+                result = evaluate_hybrid_retrieval(
+                    database=Path("base.sqlite"), gold_path=gold, evidence_service=Service(), limit=20,
+                )
+
+        self.assertEqual(result["target_recall_at_k"], 0.5)
+        self.assertEqual(result["evaluations"], [{"question_id": "sparse-kept"}])
+        self.assertEqual(result["hybrid"]["target_recall_at_k"], 1.0)
+        self.assertEqual(result["hybrid"]["question_complete_recall_at_k"], 1.0)
+        self.assertEqual(result["hybrid"]["route_counts"], {"sparse_text": 1, "structured_financial": 1})
+        self.assertEqual(result["hybrid"]["residual_targets"], [])
+
+    def test_hybrid_evaluation_fails_closed_when_service_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            gold = Path(directory) / "gold.jsonl"
+            gold.write_text(json.dumps({
+                "question_id": "q1", "question": "회사 공시 제목", "question_type": "single_filing_fact",
+                "answerability": "answerable", "company_resolution": {"issuer_name": "회사"},
+                "candidate_filing_ids": ["f1"], "evidence": [{"evidence_id": "ev1"}],
+            }) + "\n", encoding="utf-8")
+
+            class BrokenService:
+                def search(self, plan, *, limit):
+                    raise RuntimeError("attestation mismatch")
+
+            sparse = {"target_recall_at_k": 0.25, "evaluations": []}
+            with patch("disclosure_db.retrieval_evaluation.evaluate_retrieval", return_value=sparse):
+                result = evaluate_hybrid_retrieval(
+                    database=Path("base.sqlite"), gold_path=gold, evidence_service=BrokenService(), limit=20,
+                )
+
+        self.assertEqual(result["target_recall_at_k"], 0.25)
+        self.assertEqual(result["hybrid"]["target_recall_at_k"], 0.0)
+        self.assertEqual(result["hybrid"]["reason_code_counts"], {"hybrid_service_error": 1})
+        self.assertEqual(result["hybrid"]["residual_targets"][0]["evidence_id"], "ev1")
+
     def test_financial_fact_coverage_requires_exact_gold_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
