@@ -18,7 +18,7 @@ This checklist records binary evidence without credentials or raw provider respo
 | Dense embedding/vector pilot | DEFERRED_NO_EVIDENCE | Residual text targets `0`; no paid embedding call or dense manifest was created because the current Gold gate shows no eligible miss |
 | PostgreSQL/pgvector/OpenSearch serving | DEFERRED_NO_EVIDENCE | SQLite remains attested SSOT/rollback; no serving sidecar or OpenSearch resource is justified by current residual evidence, provisioned, or claimed complete |
 | 300-case manifest | PASS | SHA-256 `1b014f0bfca75c8db6f6306dcdab80fff4cafb80dfb3709bf1e9d3bb8d8dd2a0`; fresh final provider-disabled run `20260819T174202Z-1b014f0bfca7`; `300/300` pass; evaluator error and all hard counters `0`; all four quality metrics `1.0`; p95 `5193.46ms`; failures `0` bytes; summary SHA-256 `3ab5b0a5823112157a4be4219883bcdba46f4f859d47f5fc2c65b8a0d73230ce` |
-| Full local regression | PASS | `243 passed, 1 skipped, 17 subtests passed` in `28.62s`; compileall passed |
+| Full local regression | PASS | latest hybrid-closure run `249 passed, 1 skipped, 17 subtests passed`; compileall passed |
 | Frontend logic regression | PASS | Node `24.14.0`; history/API suites `10/10` passed; this Node release rejects the removed `--experimental-default-type=module` flag, so the equivalent current `node --test` command was used |
 | Wheel web assets | PASS | wheel SHA-256 `78056aee8b9d800dae964ae4624848ec05622a0adb922ff15afbe50f2e2e58f2`; `index.html`, `app.css`, `app.js`, `history.js`, `api.js` present (`5/5`) |
 | Local Docker image/UI smoke | PASS | Docker Engine `29.7.2`; image `sha256:c0adf3adcc07dfb09e2e0fdb8f235b973c1036592c5cc262d3760b6ac1721cd9`; container healthy; web/CSP and three query probes passed |
