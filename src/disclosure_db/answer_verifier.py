@@ -14,6 +14,11 @@ PROMPT_INJECTION_MARKERS = (
 VERIFIED_ABSTENTION = "검증에 실패하여 답변을 보류합니다."
 
 
+def _citation_excerpt(text: str) -> str | None:
+    normalized = " ".join(text.split())
+    return normalized[:600] or None
+
+
 def _canonical_failure(
     *,
     citation_ids: list[str],
@@ -134,6 +139,7 @@ def verify_answer(bundle: EvidenceBundle, draft: AnswerDraft) -> VerifiedAnswer:
             report_name=evidence_by_id[item].report_name,
             filed_at=evidence_by_id[item].filed_at,
             locator=dict(evidence_by_id[item].locator),
+            excerpt=_citation_excerpt(evidence_by_id[item].text) if valid and draft.answerable else None,
         )
         for item in safe_citation_ids
     ]

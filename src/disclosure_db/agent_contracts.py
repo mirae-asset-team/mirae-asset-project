@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from decimal import Decimal
 from typing import Any
 
@@ -14,6 +14,7 @@ class CitationRef:
     report_name: str | None = None
     filed_at: str | None = None
     locator: dict[str, Any] = field(default_factory=dict)
+    excerpt: str | None = None
 
 
 @dataclass(slots=True)
@@ -101,8 +102,13 @@ def to_jsonable(value: Any) -> Any:
     """Convert runtime contracts (including Decimal) into strict JSON values."""
     if isinstance(value, Decimal):
         return str(value)
+    if isinstance(value, CitationRef):
+        citation = asdict(value)
+        if citation["excerpt"] is None:
+            citation.pop("excerpt")
+        return {key: to_jsonable(item) for key, item in citation.items()}
     if hasattr(value, "__dataclass_fields__"):
-        return {key: to_jsonable(item) for key, item in asdict(value).items()}
+        return {item.name: to_jsonable(getattr(value, item.name)) for item in fields(value)}
     if isinstance(value, dict):
         return {str(key): to_jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
