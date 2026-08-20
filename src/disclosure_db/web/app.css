@@ -58,6 +58,17 @@ summary {
   min-height: 100vh;
 }
 
+.app-shell.sidebar-collapsed {
+  grid-template-columns: 0 minmax(0, 1fr);
+}
+
+.app-shell.sidebar-collapsed .sidebar {
+  visibility: hidden;
+  min-width: 0;
+  padding-right: 0;
+  padding-left: 0;
+}
+
 .sidebar {
   position: relative;
   display: flex;
@@ -82,7 +93,18 @@ summary {
 }
 
 .sidebar-close {
-  display: none;
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  margin-left: auto;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #445069;
+  border-radius: 0.5rem;
+  color: #edf1f8;
+  background: #1d2940;
+  font-size: 1.25rem;
+  line-height: 1;
 }
 
 .brand-mark {
@@ -217,7 +239,7 @@ summary {
   position: relative;
   z-index: 3;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 1rem;
   min-height: 4.4rem;
@@ -300,8 +322,48 @@ summary {
   margin: 0.2rem 0;
 }
 
+.coverage-title {
+  padding-top: 0.45rem;
+  color: #30394a;
+  font-weight: 700;
+}
+
+.financial-coverage-list,
+.message-coverage ul {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.3rem 0.75rem;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.76rem;
+}
+
+.coverage-complete::before,
+.coverage-incomplete::before {
+  margin-right: 0.3rem;
+}
+
+.coverage-complete::before {
+  content: "✓";
+  color: #257047;
+}
+
+.coverage-incomplete::before {
+  content: "△";
+  color: #9a6a17;
+}
+
 .sidebar-toggle {
-  display: none;
+  display: inline-grid;
+  width: 2.4rem;
+  height: 2.4rem;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #d6d2ca;
+  border-radius: 0.55rem;
+  color: #28344a;
+  background: #fff;
 }
 
 .examples {
@@ -455,6 +517,58 @@ summary {
   margin-top: 1rem;
   padding-top: 0.8rem;
   border-top: 1px solid #e5e1d9;
+}
+
+.financial-facts-section,
+.message-coverage {
+  margin-top: 0.9rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #e5e1d9;
+}
+
+.financial-facts-heading,
+.message-coverage summary {
+  color: #31415e;
+  font-size: 0.9rem;
+}
+
+.financial-facts-list {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.7rem;
+}
+
+.financial-fact-card {
+  padding: 0.75rem;
+  border: 1px solid #dedbd3;
+  border-left: 3px solid #3451c7;
+  border-radius: 0.7rem;
+  background: #faf9f6;
+}
+
+.financial-fact-label,
+.financial-fact-filing {
+  color: #656d7b;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.financial-fact-value {
+  display: block;
+  margin: 0.35rem 0;
+  color: #172033;
+  font-family: "KoPubWorld Dotum", sans-serif;
+  font-size: 1.05rem;
+}
+
+.financial-fact-source {
+  margin-top: 0.55rem;
+  color: #3f4c63;
+  font-size: 0.78rem;
+}
+
+.message-coverage ul {
+  grid-template-columns: 1fr;
 }
 
 .evidence-heading {
@@ -622,31 +736,8 @@ summary:focus-visible {
     padding: 0.75rem 0.85rem;
   }
 
-  .sidebar-toggle {
-    display: inline-grid;
-    width: 2.4rem;
-    height: 2.4rem;
-    place-items: center;
-    padding: 0;
-    border: 1px solid #d6d2ca;
-    border-radius: 0.55rem;
-    color: #28344a;
-    background: #fff;
-  }
-
   .sidebar-close {
     display: inline-grid;
-    width: 2rem;
-    height: 2rem;
-    margin-left: auto;
-    place-items: center;
-    padding: 0;
-    border: 1px solid #445069;
-    border-radius: 0.5rem;
-    color: #edf1f8;
-    background: #1d2940;
-    font-size: 1.25rem;
-    line-height: 1;
   }
 
   .chat-header h1 {

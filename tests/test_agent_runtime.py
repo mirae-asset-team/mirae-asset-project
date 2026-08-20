@@ -78,6 +78,23 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertIn("2025년", draft.answer)
         self.assertIn("연결", draft.answer)
 
+    def test_deterministic_generator_groups_financial_digits_for_display_only(self) -> None:
+        bundle = EvidenceBundle(
+            question="삼성전자 최근 매출액",
+            answerable=True,
+            evidence=[EvidenceRef("ev-1", "f1", "s1", "333605938")],
+            financial_facts=[{
+                "account_name_raw": "매출액 (주30)", "fiscal_year": 2025,
+                "scope": "consolidated", "value_numeric": "333605938",
+                "unit_raw": "백만원", "evidence_ids": ["ev-1"],
+            }],
+        )
+
+        draft = DeterministicGenerator().generate(bundle)
+
+        self.assertIn("333,605,938 백만원", draft.answer)
+        self.assertEqual(draft.numeric_values, ["333605938"])
+
     def test_verified_answer_preserves_financial_context_and_coverage(self) -> None:
         fact = {
             "filing_id": "f1", "account_id": "revenue", "account_name_raw": "영업수익",

@@ -5,6 +5,21 @@ export function classifyAnswer(body) {
 export function answerText(body) {
   if (
     Array.isArray(body.reason_codes)
+    && body.reason_codes.includes("corpus_wide_financial_coverage_incomplete")
+  ) {
+    const rows = metricCoverageRows(body.coverage);
+    const metric = rows[0];
+    const rawMetric = Array.isArray(body.coverage?.metrics) ? body.coverage.metrics[0] : null;
+    if (metric) {
+      const missing = Array.isArray(rawMetric?.missing_companies)
+        ? rawMetric.missing_companies.filter(Boolean)
+        : [];
+      const suffix = missing.length > 0 ? ` 누락: ${missing.join(", ")}` : "";
+      return `${metric.label}은 ${metric.expected}개 법인 중 ${metric.validated}개가 검증되어 전체 집계를 보류합니다.${suffix}`;
+    }
+  }
+  if (
+    Array.isArray(body.reason_codes)
     && body.reason_codes.includes("corpus_wide_financial_coverage_required")
   ) {
     return "현재 검증된 재무 데이터가 전체 기업을 포괄하지 않아 기업 수 집계를 제공할 수 없습니다.";
@@ -19,7 +34,63 @@ export function healthLabel(body) {
   const count = Number.isInteger(body.company_count) && body.company_count >= 0
     ? body.company_count
     : 0;
-  return `공시 DB 준비됨 · ${count}개 기업`;
+  return `공시 DB 준비됨 · 검색명 ${count}개`;
+}
+
+const ACCOUNT_LABELS = {
+  revenue: "매출 계열",
+  operating_income: "영업이익",
+  net_income: "당기순이익",
+  total_assets: "자산총계",
+  total_liabilities: "부채총계",
+  total_equity: "자본총계",
+};
+
+const SCOPE_LABELS = {
+  consolidated: "연결",
+  separate: "별도",
+  unknown: "범위 미상",
+};
+
+export function financialFactLabel(fact) {
+  const period = fact?.fiscal_year
+    ?? Number.parseInt(String(fact?.period_end ?? fact?.instant_date ?? "").slice(0, 4), 10);
+  const parts = [];
+  if (Number.isInteger(period)) {
+    parts.push(`${period}년`);
+  }
+  parts.push(SCOPE_LABELS[fact?.scope] ?? "범위 미상");
+  parts.push(fact?.account_name_raw || ACCOUNT_LABELS[fact?.account_id] || "재무 수치");
+  if (fact?.unit_raw) {
+    parts.push(fact.unit_raw);
+  }
+  return parts.join(" · ");
+}
+
+export function financialValueLabel(fact) {
+  const raw = String(fact?.value_numeric ?? "").trim();
+  if (!raw) {
+    return "값 없음";
+  }
+  const match = raw.match(/^([+-]?)(\d+)(\.\d+)?$/);
+  const value = match
+    ? `${match[1]}${match[2].replace(/\B(?=(\d{3})+(?!\d))/g, ",")}${match[3] ?? ""}`
+    : raw;
+  return fact?.unit_raw ? `${value} ${fact.unit_raw}` : value;
+}
+
+export function metricCoverageRows(coverage) {
+  const expected = Number(coverage?.snapshot?.source_company_count ?? 0);
+  if (!Array.isArray(coverage?.metrics) || expected <= 0) {
+    return [];
+  }
+  return coverage.metrics.map((metric) => ({
+    account_id: metric.account_id,
+    label: ACCOUNT_LABELS[metric.account_id] ?? metric.account_id,
+    validated: Number(metric.latest_validated_company_count ?? 0),
+    expected,
+    complete: metric.aggregate_eligible === true,
+  }));
 }
 
 export function providerLabel(configured) {
@@ -176,4 +247,32 @@ export async function askDisclosure(
     };
   }
   return body;
+}
+
+export async function fetchFinancialCoverage({fetchImpl = globalThis.fetch, signal} = {}) {
+  let response;
+  try {
+    response = await fetchImpl("/financial-coverage", {
+      headers: {Accept: "application/json"},
+      signal,
+    });
+  } catch (error) {
+    throw classifyTransportFailure(error);
+  }
+  if (!response.ok) {
+    throw classifyFailure(response.status, "coverage_unavailable");
+  }
+  try {
+    const body = await response.json();
+    if (!body || typeof body !== "object" || !Array.isArray(body.metrics)) {
+      throw new TypeError("invalid coverage response");
+    }
+    return body;
+  } catch {
+    throw {
+      kind: "invalid_response",
+      message: "재무 데이터 현황을 확인하지 못했습니다.",
+      retryable: true,
+    };
+  }
 }

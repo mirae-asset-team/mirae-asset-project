@@ -6,12 +6,28 @@ import json
 import os
 import urllib.request
 from dataclasses import replace
+from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 
 from .agent_contracts import AnswerDraft, EvidenceBundle, to_jsonable
 
 
 UNANSWERABLE_TEXT = "검증 가능한 근거가 충분하지 않아 답변할 수 없습니다."
+
+
+def _display_decimal(value: object) -> str:
+    """Group digits for prose while leaving verifier numeric_values untouched."""
+    raw = str(value)
+    try:
+        numeric = Decimal(raw)
+    except InvalidOperation:
+        return raw
+    if not numeric.is_finite():
+        return raw
+    fixed = format(numeric, "f")
+    whole, separator, fraction = fixed.partition(".")
+    grouped = f"{int(whole):,}"
+    return grouped + (separator + fraction if separator else "")
 
 
 def _known_ids(bundle: EvidenceBundle, requested: Iterable[str]) -> list[str]:
@@ -118,13 +134,13 @@ class DeterministicGenerator:
             scope = "연결" if fact.get("scope") == "consolidated" else "별도" if fact.get("scope") == "separate" else "범위 미상"
             if len(facts) > 1:
                 values = ", ".join(
-                    f"{item.get('fiscal_year') or str(item.get('period_end') or item.get('instant_date') or '')[:4]}년 {item.get('value_numeric')} {item.get('unit_raw') or item.get('currency') or ''}".strip()
+                    f"{item.get('fiscal_year') or str(item.get('period_end') or item.get('instant_date') or '')[:4]}년 {_display_decimal(item.get('value_numeric'))} {item.get('unit_raw') or item.get('currency') or ''}".strip()
                     for item in facts
                 )
                 answer = f"{fact.get('account_name_raw', '해당 항목')} 최근 {len(facts)}개년({scope})은 {values}입니다."
             else:
                 year = fact.get("fiscal_year") or str(fact.get("period_end") or fact.get("instant_date") or "")[:4]
-                answer = f"{year}년 {fact.get('account_name_raw', '해당 항목')}({scope})은 {fact.get('value_numeric')} {fact.get('unit_raw') or fact.get('currency') or ''}입니다.".strip()
+                answer = f"{year}년 {fact.get('account_name_raw', '해당 항목')}({scope})은 {_display_decimal(fact.get('value_numeric'))} {fact.get('unit_raw') or fact.get('currency') or ''}입니다.".strip()
         elif bundle.event_facts:
             facts = list(bundle.event_facts)
             fact = facts[0]

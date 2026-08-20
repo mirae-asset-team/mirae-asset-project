@@ -4,8 +4,12 @@ import {
   classifyAnswer,
   dartUrl,
   evidenceLabel,
+  fetchFinancialCoverage,
+  financialFactLabel,
+  financialValueLabel,
   healthLabel,
   locatorLabel,
+  metricCoverageRows,
   providerLabel,
 } from "/static/api.js";
 import {
@@ -24,6 +28,9 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const status = document.querySelector("#service-status");
 const providerMode = document.querySelector("#provider-mode");
 const corpusRevision = document.querySelector("#corpus-revision");
+const legalCompanyCount = document.querySelector("#legal-company-count");
+const financialCoverageList = document.querySelector("#financial-coverage-list");
+const appShell = document.querySelector("#app-shell");
 const sidebar = document.querySelector("#sidebar");
 const sidebarToggle = document.querySelector("#sidebar-toggle");
 const sidebarClose = document.querySelector("#sidebar-close");
@@ -42,6 +49,7 @@ let selectedConversationId = store.conversations[0]?.id ?? null;
 let transientFailure = null;
 let requestPending = false;
 let healthSnapshot = null;
+let coverageSnapshot = null;
 
 function loadStore() {
   try {
@@ -67,10 +75,18 @@ function selectedConversation() {
 
 function closeSidebar(returnFocus = false) {
   sidebar.classList.remove("sidebar-open");
+  appShell.classList.add("sidebar-collapsed");
   sidebarToggle.setAttribute("aria-expanded", "false");
   if (returnFocus && sidebarToggle.offsetParent !== null) {
     sidebarToggle.focus();
   }
+}
+
+function setSidebarOpen(open) {
+  const mobile = window.matchMedia("(max-width: 44rem)").matches;
+  sidebar.classList.toggle("sidebar-open", mobile && open);
+  appShell.classList.toggle("sidebar-collapsed", !mobile && !open);
+  sidebarToggle.setAttribute("aria-expanded", String(open));
 }
 
 function addText(parent, tagName, className, text) {
@@ -117,6 +133,77 @@ function renderEvidence(parent, evidence) {
   parent.append(section);
 }
 
+function renderFinancialFacts(parent, financialFacts, evidence) {
+  if (!Array.isArray(financialFacts) || financialFacts.length === 0) {
+    return;
+  }
+  const section = document.createElement("details");
+  section.className = "financial-facts-section";
+  section.open = financialFacts.length <= 3;
+  addText(section, "summary", "financial-facts-heading", `재무 수치·근거 ${financialFacts.length}건`);
+  const list = document.createElement("div");
+  list.className = "financial-facts-list";
+  for (const fact of financialFacts) {
+    const card = document.createElement("article");
+    card.className = "financial-fact-card";
+    addText(card, "p", "financial-fact-label", financialFactLabel(fact));
+    addText(card, "strong", "financial-fact-value", financialValueLabel(fact));
+    const filingName = fact.report_name_raw || "사업보고서";
+    const filingMeta = [filingName, fact.filed_at, fact.filing_id].filter(Boolean).join(" · ");
+    if (filingMeta) {
+      addText(card, "p", "financial-fact-filing", filingMeta);
+    }
+    const evidenceIds = Array.isArray(fact.evidence_ids) ? fact.evidence_ids : [];
+    const matching = Array.isArray(evidence)
+      ? evidence.filter((item) => evidenceIds.includes(item.evidence_id))
+      : [];
+    const excerpts = matching.length > 0
+      ? matching
+      : (Array.isArray(fact.evidence_texts)
+        ? fact.evidence_texts.map((excerpt) => ({excerpt}))
+        : []);
+    if (excerpts.length > 0) {
+      const source = document.createElement("details");
+      source.className = "financial-fact-source";
+      addText(source, "summary", "", "근거 표 셀 보기");
+      for (const item of excerpts) {
+        if (typeof item.excerpt === "string" && item.excerpt.trim()) {
+          addText(source, "p", "evidence-excerpt", item.excerpt.trim());
+        }
+        const location = locatorLabel(item.locator);
+        if (location) {
+          addText(source, "p", "evidence-meta", location);
+        }
+      }
+      card.append(source);
+    }
+    list.append(card);
+  }
+  section.append(list);
+  parent.append(section);
+}
+
+function renderMessageCoverage(parent, coverage) {
+  const rows = metricCoverageRows(coverage);
+  if (rows.length === 0) {
+    return;
+  }
+  const details = document.createElement("details");
+  details.className = "message-coverage";
+  addText(details, "summary", "", "전체 데이터 검증 현황");
+  const list = document.createElement("ul");
+  for (const row of rows) {
+    addText(
+      list,
+      "li",
+      row.complete ? "coverage-complete" : "coverage-incomplete",
+      `${row.label} ${row.validated}/${row.expected}개 법인`,
+    );
+  }
+  details.append(list);
+  parent.append(details);
+}
+
 function renderResponseDetails(parent, message) {
   const values = [
     ["요청 ID", message.request_id],
@@ -148,6 +235,8 @@ function renderMessage(message) {
   }
   addText(item, "p", "message-text", message.text);
   if (message.role === "assistant") {
+    renderFinancialFacts(item, message.financial_facts, message.evidence);
+    renderMessageCoverage(item, message.coverage);
     renderEvidence(item, message.evidence);
     renderResponseDetails(item, message);
   }
@@ -193,8 +282,10 @@ function renderEmptyState() {
     facts,
     "span",
     "",
-    healthSnapshot?.ready === true
-      ? `${healthSnapshot.company_count ?? 0}개 기업 검색 가능`
+    coverageSnapshot?.snapshot
+      ? `${healthSnapshot?.company_count ?? coverageSnapshot.snapshot.searchable_alias_count ?? 0}개 검색 대상 · ${coverageSnapshot.snapshot.source_company_count ?? 0}개 법인`
+      : healthSnapshot?.ready === true
+        ? `${healthSnapshot.company_count ?? 0}개 검색명`
       : "검색 가능한 기업 확인 중",
   );
   companyFact.id = "company-count-fact";
@@ -301,6 +392,11 @@ async function submitQuestion(question, appendUser = true) {
       created_at: new Date().toISOString(),
       answer_state: classifyAnswer(body),
       evidence: Array.isArray(body.evidence) ? body.evidence : [],
+      financial_facts: Array.isArray(body.financial_facts) ? body.financial_facts : [],
+      coverage: body.coverage && typeof body.coverage === "object" ? body.coverage : {},
+      aggregate_result: body.aggregate_result && typeof body.aggregate_result === "object"
+        ? body.aggregate_result
+        : {},
       request_id: body.request_id,
       latency_ms: body.latency_ms,
       reason_codes: Array.isArray(body.reason_codes) ? body.reason_codes : [],
@@ -318,6 +414,43 @@ async function submitQuestion(question, appendUser = true) {
     setPending(false);
     render();
     questionInput.focus();
+  }
+}
+
+function renderCoverageStatus() {
+  const snapshot = coverageSnapshot?.snapshot;
+  const rows = metricCoverageRows(coverageSnapshot);
+  if (!snapshot || rows.length === 0) {
+    legalCompanyCount.textContent = "재무 DB 법인 수 확인 불가";
+    financialCoverageList.replaceChildren();
+    addText(financialCoverageList, "li", "coverage-incomplete", "검증 현황 확인 불가");
+    return;
+  }
+  legalCompanyCount.textContent = [
+    `${healthSnapshot?.company_count ?? snapshot.searchable_alias_count ?? 0}개 검색 대상`,
+    `${snapshot.source_company_count ?? 0}개 법인`,
+    `${snapshot.selected_filing_company_count ?? 0}개 사업보고서 선택`,
+  ].join(" · ");
+  financialCoverageList.replaceChildren();
+  for (const row of rows) {
+    addText(
+      financialCoverageList,
+      "li",
+      row.complete ? "coverage-complete" : "coverage-incomplete",
+      `${row.label} ${row.validated}/${row.expected}`,
+    );
+  }
+}
+
+async function refreshCoverage() {
+  try {
+    coverageSnapshot = await fetchFinancialCoverage();
+  } catch {
+    coverageSnapshot = null;
+  }
+  renderCoverageStatus();
+  if (!selectedConversation()) {
+    renderMessages();
   }
 }
 
@@ -366,9 +499,12 @@ clearHistory.addEventListener("click", () => {
 });
 
 sidebarToggle.addEventListener("click", () => {
-  const willOpen = !sidebar.classList.contains("sidebar-open");
-  sidebar.classList.toggle("sidebar-open", willOpen);
-  sidebarToggle.setAttribute("aria-expanded", String(willOpen));
+  const mobile = window.matchMedia("(max-width: 44rem)").matches;
+  const isOpen = mobile
+    ? sidebar.classList.contains("sidebar-open")
+    : !appShell.classList.contains("sidebar-collapsed");
+  const willOpen = !isOpen;
+  setSidebarOpen(willOpen);
   if (willOpen) {
     newChat.focus();
   } else {
@@ -410,3 +546,4 @@ questionForm.addEventListener("submit", (event) => {
 
 render();
 refreshHealth();
+refreshCoverage();

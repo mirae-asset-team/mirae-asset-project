@@ -9,8 +9,12 @@ import {
   classifyTransportFailure,
   dartUrl,
   evidenceLabel,
+  fetchFinancialCoverage,
+  financialFactLabel,
+  financialValueLabel,
   healthLabel,
   locatorLabel,
+  metricCoverageRows,
   providerLabel,
 } from "../src/disclosure_db/web/api.js";
 
@@ -27,12 +31,61 @@ test("explains incomplete corpus-wide financial counts without changing other an
     answerText({answer: "일반 보류", reason_codes: ["company_unresolved"]}),
     "일반 보류",
   );
+  assert.equal(
+    answerText({
+      answer: "검증에 실패하여 답변을 보류합니다.",
+      reason_codes: ["corpus_wide_financial_coverage_incomplete"],
+      coverage: {
+        snapshot: {source_company_count: 70},
+        metrics: [{
+          account_id: "operating_income",
+          latest_validated_company_count: 67,
+          missing_companies: ["KB금융", "하나금융지주", "한화솔루션"],
+        }],
+      },
+    }),
+    "영업이익은 70개 법인 중 67개가 검증되어 전체 집계를 보류합니다. 누락: KB금융, 하나금융지주, 한화솔루션",
+  );
+});
+
+test("formats financial facts and metric coverage without losing raw filing labels", () => {
+  assert.equal(
+    financialFactLabel({
+      fiscal_year: 2025,
+      scope: "consolidated",
+      account_id: "revenue",
+      account_name_raw: "매출액 (주30)",
+      unit_raw: "백만원",
+    }),
+    "2025년 · 연결 · 매출액 (주30) · 백만원",
+  );
+  assert.equal(
+    financialValueLabel({value_numeric: "333605938", unit_raw: "백만원"}),
+    "333,605,938 백만원",
+  );
+  assert.equal(
+    financialValueLabel({value_numeric: "9007199254740993.50", unit_raw: "원"}),
+    "9,007,199,254,740,993.50 원",
+  );
+  assert.deepEqual(
+    metricCoverageRows({
+      snapshot: {source_company_count: 70},
+      metrics: [
+        {account_id: "revenue", latest_validated_company_count: 63, aggregate_eligible: false},
+        {account_id: "total_assets", latest_validated_company_count: 67, aggregate_eligible: false},
+      ],
+    }),
+    [
+      {account_id: "revenue", label: "매출 계열", validated: 63, expected: 70, complete: false},
+      {account_id: "total_assets", label: "자산총계", validated: 67, expected: 70, complete: false},
+    ],
+  );
 });
 
 test("formats research readiness and provider mode without false warnings", () => {
   assert.equal(
     healthLabel({ready: true, company_count: 76}),
-    "공시 DB 준비됨 · 76개 기업",
+    "공시 DB 준비됨 · 검색명 76개",
   );
   assert.equal(healthLabel({ready: false, company_count: 76}), "공시 DB 준비 중");
   assert.equal(
@@ -105,6 +158,22 @@ test("posts a normalized question to the same-origin query route", async () => {
     question: "삼성전자 매출액",
   });
   assert.equal(body.answer, "답");
+});
+
+test("loads attested coverage from the same-origin coverage route", async () => {
+  let requestedUrl = null;
+  const coverage = await fetchFinancialCoverage({
+    fetchImpl: async (url) => {
+      requestedUrl = url;
+      return new Response(JSON.stringify({
+        snapshot: {source_company_count: 70, searchable_alias_count: 76},
+        metrics: [],
+        companies: [],
+      }), {status: 200, headers: {"Content-Type": "application/json"}});
+    },
+  });
+  assert.equal(requestedUrl, "/financial-coverage");
+  assert.equal(coverage.snapshot.source_company_count, 70);
 });
 
 test("returns safe typed failures for invalid input and malformed responses", async () => {

@@ -61,6 +61,8 @@ def test_root_serves_accessible_web_shell(ready_agent) -> None:
         "corpus-revision",
         "corpus-facts",
         "company-count-fact",
+        "legal-company-count",
+        "financial-coverage-list",
     ):
         assert f'id="{element_id}"' in response.text
     assert "공시를 근거로 기업 정보를 검색하고 설명합니다." not in response.text

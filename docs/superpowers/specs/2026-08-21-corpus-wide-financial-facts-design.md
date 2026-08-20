@@ -88,3 +88,10 @@ Each implementation task records its RED failure, GREEN verification, full regre
 - Detailed responses expose the admitted financial facts and attested coverage used for the decision. Public financial-fact and coverage endpoints support canonical account, fiscal year, and scope without changing the official contest `/answer` schema.
 - Corpus-wide count, list, and rank operations share one coverage-first path. They reconstruct the legal-company denominator from the overlay snapshot, apply unit scale with Decimal, and fail closed before fetching values when the metric is incomplete. HyperCLOVA is bypassed for these structured aggregates.
 - The primary Samsung regression now passes against the staging overlay. Corpus-wide operating-income aggregation remains intentionally unavailable at 67/70; this is a data-completeness result, not a query limitation or reduced gate.
+
+## Task 7 measured answer/UI boundary
+
+- The UI reports three different populations explicitly: 76 search targets from the corpus, 70 legal issuers used as the financial completeness denominator, and 69 latest annual reports admitted by the manifest. The 75 admitted aliases in the coverage artifact are internal manifest coverage and are not presented as a legal-company count.
+- A structured answer persists its financial facts, coverage decision, aggregate result, and citation metadata in browser-local conversation history. Reopening a conversation therefore preserves the exact year, scope, raw account label, unit, filing identity, table-cell excerpt, and locator used to verify the claim.
+- Coverage is visible both globally, as six latest-year metric rows, and per incomplete aggregate answer. A partial denominator is never rendered as a completed count. The client does not infer completion from the displayed percentages; it renders the server's attested `aggregate_eligible` decision.
+- Browser testing found a cold-start query exceeding the existing 30-second client timeout and a warm direct request at 8.777 seconds. Task 8 must measure the required 20-request concurrency gate before promotion. UI timeout and SQLite performance gates remain unchanged.
