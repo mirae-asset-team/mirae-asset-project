@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
-from .gold_validation import load_jsonl
+from .gold_validation import load_jsonl, validate_record_contract
 from .pipeline import query_database
 from .migration import portable_path
 
@@ -19,6 +19,14 @@ STOPWORDS = {
     "각각", "해당", "현재", "원", "몇", "후", "전", "및",
 }
 PARTICLE_SUFFIXES = ("에서는", "에서", "으로", "에게", "까지", "부터", "에는", "은", "는", "이", "가", "을", "를", "의", "에")
+HYBRID_FATAL_REASON_CODES = {
+    "base_attestation_failed",
+    "overlay_base_attestation_failed",
+    "search_index_attestation_mismatch",
+    "search_index_sqlite_error",
+    "search_index_unavailable",
+    "search_index_fallback_to_ssot",
+}
 
 
 def _audited_financial_gold(record: dict[str, Any]) -> bool:
@@ -40,13 +48,30 @@ def _decimal_equal(left: object, right: object) -> bool:
         return False
 
 
+def _gold_trust_tier(record: dict[str, Any]) -> str:
+    audit = record.get("audit") if isinstance(record.get("audit"), dict) else {}
+    review = record.get("review") if isinstance(record.get("review"), dict) else {}
+    if audit.get("state") == "human_verified" or review.get("status") == "approved":
+        return "human_verified"
+    return "agent_audited"
+
+
 def audit_financial_fact_coverage(*, seed_path: Path, gold_path: Path) -> dict[str, Any]:
     """Compare checked-in validated financial seeds with audited Gold, without promotion."""
-    seed_rows = [row for row in load_jsonl(seed_path) if row.get("validation_status") == "validated"]
+    seed_rows = [
+        row for row in load_jsonl(seed_path)
+        if isinstance(row, dict) and row.get("validation_status") == "validated"
+    ]
+    seed_id_counts: dict[str, int] = {}
+    for row in seed_rows:
+        fact_id = str(row.get("financial_fact_id") or "")
+        seed_id_counts[fact_id] = seed_id_counts.get(fact_id, 0) + 1
     gold_by_question: dict[str, list[dict[str, Any]]] = {}
+    gold_contract_issues: dict[int, list[dict[str, str]]] = {}
     for record in load_jsonl(gold_path):
-        if _audited_financial_gold(record):
+        if isinstance(record, dict) and _audited_financial_gold(record):
             gold_by_question.setdefault(str(record.get("question_id") or ""), []).append(record)
+            gold_contract_issues[id(record)] = validate_record_contract(record)
 
     facts: list[dict[str, Any]] = []
     for seed in sorted(seed_rows, key=lambda row: str(row.get("financial_fact_id") or "")):
@@ -54,47 +79,66 @@ def audit_financial_fact_coverage(*, seed_path: Path, gold_path: Path) -> dict[s
         question_id = f"agent_financial_{fact_id}"
         candidates = gold_by_question.get(question_id, [])
         reasons: list[str] = []
+        required_seed_fields = {
+            "financial_fact_id", "filing_id", "value_numeric", "scale",
+            "evidence_ids", "validation_status",
+        }
+        if not required_seed_fields <= set(seed) or not isinstance(seed.get("evidence_ids"), list):
+            reasons.append("invalid_seed_contract")
+        if seed_id_counts.get(fact_id, 0) != 1:
+            reasons.append("duplicate_seed")
+        trust_tier: str | None = None
         if not candidates:
             reasons.append("missing_gold")
         else:
             if len(candidates) != 1:
                 reasons.append("duplicate_gold")
             record = candidates[0]
-            if [str(item) for item in record.get("candidate_filing_ids", [])] != [str(seed.get("filing_id") or "")]:
-                reasons.append("filing_mismatch")
-            answer = record.get("answer") if isinstance(record.get("answer"), dict) else {}
-            if answer.get("kind") != "numeric" or not _decimal_equal(answer.get("value"), seed.get("value_numeric")):
-                reasons.append("value_mismatch")
-            try:
-                scale_matches = int(answer.get("scale")) == int(seed.get("scale"))
-            except (TypeError, ValueError):
-                scale_matches = False
-            if not scale_matches:
-                reasons.append("scale_mismatch")
-            gold_evidence = {
-                str(item.get("evidence_id"))
-                for item in record.get("evidence", [])
-                if isinstance(item, dict) and item.get("evidence_id")
-            }
-            seed_evidence = {str(item) for item in seed.get("evidence_ids", [])}
-            if gold_evidence != seed_evidence:
-                reasons.append("evidence_mismatch")
+            trust_tier = _gold_trust_tier(record)
+            if gold_contract_issues.get(id(record)):
+                reasons.append("invalid_gold_contract")
+            else:
+                if [str(item) for item in record.get("candidate_filing_ids", [])] != [str(seed.get("filing_id") or "")]:
+                    reasons.append("filing_mismatch")
+                answer = record.get("answer") if isinstance(record.get("answer"), dict) else {}
+                if answer.get("kind") != "numeric" or not _decimal_equal(answer.get("value"), seed.get("value_numeric")):
+                    reasons.append("value_mismatch")
+                try:
+                    scale_matches = int(answer.get("scale")) == int(seed.get("scale"))
+                except (TypeError, ValueError):
+                    scale_matches = False
+                if not scale_matches:
+                    reasons.append("scale_mismatch")
+                evidence_rows = [item for item in record.get("evidence", []) if isinstance(item, dict)]
+                gold_evidence = {str(item.get("evidence_id")) for item in evidence_rows if item.get("evidence_id")}
+                seed_evidence = {str(item) for item in seed.get("evidence_ids", [])}
+                if gold_evidence != seed_evidence:
+                    reasons.append("evidence_mismatch")
+                if any(str(item.get("filing_id") or "") != str(seed.get("filing_id") or "") for item in evidence_rows):
+                    reasons.append("evidence_filing_mismatch")
         facts.append(
             {
                 "financial_fact_id": fact_id,
                 "question_id": question_id,
+                "gold_trust_tier": trust_tier,
                 "status": "covered" if not reasons else "gap",
                 "reason_codes": sorted(reasons),
             }
         )
 
     covered = sum(item["status"] == "covered" for item in facts)
+    coverage_by_trust_tier: dict[str, int] = {}
+    for item in facts:
+        tier = item.get("gold_trust_tier")
+        if item["status"] == "covered" and isinstance(tier, str):
+            coverage_by_trust_tier[tier] = coverage_by_trust_tier.get(tier, 0) + 1
     return {
         "scope": "checked_in_validated_seed_vs_audited_gold",
         "validated_seed_count": len(facts),
         "covered_seed_count": covered,
         "gap_seed_count": len(facts) - covered,
         "coverage": (covered / len(facts)) if facts else None,
+        "coverage_by_trust_tier": dict(sorted(coverage_by_trust_tier.items())),
         "corpus_wide_complete": False,
         "facts": facts,
     }
@@ -363,6 +407,7 @@ def evaluate_hybrid_retrieval(
     residual_targets: list[dict[str, str]] = []
     answerable_count = 0
     service_error_count = 0
+    dependency_failure_count = 0
 
     for record in load_jsonl(gold_path):
         if record.get("answerability") != "answerable" or not record.get("evidence"):
@@ -398,6 +443,8 @@ def evaluate_hybrid_retrieval(
             reasons = sorted({str(item) for item in getattr(bundle, "reason_codes", [])})
             for reason in reasons:
                 reason_counts[reason] = reason_counts.get(reason, 0) + 1
+            if HYBRID_FATAL_REASON_CODES.intersection(reasons):
+                dependency_failure_count += 1
         if answerable:
             answerable_count += 1
 
@@ -440,15 +487,19 @@ def evaluate_hybrid_retrieval(
     target_rows = [target for item in evaluations for target in item["targets"]]
     found = [target for target in target_rows if target["rank"] is not None]
     complete = sum(all(target["rank"] is not None for target in item["targets"]) for item in evaluations)
+    metrics_available = service_error_count == 0 and dependency_failure_count == 0
     hybrid = {
-        "status": "ok" if service_error_count == 0 else "failed_closed",
+        "status": "ok" if metrics_available else "failed_closed",
+        "requested_limit": limit,
+        "effective_limit": min(limit, 8),
         "eligible_questions": len(evaluations),
         "target_evidence_count": len(target_rows),
-        "target_recall_at_k": (len(found) / len(target_rows)) if target_rows else None,
-        "question_complete_recall_at_k": (complete / len(evaluations)) if evaluations else None,
+        "target_recall_at_k": (len(found) / len(target_rows)) if metrics_available and target_rows else None,
+        "question_complete_recall_at_k": (complete / len(evaluations)) if metrics_available and evaluations else None,
         "answerable_count": answerable_count,
         "abstained_count": len(evaluations) - answerable_count,
         "service_error_count": service_error_count,
+        "dependency_failure_count": dependency_failure_count,
         "route_counts": dict(sorted(route_counts.items())),
         "reason_code_counts": dict(sorted(reason_counts.items())),
         "residual_targets": sorted(

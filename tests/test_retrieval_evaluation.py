@@ -24,6 +24,8 @@ class RetrievalEvaluationTests(unittest.TestCase):
             parse_args(["--attestation", "attestation.json"])
         with self.assertRaises(SystemExit):
             parse_args(["--search-index", "search.sqlite"])
+        with self.assertRaises(SystemExit):
+            parse_args(["--overlay", "overlay.sqlite", "--attestation", "attestation.json"])
 
     def test_retrieval_cli_accepts_complete_hybrid_and_inventory_configuration(self) -> None:
         args = parse_args([
@@ -38,6 +40,23 @@ class RetrievalEvaluationTests(unittest.TestCase):
         self.assertEqual(args.search_index, Path("search.sqlite"))
         self.assertEqual(args.financial_seed, Path("seed.jsonl"))
         self.assertEqual(args.inventory_output, Path("inventory.json"))
+
+    def test_retrieval_cli_rejects_input_output_and_output_output_collisions(self) -> None:
+        with self.assertRaises(SystemExit):
+            parse_args(["--database", "same.sqlite", "--output", "same.sqlite"])
+        with self.assertRaises(SystemExit):
+            parse_args([
+                "--overlay", "overlay.sqlite", "--attestation", "attestation.json",
+                "--search-index", "search.sqlite", "--output", "overlay.sqlite",
+            ])
+        with self.assertRaises(SystemExit):
+            parse_args([
+                "--output", "same.json", "--inventory-output", "same.json",
+            ])
+        with self.assertRaises(SystemExit):
+            parse_args([
+                "--gold", "gold.jsonl", "--inventory-output", "gold.jsonl",
+            ])
 
     def test_hybrid_evaluation_preserves_sparse_metrics_and_attributes_actual_routes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -101,9 +120,37 @@ class RetrievalEvaluationTests(unittest.TestCase):
                 )
 
         self.assertEqual(result["target_recall_at_k"], 0.25)
-        self.assertEqual(result["hybrid"]["target_recall_at_k"], 0.0)
+        self.assertIsNone(result["hybrid"]["target_recall_at_k"])
         self.assertEqual(result["hybrid"]["reason_code_counts"], {"hybrid_service_error": 1})
         self.assertEqual(result["hybrid"]["residual_targets"][0]["evidence_id"], "ev1")
+
+    def test_hybrid_evaluation_invalidates_metrics_on_dependency_reason_code(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            gold = Path(directory) / "gold.jsonl"
+            gold.write_text(json.dumps({
+                "question_id": "q1", "question": "회사 2025년 연결 매출액", "question_type": "table_cell",
+                "answerability": "answerable", "company_resolution": {"issuer_name": "회사"},
+                "candidate_filing_ids": ["f1"], "evidence": [{"evidence_id": "ev1"}],
+            }) + "\n", encoding="utf-8")
+
+            class InvalidDependencyService:
+                def search(self, plan, *, limit):
+                    return SimpleNamespace(
+                        evidence=[SimpleNamespace(evidence_id="ev1")], answerable=True,
+                        reason_codes=["overlay_base_attestation_failed"],
+                        financial_facts=[{"evidence_ids": ["ev1"]}], event_facts=[],
+                    )
+
+            with patch("disclosure_db.retrieval_evaluation.evaluate_retrieval", return_value={"evaluations": []}):
+                result = evaluate_hybrid_retrieval(
+                    database=Path("base.sqlite"), gold_path=gold,
+                    evidence_service=InvalidDependencyService(), limit=20,
+                )
+
+        self.assertEqual(result["hybrid"]["status"], "failed_closed")
+        self.assertIsNone(result["hybrid"]["target_recall_at_k"])
+        self.assertIsNone(result["hybrid"]["question_complete_recall_at_k"])
+        self.assertEqual(result["hybrid"]["dependency_failure_count"], 1)
 
     def test_financial_fact_coverage_requires_exact_gold_identity(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -124,19 +171,21 @@ class RetrievalEvaluationTests(unittest.TestCase):
                 "question_id": "agent_financial_ff1", "answerability": "answerable",
                 "candidate_filing_ids": ["f1"],
                 "answer": {"kind": "numeric", "value": "1000", "scale": 1},
-                "evidence": [{"evidence_id": "ev1"}],
+                "evidence": [{"evidence_id": "ev1", "filing_id": "f1"}],
                 "audit": {"state": "agent_audited"},
             }]
             seed.write_text("\n".join(json.dumps(row) for row in seed_rows) + "\n", encoding="utf-8")
             gold.write_text("\n".join(json.dumps(row) for row in gold_rows) + "\n", encoding="utf-8")
 
-            result = audit_financial_fact_coverage(seed_path=seed, gold_path=gold)
+            with patch("disclosure_db.retrieval_evaluation.validate_record_contract", return_value=[]):
+                result = audit_financial_fact_coverage(seed_path=seed, gold_path=gold)
 
         self.assertEqual(result["scope"], "checked_in_validated_seed_vs_audited_gold")
         self.assertEqual(result["validated_seed_count"], 2)
         self.assertEqual(result["covered_seed_count"], 1)
         self.assertEqual(result["gap_seed_count"], 1)
         self.assertEqual(result["coverage"], 0.5)
+        self.assertEqual(result["coverage_by_trust_tier"], {"agent_audited": 1})
         self.assertFalse(result["corpus_wide_complete"])
         self.assertEqual(result["facts"][0]["status"], "covered")
         self.assertEqual(result["facts"][1]["reason_codes"], ["missing_gold"])
@@ -154,18 +203,66 @@ class RetrievalEvaluationTests(unittest.TestCase):
                 "question_id": "agent_financial_ff1", "answerability": "answerable",
                 "candidate_filing_ids": ["other"],
                 "answer": {"kind": "numeric", "value": "999", "scale": 1000},
-                "evidence": [{"evidence_id": "wrong"}],
+                "evidence": [{"evidence_id": "wrong", "filing_id": "other"}],
                 "audit": {"state": "agent_audited"},
             }
             gold.write_text(json.dumps(bad) + "\n" + json.dumps(bad) + "\n", encoding="utf-8")
 
-            result = audit_financial_fact_coverage(seed_path=seed, gold_path=gold)
+            with patch("disclosure_db.retrieval_evaluation.validate_record_contract", return_value=[]):
+                result = audit_financial_fact_coverage(seed_path=seed, gold_path=gold)
 
         self.assertEqual(result["covered_seed_count"], 0)
         self.assertEqual(
             result["facts"][0]["reason_codes"],
-            ["duplicate_gold", "evidence_mismatch", "filing_mismatch", "scale_mismatch", "value_mismatch"],
+            ["duplicate_gold", "evidence_filing_mismatch", "evidence_mismatch", "filing_mismatch", "scale_mismatch", "value_mismatch"],
         )
+
+    def test_financial_fact_coverage_rejects_duplicate_seed_ids(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = root / "seed.jsonl"
+            gold = root / "gold.jsonl"
+            seed_row = {
+                "financial_fact_id": "ff1", "filing_id": "f1", "value_numeric": "1000",
+                "scale": 1, "evidence_ids": ["ev1"], "validation_status": "validated",
+            }
+            gold_row = {
+                "question_id": "agent_financial_ff1", "answerability": "answerable",
+                "candidate_filing_ids": ["f1"],
+                "answer": {"kind": "numeric", "value": "1000", "scale": 1},
+                "evidence": [{"evidence_id": "ev1", "filing_id": "f1"}],
+                "audit": {"state": "agent_audited"},
+            }
+            seed.write_text(json.dumps(seed_row) + "\n" + json.dumps(seed_row) + "\n", encoding="utf-8")
+            gold.write_text(json.dumps(gold_row) + "\n", encoding="utf-8")
+
+            with patch("disclosure_db.retrieval_evaluation.validate_record_contract", return_value=[]):
+                result = audit_financial_fact_coverage(seed_path=seed, gold_path=gold)
+
+        self.assertEqual(result["covered_seed_count"], 0)
+        self.assertEqual(result["gap_seed_count"], 2)
+        self.assertTrue(all("duplicate_seed" in fact["reason_codes"] for fact in result["facts"]))
+
+    def test_financial_fact_coverage_rejects_malformed_gold_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            seed = root / "seed.jsonl"
+            gold = root / "gold.jsonl"
+            seed.write_text(json.dumps({
+                "financial_fact_id": "ff1", "filing_id": "f1", "value_numeric": "1000",
+                "scale": 1, "evidence_ids": ["ev1"], "validation_status": "validated",
+            }) + "\n", encoding="utf-8")
+            gold.write_text(json.dumps({
+                "question_id": "agent_financial_ff1", "answerability": "answerable",
+                "candidate_filing_ids": ["f1"], "answer": {"kind": "numeric", "value": "1000", "scale": 1},
+                "evidence": [{"evidence_id": "ev1", "filing_id": "f1"}],
+                "review": {"status": "approved"},
+            }) + "\n", encoding="utf-8")
+
+            result = audit_financial_fact_coverage(seed_path=seed, gold_path=gold)
+
+        self.assertEqual(result["covered_seed_count"], 0)
+        self.assertIn("invalid_gold_contract", result["facts"][0]["reason_codes"])
 
     def test_metrics_use_distinct_evidence_and_question_denominators(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

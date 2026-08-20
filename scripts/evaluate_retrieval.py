@@ -34,10 +34,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--inventory-output", type=Path)
     args = parser.parse_args(argv)
     structured_values = (args.overlay, args.attestation, args.search_index)
-    if any(value is not None for value in structured_values) and not (
-        args.overlay is not None and args.attestation is not None
-    ):
-        parser.error("hybrid evaluation requires both --overlay and --attestation")
+    configured_count = sum(value is not None for value in structured_values)
+    if configured_count not in {0, len(structured_values)}:
+        parser.error("hybrid evaluation requires --overlay, --attestation, and --search-index together")
+    input_paths = {
+        Path(value).resolve()
+        for value in (
+            args.database, args.gold, args.overlay, args.attestation,
+            args.search_index, args.financial_seed,
+        )
+        if value is not None
+    }
+    output_paths = [Path(args.output).resolve()]
+    if args.inventory_output is not None:
+        output_paths.append(Path(args.inventory_output).resolve())
+    if len(set(output_paths)) != len(output_paths):
+        parser.error("--output and --inventory-output must be different paths")
+    if any(path in input_paths for path in output_paths):
+        parser.error("output paths must not collide with any input path")
     return args
 
 
