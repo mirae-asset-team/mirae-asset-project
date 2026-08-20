@@ -55,8 +55,14 @@ def test_root_serves_accessible_web_shell(ready_agent) -> None:
         "question-input",
         "send-question",
         "service-status",
+        "service-info",
+        "provider-mode",
+        "corpus-revision",
+        "corpus-facts",
+        "company-count-fact",
     ):
         assert f'id="{element_id}"' in response.text
+    assert "공시를 근거로 기업 정보를 검색하고 설명합니다." not in response.text
     assert '<script type="module" src="/static/app.js"></script>' in response.text
 
 
@@ -76,3 +82,19 @@ def test_public_assets_have_security_headers_and_local_sources(ready_agent) -> N
     assert "javascript" in client.get("/static/app.js").headers["content-type"]
     assert "javascript" in client.get("/static/api.js").headers["content-type"]
     assert "javascript" in client.get("/static/history.js").headers["content-type"]
+
+    for font_name in (
+        "KoPubWorld-Dotum-Bold.woff2",
+        "KoPubWorld-Batang-Medium.woff2",
+        "KoPubWorld-Batang-Bold.woff2",
+    ):
+        font = client.get(f"/static/fonts/{font_name}")
+        assert font.status_code == 200
+        assert len(font.content) > 1_000
+
+    css = client.get("/static/app.css").text
+    assert "KoPubWorld Dotum" in css
+    assert "KoPubWorld Batang" in css
+    assert "url(\"/static/fonts/" in css
+    assert "https://" not in css
+    assert "http://" not in css

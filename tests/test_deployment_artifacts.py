@@ -31,6 +31,11 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn("COPY config ./config", text)
         self.assertIn("DISCLOSURE_CONFIG_DIR=/app/config", text)
 
+    def test_python_package_declares_local_webfont_assets(self):
+        text = Path("pyproject.toml").read_text(encoding="utf-8")
+        self.assertIn('"web/fonts/*.woff2"', text)
+        self.assertIn('"web/fonts/LICENSE.md"', text)
+
     def test_windows_scripts_validate_read_only_inputs_and_smoke_query(self):
         start = Path("scripts/start-agent.ps1").read_text(encoding="utf-8")
         smoke = Path("scripts/smoke-agent.ps1").read_text(encoding="utf-8")
