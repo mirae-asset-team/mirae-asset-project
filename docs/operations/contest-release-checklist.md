@@ -9,7 +9,7 @@ This checklist records binary evidence without credentials or raw provider respo
 |---|---|---|
 | Runtime image source commit | PASS | exact code-only `git archive` from `dcf44b8`; archive SHA-256 `5e75b7b9e4e86c7d70e93761fb90a6f8f292c23df8835546dba53c006b182cdb`; no `.env`, database, key, or runtime file |
 | Immutable base size/SHA-256 | PASS | `38,773,280,768` bytes / `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563` |
-| NCP live overlay SHA-256 | PASS_PRIOR_RELEASE | `92ffe3ce1740153cfec457f5354685535a31cc5fe0d7722d61f1195f2ac1d3ad`; corpus-wide overlay is not yet deployed remotely |
+| NCP live overlay SHA-256 | PASS | corpus-wide overlay `a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55`; `quick_check=ok`, FK violations `0`, financial facts `1,191` |
 | Live search SHA-256/revision | PASS | `e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793` / `safe-search-v1` |
 | Overlay integrity/base attestation | PASS | `integrity_check=ok`, `overlay_matches_base=true`, event facts `1,423` |
 | Validated financial-fact seed coverage | PASS_SCOPE_LIMITED | Strict seed-to-audited-Gold match `8/8`, all trust tier `agent_audited`; exact question/fact ID, filing, value, scale, and evidence set; `corpus_wide_complete=false` |
@@ -26,7 +26,7 @@ This checklist records binary evidence without credentials or raw provider respo
 | Local Docker bind-mount latency | PASS_WITH_WARNING | internal query latency `192174.44–207511.27ms` on Windows Docker Desktop D-drive bind mounts; direct local runtime remained `4.78–4.89s`; functional gate passed but this setup is not a performance reference |
 | Browser desktop/360px/XSS | PASS | verified answer and evidence card, abstention, search `2→0→3`, three delete controls, no horizontal overflow, mobile menu/focus return; literal `<img src=x onerror=alert(1)>` rendered as exact text with `img=0`, dialog `false`, console errors `0` |
 | Immutable artifacts after Docker | PASS | base/overlay/search size, UTC mtime and SHA-256 matched the pre-Docker values; container mounts reported base/agent/attestation `rw=false`, runtime `rw=true` |
-| Provider configured on NCP | BLOCKED_EXTERNAL | `/health.provider_configured=false`; no rotated credential was supplied and the credential previously pasted in chat was not reused |
+| Provider configured on NCP | PASS_CONFIGURED | `/health.provider_configured=true`; credential value and `.env` contents were not printed or committed; configuration alone is not provider-quality evidence |
 | Provider HTTP smoke | PASS | HyperCLOVA endpoint returned HTTP 200; response body redacted |
 | Provider adapter schema smoke | FAIL_CLOSED | Parser now accepts exactly one prose-wrapped JSON object and rejects ambiguity; the prior live text response still did not satisfy the exact schema, and no current credential is available for re-smoke |
 | Provider 300-case pass | NOT_RUN | Stopped after schema smoke; no provider quality gate was claimed |
@@ -35,8 +35,8 @@ This checklist records binary evidence without credentials or raw provider respo
 | Technical proposal source/PDF | PASS | Korean Markdown plus visually inspected 12-page A4 PDF; all required sections, tables and architecture diagram present; invariant build reproduced identical SHA-256 twice: `b238a7d75a5604ea73207dc04c095e4d92ebf5d42750c98a233ba415f17cd0cc` |
 | Evaluation API server specification | PASS_PUBLIC | Standalone request/response/error/limit/health/deployment contract for `GET /answer` and `POST /query`; the public no-login deployment returned the exact five-field official response and the detailed verified response |
 | Compose config hash | PASS | `compose.yaml` SHA-256 `eebdcf5a7604ae904fe8ffbb049f508a2f3abe9194bdfad510392e636c4886d1`; anonymous limits render as `120/4/8` |
-| NCP Docker image build/start | PASS | Docker Engine 29.1.3 / Compose 2.40.3; image rebuilt from exact commit `dcf44b8`; image `sha256:53d5c5969df4f44338deb298320534bbffd952019568e948e40a8c5cfeb3e84f`; container healthy |
-| NCP Docker `/health` | PASS | HTTP 200; ready/base-attested/overlay-attested/search-ready all true; provider false |
+| NCP Docker image build/start | PASS | corpus release `corpus-d3e909a`; image `sha256:9ab930b8bf84ad2c54fdbadb5e9ed2b0a41dd545ae8addf759edde53602117bea`; container healthy before and after explicit restart |
+| NCP Docker `/health` | PASS | HTTP 200; ready/base-attested/overlay-attested/search-ready all true; `company_count=76`; provider configured; post-restart request `70cb5e5e99404f8f882b86a909b3198c` |
 | NCP Docker `/query` smoke | PASS | Exact numeric returned 2 verified values/2 citations; textual returned 1 citation; out-of-scope and injection returned no values/citations; 1.66–1.71s internally |
 | NCP server/public IP/ACG | PASS | Operational 2-vCPU/8GB server with public IP; inbound current-admin `/32` TCP 22 and public TCP 8000 only; outbound TCP 443; stale SSH `/32` removed |
 | Current public API reachability | PASS | Fresh Windows-network probe on 2026-08-20: TCP 22 and 8000 open; `/health` HTTP 200 with ready/base/overlay/search true and provider false; q005 HTTP 200, verified/answerable, both expected values present, two evidence records, about 2.09s |
@@ -58,21 +58,21 @@ This checklist records binary evidence without credentials or raw provider respo
 | Incomplete aggregate explanation | PASS_LOCAL | the operating-profit threshold-count query remained unanswerable with corpus_wide_financial_coverage_required; no partial count was emitted |
 | Insider-purchase regression after UI release | PASS_LOCAL | the Samsung Biologics insider-purchase query remained unanswerable with validated_event_fact_required |
 | Local font packaging | PASS | pinned unmodified font-kopubworld@1.0.3; three WOFF2 files plus license present in the wheel; no runtime CDN |
-| Public research UI v2 NCP deployment | PENDING | code-only deployment, restart recovery, anonymous browser/evidence expansion, provider mode, and read-only remote mount/hash checks must pass before promotion |
+| Public research UI v2 NCP deployment | PASS | anonymous public UI served from corpus release; browser returned the verified Samsung answer and evidence state; restart recovery and read-only mount/hash checks passed |
 | Corpus-wide financial release evaluation | PASS_LOCAL | staging overlay: 856/856 exact cases; latest 456, three-year 397, incomplete count/list/rank refusals 3; false numeric and ungrounded verified answers 0; Samsung regression passed |
 | SQLite 20-request concurrency | PASS_LOCAL | synchronized 20-request wave; errors 0; p95 86.94ms; fixed gate <=2,000ms, so PostgreSQL/OpenSearch remains deferred |
 | Local corpus-wide overlay promotion | PASS_LOCAL | atomic rename promotion; new live SHA-256 `a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55`; `quick_check=ok`; FK violations `0`; base identity matched; `1,191` facts |
 | Local corpus-wide post-promotion smoke | PASS_LOCAL | root/static/health/coverage HTTP 200; Samsung FY2025 consolidated revenue `333,605,938 백만원`, filing `20260310002820`, verified with one evidence; request `9ceee5941efb4337bee91bafd07e475d` |
 | Refreshed technical proposal PDF | PASS | 12 pages; pypdf required-value checks and Poppler visual inspection passed; SHA-256 `a77d409c4f0821d9f36431c35f0cb767ae64d2834881408c1d90c39974f71c75` |
-| Corpus-wide NCP deployment | BLOCKED_EXTERNAL | authenticated console session is a subaccount; NCP rejects `서버 인증키 변경` and requires a main account. The stopped server was restored to `운영중` and the prior public UI reloaded successfully; no key or remote artifact changed |
+| Corpus-wide NCP deployment | PASS | original PEM was found and used after explicit approval, so no key change was needed; code `d3e909a`, overlay `a4491f20...b55`, `1,191` facts, atomic rollback artifacts, public Samsung regression, restart recovery, and four post-deploy hashes passed |
 | GitHub corpus-wide branch publication | PASS | explicit approval received; commits `4bd23bd` through `7467e4f` pushed to `ksm12030-sudo/mirae-asset-project`, branch `agent/disclosure-db-foundation`; remote advanced `df6f64d..7467e4f` |
 
 ## Rollback path
 
-The previous local live overlay is preserved at `D:\mirae-asset-project\db\agent\agent_overlay.20260821-015205.pre-corpus-wide.sqlite`. Its SHA-256 is `92ffe3ce1740153cfec457f5354685535a31cc5fe0d7722d61f1195f2ac1d3ad`. The immutable base and live search index were not modified by the promotion. The remote NCP service has not yet received the corpus-wide overlay.
+The previous local live overlay is preserved at `D:\mirae-asset-project\db\agent\agent_overlay.20260821-015205.pre-corpus-wide.sqlite`. On NCP, the previous app is `/srv/mirae/releases/app-before-d3e909a-20260821`, the previous overlay is `/srv/mirae/data/agent/agent_overlay.20260821-pre-corpus.sqlite`, and the rollback image tag is `app-disclosure-agent:rollback-d3e909a`. The previous overlay SHA-256 is `92ffe3ce1740153cfec457f5354685535a31cc5fe0d7722d61f1195f2ac1d3ad`. The immutable base and live search index were not modified.
 
 ## Go/no-go
 
-Local deterministic and corpus-wide financial hard gates: GO. Local atomic promotion: GO. Existing prior-release public API and restart-recovery evidence: GO. GitHub publication: GO. Corpus-wide NCP redeployment: BLOCKED_EXTERNAL on a main-account session.
+Local deterministic and corpus-wide financial hard gates: GO. Local and NCP atomic promotion: GO. Public API/UI, post-restart recovery, immutable-hash re-attestation, and GitHub publication: GO.
 
 Final contest submission: NO-GO until a rotated HyperCLOVA X credential passes the bounded schema/provider 300 gate. The public UI/`GET /answer`/restart checks, technical proposal, and API specification are complete; no external gate was relaxed.
