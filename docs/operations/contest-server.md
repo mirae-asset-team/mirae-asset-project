@@ -146,11 +146,17 @@ python scripts/evaluate_retrieval.py `
 ```
 
 2026-08-20 read-only 실행에서 sparse Recall@20은 `13/17`(`0.7647`)로 그대로였고 hybrid는
-`17/17`(`1.0`)이었다. hybrid 경로 귀속은 `structured_financial=8`,
+`17/17`(`1.0`)이었다. 요청 K는 20이고 최종 safe evidence bundle의 유효 K는 8이다.
+hybrid 경로 귀속은 `structured_financial=8`,
 `structured_event=7`, `sparse_text=2`이며 service error와 residual target은 0이었다.
 검증 seed는 8/8 Gold 일치지만 이는 **checked-in seed 범위**일 뿐 full-corpus
 `financial_fact` 완성을 뜻하지 않는다. sparse 지표를 hybrid 값으로 대체하거나 hard gate를
 낮추지 않는다.
+
+Hybrid CLI는 base/Gold/overlay/attestation/search/seed와 두 output 경로의 충돌을 시작 전에
+거부한다. overlay·attestation·search는 세 경로를 모두 제공하거나 모두 생략해야 한다.
+base/overlay/search attestation 및 search SQLite fatal reason이 bundle에 반환되면 hybrid
+status는 `failed_closed`, recall은 `null`이며 sparse fallback을 hybrid 통과로 계산하지 않는다.
 
 ## Provider-required 300-case gate
 
