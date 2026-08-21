@@ -113,6 +113,108 @@ def test_transaction_mentions_are_excluded_span_by_span_but_mixed_advice_is_refu
         assert decision.reason_codes == ("policy_recommendation_or_suitability_refusal",)
 
 
+def test_direct_advice_stays_refused_when_unrelated_disclosure_lookup_words_follow_it():
+    advice_phrases = [
+        "사도 돼", "살까요", "사는 게 나을까요",
+        "팔아도 되나요", "팔까", "파는 게 좋을까",
+    ]
+
+    for phrase in advice_phrases:
+        decision = classify_policy(
+            f"사업보고서를 보고 삼성전자 주식을 {phrase}? 관련 공시 내용을 찾아줘"
+        )
+        assert decision.action == "refuse_recommendation", phrase
+        assert decision.reason_codes == ("policy_recommendation_or_suitability_refusal",)
+
+
+def test_quoted_transaction_questions_stay_refused_when_the_user_asks_for_an_answer():
+    advice_phrases = [
+        "사도 돼", "살까요", "사는 게 나을까요",
+        "팔아도 되나요", "팔까", "파는 게 좋을까",
+    ]
+
+    for phrase in advice_phrases:
+        questions = [
+            f"사업보고서를 보고 '삼성전자 주식을 {phrase}?'라는 내용에 답해줘",
+            f"사업보고서에서 '삼성전자 주식을 {phrase}?'라는 문구를 찾아서 그 질문에 답해줘",
+            f"사업보고서에서 '삼성전자 주식을 {phrase}?'라는 문구를 찾아줘. 그 질문에 답해줘",
+        ]
+        for question in questions:
+            decision = classify_policy(question)
+            assert decision.action == "refuse_recommendation", (phrase, question)
+            assert decision.reason_codes == ("policy_recommendation_or_suitability_refusal",)
+
+
+def test_mixed_mention_and_advice_order_keeps_each_buy_sell_occurrence_independent():
+    advice_and_neutral_mentions = [
+        ("사도 돼", "팔까요"),
+        ("살까요", "팔아도 되나요"),
+        ("사는 게 나을까요", "파는 게 좋을까"),
+        ("팔아도 되나요", "사도 돼"),
+        ("팔까", "살까요"),
+        ("파는 게 좋을까", "사는 게 나을까요"),
+    ]
+
+    for advice, neutral_mention in advice_and_neutral_mentions:
+        questions = [
+            (
+                f"사업보고서에서 '{neutral_mention}'라는 문구를 확인하고 "
+                f"삼성전자 주식을 {advice}? 관련 공시 내용을 찾아줘"
+            ),
+            (
+                f"사업보고서를 보고 삼성전자 주식을 {advice}? 이어 "
+                f"'{neutral_mention}'라는 표현이 있는지 찾아줘"
+            ),
+        ]
+        for question in questions:
+            decision = classify_policy(question)
+            assert decision.action == "refuse_recommendation", (advice, question)
+            assert decision.reason_codes == ("policy_recommendation_or_suitability_refusal",)
+
+
+def test_unquoted_reported_buy_sell_occurrences_are_neutral_but_do_not_hide_adjacent_advice():
+    neutral_questions = [
+        "사업보고서에서 주식을 사도 되는지 검토한 내용을 찾아줘",
+        "사업보고서에서 주식을 팔아도 되는지 검토한 내용을 찾아줘",
+    ]
+    for question in neutral_questions:
+        assert classify_policy(question).action == "allow_analysis"
+
+    mixed_questions = [
+        (
+            "사업보고서에서 주식을 사도 되는지 검토한 내용을 찾고 "
+            "삼성전자 주식 팔까요? 관련 공시도 확인해줘"
+        ),
+        (
+            "사업보고서를 보고 삼성전자 주식 살까요? 이어 "
+            "주식을 팔아도 되는지 검토한 내용을 찾아줘"
+        ),
+    ]
+    for question in mixed_questions:
+        decision = classify_policy(question)
+        assert decision.action == "refuse_recommendation"
+        assert decision.reason_codes == ("policy_recommendation_or_suitability_refusal",)
+
+    answer_requests = [
+        "사업보고서에서 주식을 사도 되는지 검토한 내용을 찾아서 그 질문에 답해줘",
+        "사업보고서에서 주식을 팔아도 되는지 검토한 내용을 찾아서 그 질문에 답해줘",
+    ]
+    for question in answer_requests:
+        assert classify_policy(question).action == "refuse_recommendation"
+
+
+def test_neutral_transaction_mentions_bind_a_disclosure_source_on_either_side():
+    questions = [
+        "'사도 돼'라는 문구가 사업보고서에 있는지 찾아줘",
+        "'팔까요'라는 표현이 공시에 있는지 찾아줘",
+        "주식을 사도 되는지 검토한 내용이 사업보고서에 있는지 찾아줘",
+        "주식을 팔아도 되는지 검토한 내용이 공시에 있는지 찾아줘",
+    ]
+
+    for question in questions:
+        assert classify_policy(question).action == "allow_analysis", question
+
+
 def test_historical_risk_factor_analysis_is_not_blocked_by_outlook_word_alone():
     decision = classify_policy("삼성전자 공시에 나온 과거 위험요인과 사업 전망 내용을 분석해줘")
 

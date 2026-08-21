@@ -34,9 +34,36 @@ _DIRECT_TRANSACTION_ACTION = re.compile(
     r"|파는게(?:좋(?:을까|을까요)|나을까|나을까요|될까|될까요)"
     r")"
 )
-_QUOTED_TRANSACTION_MENTION = re.compile(
-    r"[\"'“”‘’](?P<mention>.+?)[\"'“”‘’]\s*(?:(?:라는|이란)\s*)?(?:문구|표현|기재|언급|내용)"
+_DISCLOSURE_SOURCE_TEXT = r"(?:공시|(?:사업|분기|반기)?보고서)"
+_DISCLOSURE_SOURCE = re.compile(_DISCLOSURE_SOURCE_TEXT)
+_QUOTED_TEXT_PATTERNS = (
+    re.compile(r'"(?P<mention>[^"]+)"'),
+    re.compile(r"'(?P<mention>[^']+)'"),
+    re.compile(r"“(?P<mention>[^”]+)”"),
+    re.compile(r"‘(?P<mention>[^’]+)’"),
 )
+_NEUTRAL_QUOTED_MENTION_TAIL = re.compile(
+    rf"\s*(?:(?:라는|이란)\s*)?(?:문구|표현|기재|언급|내용)"
+    rf"\s*(?:을|를|이|가|은|는)?\s*"
+    rf"(?P<source>{_DISCLOSURE_SOURCE_TEXT}\s*(?:에|에서|의)?\s*)?"
+    rf"(?:찾|검색|조회|확인|있는지|있었는지|나오는지|포함(?:됐|되었|되어|된|되)?는지)"
+)
+_REPORTED_TRANSACTION_MENTION_TAIL = re.compile(
+    rf"\s*(?:검토|논의|확인|언급|기재)(?:한|했던|된|됐던)\s*"
+    rf"(?:내용|문구|표현|기록|대목)\s*(?:을|를|이|가|은|는)?\s*"
+    rf"(?P<source>{_DISCLOSURE_SOURCE_TEXT}\s*(?:에|에서|의)?\s*)?"
+    rf"(?:찾|검색|조회|확인|있는지|있었는지|나오는지)"
+)
+_TRANSACTION_RESPONSE_REQUEST = re.compile(
+    r"(?:그\s*)?(?:질문|내용)\s*(?:에|에는|을|를)?\s*(?:직접\s*)?"
+    r"(?:답해|답변|대답|결론|판단|추천)"
+)
+_NEXT_CLAUSE_TRANSACTION_RESPONSE_REQUEST = re.compile(
+    r"\s*(?:(?:그리고|이어서|또)\s*)?(?:그|이)\s*질문"
+    r"\s*(?:에|에는|을|를)?\s*(?:직접\s*)?"
+    r"(?:답해|답변|대답|결론|판단|추천)"
+)
+_CLAUSE_BOUNDARIES = ".!?。！？\n"
 _RECOMMENDATION_PATTERNS = (
     r"목표\s*주가",
     r"(?:주가|가격).{0,20}(?:오를|내릴|상승|하락|방향|전망|예상)",
@@ -52,29 +79,93 @@ def _normalized_intent_text(text: str) -> str:
     return re.sub(r"[\s\W_]+", "", unicodedata.normalize("NFKC", text).casefold())
 
 
-def _without_quoted_transaction_mentions(text: str) -> str:
+def _normalized_intent_view(text: str) -> tuple[str, str, tuple[int, ...]]:
     normalized = unicodedata.normalize("NFKC", text).casefold()
-    return _QUOTED_TRANSACTION_MENTION.sub(
-        lambda match: " " if _DIRECT_TRANSACTION_ACTION.search(_normalized_intent_text(match["mention"])) else match[0],
-        normalized,
+    compact_chars: list[str] = []
+    source_offsets: list[int] = []
+    for offset, character in enumerate(normalized):
+        if re.match(r"[\s\W_]", character):
+            continue
+        compact_chars.append(character)
+        source_offsets.append(offset)
+    return normalized, "".join(compact_chars), tuple(source_offsets)
+
+
+def _clause_start(text: str, offset: int) -> int:
+    return max((text.rfind(boundary, 0, offset) for boundary in _CLAUSE_BOUNDARIES), default=-1) + 1
+
+
+def _clause_end(text: str, offset: int) -> int:
+    boundaries = tuple(
+        position
+        for boundary in _CLAUSE_BOUNDARIES
+        if (position := text.find(boundary, offset)) >= 0
+    )
+    return min(boundaries, default=len(text))
+
+
+def _has_disclosure_source_before(text: str, offset: int) -> bool:
+    return bool(_DISCLOSURE_SOURCE.search(text[_clause_start(text, offset):offset]))
+
+
+def _has_transaction_response_request_after(text: str, offset: int) -> bool:
+    current_clause_end = _clause_end(text, offset)
+    if _TRANSACTION_RESPONSE_REQUEST.search(text[offset:current_clause_end]):
+        return True
+    if current_clause_end == len(text):
+        return False
+    next_clause_start = current_clause_end + 1
+    next_clause_end = _clause_end(text, next_clause_start)
+    return bool(
+        _NEXT_CLAUSE_TRANSACTION_RESPONSE_REQUEST.match(
+            text[next_clause_start:next_clause_end]
+        )
     )
 
 
-def _is_reported_transaction_mention(text: str, match: re.Match[str]) -> bool:
-    before = text[max(0, match.start() - 80):match.start()]
-    after = text[match.end():match.end() + 80]
+def _neutral_quoted_transaction_ranges(text: str) -> tuple[tuple[int, int], ...]:
+    ranges: list[tuple[int, int]] = []
+    for pattern in _QUOTED_TEXT_PATTERNS:
+        for quoted in pattern.finditer(text):
+            mention = quoted["mention"]
+            if not _DIRECT_TRANSACTION_ACTION.search(_normalized_intent_text(mention)):
+                continue
+            tail = _NEUTRAL_QUOTED_MENTION_TAIL.match(text, quoted.end())
+            if tail is None:
+                continue
+            if not (_has_disclosure_source_before(text, quoted.start("mention")) or tail["source"]):
+                continue
+            if _has_transaction_response_request_after(text, quoted.end()):
+                continue
+            ranges.append((quoted.start("mention"), quoted.end("mention")))
+    return tuple(ranges)
+
+
+def _is_neutral_transaction_mention(
+    text: str,
+    start: int,
+    end: int,
+    quoted_ranges: tuple[tuple[int, int], ...],
+) -> bool:
+    if any(quoted_start <= start and end <= quoted_end for quoted_start, quoted_end in quoted_ranges):
+        return True
+    tail = _REPORTED_TRANSACTION_MENTION_TAIL.match(text, end)
     return (
-        ("공시" in before or "보고서" in before)
-        and any(marker in after for marker in ("검토", "논의", "내용", "문구", "표현", "기재", "언급", "찾", "확인"))
+        tail is not None
+        and bool(_has_disclosure_source_before(text, start) or tail["source"])
+        and not _has_transaction_response_request_after(text, end)
     )
 
 
 def _is_direct_transaction_action(text: str) -> bool:
-    normalized = _normalized_intent_text(_without_quoted_transaction_mentions(text))
-    return any(
-        not _is_reported_transaction_mention(normalized, match)
-        for match in _DIRECT_TRANSACTION_ACTION.finditer(normalized)
-    )
+    normalized, compact, source_offsets = _normalized_intent_view(text)
+    quoted_ranges = _neutral_quoted_transaction_ranges(normalized)
+    for match in _DIRECT_TRANSACTION_ACTION.finditer(compact):
+        start = source_offsets[match.start()]
+        end = source_offsets[match.end() - 1] + 1
+        if not _is_neutral_transaction_mention(normalized, start, end, quoted_ranges):
+            return True
+    return False
 
 
 def _unique_strings(value: object, *, field_name: str) -> tuple[str, ...]:
