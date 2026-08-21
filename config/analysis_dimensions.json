@@ -1,0 +1,91 @@
+{
+  "dimensions": [
+    {
+      "dimension_id": "profitability_financial_health",
+      "match_all": ["수익성", "재무건전성"],
+      "subquestions": ["수익성 추세", "재무상태 변화", "자금조달 또는 상환 사건"],
+      "allowed_conclusions": ["improved", "deteriorated", "mixed", "stable", "insufficient_evidence"],
+      "max_evidence": 12,
+      "slots": [
+        {"slot_id": "income_trend", "domain": "financial", "search_concepts": ["매출액", "영업이익", "당기순이익"], "min_evidence": 2, "max_evidence": 4, "mandatory": true, "absence_reason_code": "income_trend_missing"},
+        {"slot_id": "balance_sheet", "domain": "financial", "search_concepts": ["자산총계", "부채총계", "자본총계"], "min_evidence": 2, "max_evidence": 4, "mandatory": true, "absence_reason_code": "balance_sheet_missing"},
+        {"slot_id": "financing_events", "domain": "event", "search_concepts": ["차입", "사채", "유상증자", "상환"], "min_evidence": 0, "max_evidence": 4, "mandatory": false, "absence_reason_code": "financing_events_missing"}
+      ]
+    },
+    {
+      "dimension_id": "contract_change",
+      "match_any": ["계약", "수주", "계약금액"],
+      "subquestions": ["계약의 현재 조건", "계약 변경 또는 종료"],
+      "allowed_conclusions": ["improved", "deteriorated", "mixed", "stable", "insufficient_evidence"],
+      "max_evidence": 8,
+      "slots": [
+        {"slot_id": "contract_current", "domain": "event", "search_concepts": ["계약금액", "계약기간", "계약상대"], "min_evidence": 1, "max_evidence": 4, "mandatory": true, "absence_reason_code": "contract_current_missing"},
+        {"slot_id": "contract_change_history", "domain": "event", "search_concepts": ["변경", "해지", "종료", "정정"], "min_evidence": 0, "max_evidence": 4, "mandatory": false, "absence_reason_code": "contract_change_history_missing"}
+      ]
+    },
+    {
+      "dimension_id": "financing_pressure",
+      "match_any": ["차입", "사채", "유상증자", "상환", "자금조달"],
+      "subquestions": ["차입과 채무", "자본 조달과 상환"],
+      "allowed_conclusions": ["risk_signal", "stable", "mixed", "insufficient_evidence"],
+      "max_evidence": 10,
+      "slots": [
+        {"slot_id": "debt_position", "domain": "financial", "search_concepts": ["부채총계", "차입금", "사채"], "min_evidence": 1, "max_evidence": 5, "mandatory": true, "absence_reason_code": "debt_position_missing"},
+        {"slot_id": "financing_disclosures", "domain": "event", "search_concepts": ["차입", "사채", "유상증자", "상환"], "min_evidence": 1, "max_evidence": 5, "mandatory": true, "absence_reason_code": "financing_disclosures_missing"}
+      ]
+    },
+    {
+      "dimension_id": "correction_materiality",
+      "match_any": ["정정", "정정공시", "수정"],
+      "subquestions": ["최초 공시", "유효 정정 공시"],
+      "allowed_conclusions": ["improved", "deteriorated", "mixed", "stable", "insufficient_evidence"],
+      "max_evidence": 8,
+      "slots": [
+        {"slot_id": "original_disclosure", "domain": "text", "search_concepts": ["최초", "원문"], "min_evidence": 1, "max_evidence": 4, "mandatory": true, "absence_reason_code": "original_disclosure_missing"},
+        {"slot_id": "effective_correction", "domain": "text", "search_concepts": ["정정", "수정"], "min_evidence": 1, "max_evidence": 4, "mandatory": true, "absence_reason_code": "effective_correction_missing"}
+      ]
+    },
+    {
+      "dimension_id": "governance_signal",
+      "match_any": ["지배구조", "내부자", "임원", "최대주주"],
+      "subquestions": ["지배구조 또는 내부자 사건"],
+      "allowed_conclusions": ["risk_signal", "stable", "mixed", "insufficient_evidence"],
+      "max_evidence": 6,
+      "slots": [
+        {"slot_id": "governance_events", "domain": "event", "search_concepts": ["지배구조", "내부자", "임원", "최대주주"], "min_evidence": 1, "max_evidence": 6, "mandatory": true, "absence_reason_code": "governance_events_missing"}
+      ]
+    },
+    {
+      "dimension_id": "business_risk",
+      "match_any": ["위험요인", "사업위험", "리스크"],
+      "subquestions": ["공시된 사업 위험요인"],
+      "allowed_conclusions": ["risk_signal", "stable", "mixed", "insufficient_evidence"],
+      "max_evidence": 6,
+      "slots": [
+        {"slot_id": "disclosed_risk_factors", "domain": "text", "search_concepts": ["위험요인", "리스크", "불확실성"], "min_evidence": 1, "max_evidence": 6, "mandatory": true, "absence_reason_code": "disclosed_risk_factors_missing"}
+      ]
+    },
+    {
+      "dimension_id": "management_discussion",
+      "match_any": ["경영진", "경영진단", "사업의 내용", "경영 논의"],
+      "subquestions": ["경영진의 공시 설명", "공시된 수치와의 일치"],
+      "allowed_conclusions": ["improved", "deteriorated", "mixed", "stable", "insufficient_evidence"],
+      "max_evidence": 8,
+      "slots": [
+        {"slot_id": "management_discussion_text", "domain": "text", "search_concepts": ["경영진", "사업의 내용", "전망"], "min_evidence": 1, "max_evidence": 4, "mandatory": true, "absence_reason_code": "management_discussion_missing"},
+        {"slot_id": "reported_outcomes", "domain": "financial", "search_concepts": ["매출액", "영업이익", "당기순이익"], "min_evidence": 1, "max_evidence": 4, "mandatory": true, "absence_reason_code": "reported_outcomes_missing"}
+      ]
+    },
+    {
+      "dimension_id": "peer_comparison",
+      "match_any": ["동종", "동일업종", "동종업계", "경쟁사", "비교"],
+      "subquestions": ["비교 대상의 공시 지표", "비교 대상의 완전성"],
+      "allowed_conclusions": ["improved", "deteriorated", "mixed", "stable", "insufficient_evidence"],
+      "max_evidence": 12,
+      "slots": [
+        {"slot_id": "peer_metric_coverage", "domain": "financial", "search_concepts": ["매출액", "영업이익", "당기순이익"], "min_evidence": 1, "max_evidence": 8, "mandatory": true, "absence_reason_code": "peer_metric_coverage_missing"},
+        {"slot_id": "peer_comparison_context", "domain": "text", "search_concepts": ["동종", "경쟁", "시장"], "min_evidence": 0, "max_evidence": 4, "mandatory": false, "absence_reason_code": "peer_comparison_context_missing"}
+      ]
+    }
+  ]
+}

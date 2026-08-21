@@ -121,6 +121,8 @@ def to_jsonable(value: Any) -> Any:
         return {item.name: to_jsonable(getattr(value, item.name)) for item in fields(value)}
     if isinstance(value, dict):
         return {str(key): to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, (set, frozenset)):
+        return [to_jsonable(item) for item in sorted(value, key=repr)]
     if isinstance(value, (list, tuple)):
         return [to_jsonable(item) for item in value]
     return value
