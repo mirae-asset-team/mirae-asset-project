@@ -55,10 +55,13 @@ class EvidenceSlot:
     max_evidence: int = 4
     mandatory: bool = True
     absence_reason_code: str = "required_evidence_missing"
+    min_periods: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "report_types", _normalized_string_tuple(self.report_types, "report_types"))
         object.__setattr__(self, "search_concepts", _normalized_string_tuple(self.search_concepts, "search_concepts"))
+        if type(self.min_periods) is not int or self.min_periods <= 0:
+            raise ValueError("min_periods must be a positive integer")
 
 
 def _normalized_evidence_slots(value: object) -> tuple[EvidenceSlot, ...]:

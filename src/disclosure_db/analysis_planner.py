@@ -218,6 +218,8 @@ def load_dimension_catalog(path: str | Path | None = None) -> tuple[Mapping[str,
                 raise ValueError(f"analysis slot {slot_id} evidence bounds must be integers")
             if slot["min_evidence"] < 0 or slot["max_evidence"] < slot["min_evidence"]:
                 raise ValueError(f"analysis slot {slot_id} has invalid evidence bounds")
+            if type(slot.get("min_periods", 1)) is not int or slot.get("min_periods", 1) <= 0:
+                raise ValueError(f"analysis slot {slot_id} minimum periods must be a positive integer")
         validated.append(dimension)
     return tuple(validated)
 
@@ -253,6 +255,7 @@ def _make_slot(slot: Mapping[str, Any], *, issuer: str | None, base_plan: Any) -
         filing_date=base_plan.filing_date,
         report_types=tuple(slot.get("report_types", ())),
         search_concepts=tuple(slot["search_concepts"]),
+        min_periods=slot.get("min_periods", 1),
         min_evidence=slot["min_evidence"],
         max_evidence=slot["max_evidence"],
         mandatory=bool(slot["mandatory"]),

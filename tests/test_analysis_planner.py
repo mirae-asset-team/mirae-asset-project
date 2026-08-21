@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import mock_open, patch
 
 import pytest
 
 from disclosure_db.agent_contracts import QueryPlan, to_jsonable
 from disclosure_db.analysis_contracts import AnalysisPlan, EvidenceSlot, PolicyDecision, QueryPlanSnapshot
-from disclosure_db.analysis_planner import classify_policy, plan_analysis
+from disclosure_db.analysis_planner import classify_policy, load_dimension_catalog, plan_analysis
 
 
 def test_historical_disclosure_judgment_is_permitted_but_trade_advice_is_blocked():
@@ -33,6 +34,39 @@ def test_profitability_and_financial_health_requires_three_evidence_slots():
         "financing_events",
     ]
     assert all(slot.mandatory for slot in plan.required_evidence_slots[:2])
+
+
+@pytest.mark.parametrize("minimum", [0, -1, "2"])
+def test_dimension_catalog_rejects_invalid_minimum_periods(minimum):
+    catalog = {
+        "dimensions": [{
+            "dimension_id": "invalid-periods",
+            "match_any": ["분석"],
+            "subquestions": ["기간"],
+            "allowed_conclusions": ["insufficient_evidence"],
+            "max_evidence": 2,
+            "slots": [{
+                "slot_id": "period-slot", "domain": "financial",
+                "search_concepts": ["매출액"], "min_periods": minimum,
+                "min_evidence": 1, "max_evidence": 2, "mandatory": True,
+                "absence_reason_code": "missing",
+            }],
+        }],
+    }
+    with patch("pathlib.Path.open", mock_open(read_data=json.dumps(catalog, ensure_ascii=False))):
+        with pytest.raises(ValueError, match="minimum periods"):
+            load_dimension_catalog("unused.json")
+
+
+def test_evidence_slot_positional_evidence_bounds_remain_backward_compatible():
+    slot = EvidenceSlot(
+        "slot", "financial", None, None, None, None, None, (), ("매출액",),
+        2, 4, True, "missing",
+    )
+
+    assert slot.min_evidence == 2
+    assert slot.max_evidence == 4
+    assert slot.min_periods == 1
 
 
 def test_disguised_advice_target_price_portfolio_and_suitability_are_refused():

@@ -46,18 +46,21 @@ unresolved 539, missing-original 2입니다. 검색 관련성 통과는 evidence
 ## Free-form retrieval Loop 1
 
 - `freeform_gold.agent_audited.jsonl`: 승인·agent-audited issuer와 안전한 current corpus evidence에서
-  결정론적으로 만든 126개 free-form 검색 사례. 7개 non-peer dimension, 42개 paraphrase template을
+  결정론적으로 만든 120개 free-form 검색 사례. 7개 non-peer dimension, 42개 paraphrase template을
   포함하며 생성 레코드는 모두 `agent_audited`이다.
 - `freeform_gold_manifest.json`: Gold 입력·contract·template·database 및 canonical content SHA-256과
-  dimension/route/split별 건수만 기록한다. 원문 질의·답변·excerpt는 포함하지 않는다.
+  dimension/route/split별 건수, 19개 source record와 36개 unique target을 기록한다. 원문 질의·답변·excerpt는 포함하지 않는다.
 - `freeform_retrieval_summary.json`: 실제 `plan_analysis` + `EvidenceService.search_analysis` 경로의
   exact evidence-ID Recall@5/20, MRR, slot completeness, issuer/version 안전성, query/candidate 수,
   p50/p95 및 case-ID 기반 residual 진단이다.
 - `embedding_decision.json`: Recall@20 0.95 및 residual text 최대 개선폭 0.05 고정 gate의 결정 기록이다.
-- `dense_pilot_manifest.json`, `dense_pilot_summary.json`: residual text gate는 pilot eligible이지만 외부
-  provider access가 없어 `BLOCKED_EXTERNAL`인 상태를 기록한다. 모델은 공식 CLOVA Studio Embedding v2의
-  `bge-m3`, dimension은 1024, fragment cap은 20,000이며 vector record는 생성하지 않았다.
+- `dense_pilot_manifest.json`, `dense_pilot_summary.json`: 유효한 독립 Gold의 residual text 36건에
+  결합된 bounded pilot 계약이다. 외부 provider 비용 실행 전이므로 `BLOCKED_EXTERNAL`이며 vector record와
+  측정 gain/p95는 없다. `bge-m3`는 pilot 후보일 뿐 채택 모델이 아니다.
 
-현재 Loop 1 결과는 Recall@20 `1/126`으로 quality gate 미달이다. Gold target이나 threshold는 변경하지
-않았고, wrong issuer/version hard failure는 0이다. 상세 실패 ID와 content-free hypothesis는 retrieval
-summary에 보존한다.
+현재 Loop 1 결과는 120건·234 target occurrence에서 Recall@5 `0.3589743590`, Recall@20
+`0.4871794872`, MRR `0.225`, slot completeness `1.0`이다. wrong issuer/version과 hard failure는 0이다.
+96개 residual case 중 text는 36건이며 embedding pilot 최대 개선 가능폭은 `0.1538461538`이다.
+두 번의 재실행에서 canonical Gold content SHA-256 `9a0b21a429db7f1ea3fa41c9e040f67d9f8146ecc143a725ee02cd4fbf8940be`와
+semantic summary SHA-256 `1a7a030ef29aeca5ed9dfdf597628638074302cc74241314b4d27a3db4d64baf`가 동일했다.
+manifest는 base·overlay·search index SHA-256을 모두 기록하고, 생성 전 세 artifact의 동일 base identity를 fail-closed 검증한다.

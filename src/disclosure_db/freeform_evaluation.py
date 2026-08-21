@@ -12,6 +12,8 @@ import sqlite3
 from typing import Iterable, Mapping, Sequence
 
 from .analysis_planner import plan_analysis
+from .financial_overlay import overlay_matches_base
+from .search_index import SafeSearchIndex
 
 
 _FORBIDDEN_MANIFEST_KEYS = ("question", "answer", "excerpt", "credential", "secret", "api_key")
@@ -54,6 +56,87 @@ def text_target_is_answer_safe(
         and any(marker in normalized for marker in markers)
         and not any(marker in lowered for marker in _PROMPT_INJECTION_MARKERS)
     )
+
+
+def text_candidate_version_is_admitted(
+    slot_id: str,
+    *,
+    is_current: bool,
+    lineage_status: str,
+) -> bool:
+    """Apply the exact correction-lineage contract for a text evidence slot."""
+
+    if slot_id == "original_disclosure":
+        return not is_current and lineage_status == "root"
+    if slot_id == "effective_correction":
+        return is_current and lineage_status in {"root", "resolved"}
+    return is_current and lineage_status in {"root", "resolved"}
+
+
+def validate_freeform_ledger_identities(
+    database: Path,
+    overlay_database: Path,
+    search_index: Path,
+    attestation: object,
+) -> None:
+    """Fail closed unless both independent ledgers match the attested base."""
+
+    if not overlay_matches_base(
+        Path(database), Path(overlay_database), attestation=attestation,
+    ):
+        raise ValueError("overlay_base_attestation_mismatch")
+    try:
+        SafeSearchIndex(
+            Path(search_index),
+            base_sha256=str(getattr(attestation, "sha256")),
+            expected_base_size=int(getattr(attestation, "size_bytes")),
+        )
+    except (AttributeError, OSError, sqlite3.Error, TypeError, ValueError) as error:
+        raise ValueError("search_index_attestation_mismatch") from error
+
+
+def select_period_covered_financial_candidates(
+    candidates: Sequence[Mapping[str, object]],
+    *,
+    minimum_periods: int,
+) -> list[dict[str, object]]:
+    """Select like-for-like financial evidence spanning the required periods."""
+
+    normalized_candidates = [dict(candidate) for candidate in candidates]
+    account_ids = sorted({
+        str(point.get("account_id") or "")
+        for candidate in normalized_candidates
+        for point in candidate.get("financial_points", ())
+        if str(point.get("account_id") or "")
+    })
+    for account_id in account_ids:
+        selected: list[dict[str, object]] = []
+        covered_periods: set[tuple[object, ...]] = set()
+        ordered_candidates = sorted(
+            normalized_candidates,
+            key=lambda candidate: (
+                max((
+                    tuple(str(value or "") for value in point.get("period", ()))
+                    for point in candidate.get("financial_points", ())
+                    if str(point.get("account_id") or "") == account_id
+                ), default=("", "", "")),
+                str(candidate.get("evidence_id") or ""),
+            ),
+            reverse=True,
+        )
+        for candidate in ordered_candidates:
+            periods = {
+                tuple(point.get("period", ()))
+                for point in candidate.get("financial_points", ())
+                if str(point.get("account_id") or "") == account_id
+            }
+            if not periods.difference(covered_periods):
+                continue
+            selected.append(dict(candidate))
+            covered_periods.update(periods)
+            if len(covered_periods) >= minimum_periods:
+                return selected
+    return []
 
 
 def validate_case_plan(case: Mapping[str, object], plan: object) -> tuple[tuple[str, str], ...]:
@@ -356,10 +439,13 @@ def derive_freeform_source_records(
     search_index: Path | None = None,
     attestation: object | None = None,
 ) -> list[dict[str, object]]:
-    """Derive only targets returned through trusted serving identities."""
+    """Derive targets by independently enumerating attested fact and text ledgers."""
 
     if overlay_database is None or search_index is None or attestation is None:
         raise ValueError("serving_databases_required")
+    validate_freeform_ledger_identities(
+        Path(database), Path(overlay_database), Path(search_index), attestation,
+    )
 
     issuers: dict[str, str] = {}
     for row in audited_gold:
@@ -427,14 +513,124 @@ def derive_freeform_source_records(
             "WHERE ef.trust_tier='agent_audited' ORDER BY ef.event_fact_id,efe.evidence_id"
         ):
             event_links[str(row["evidence_id"])].append(dict(row))
+        filing_metadata = {
+            str(row["filing_id"]): dict(row)
+            for row in base.execute(
+                "SELECT f.filing_id,f.issuer_corp_code,fv.event_id,fv.lineage_status,fv.is_current "
+                "FROM filing f JOIN filing_version fv ON fv.filing_id=f.filing_id "
+                "WHERE fv.lineage_status IN ('root','resolved')"
+            )
+        }
 
-        def search_metadata(evidence_id: str) -> dict[str, object] | None:
-            row = search.execute(
-                "SELECT evidence_id,filing_id,source_id,corp_code,is_current,lineage_status,fragment_type,text_normalized "
-                "FROM search_document WHERE evidence_id=?",
-                (evidence_id,),
-            ).fetchone()
-            return dict(row) if row is not None else None
+        def filing_is_admitted(filing_id: str, corp_code: str) -> bool:
+            metadata = filing_metadata.get(filing_id)
+            return bool(
+                metadata
+                and str(metadata["issuer_corp_code"]) == corp_code
+                and bool(metadata["is_current"])
+            )
+
+        def independent_financial_candidates(
+            corp_code: str,
+            slot: object,
+        ) -> list[dict[str, object]]:
+            concepts = tuple(str(item) for item in getattr(slot, "search_concepts", ()))
+            terms = tuple(dict.fromkeys(
+                term
+                for concept in concepts
+                for term in (concept, *service.account_aliases.get(concept, ()))
+            ))
+            candidates: list[dict[str, object]] = []
+            for evidence_id in sorted(financial_links):
+                facts = [
+                    fact for fact in financial_links[evidence_id]
+                    if filing_is_admitted(str(fact["filing_id"]), corp_code)
+                    and any(term in str(fact.get("account_name_raw") or "") for term in terms)
+                ]
+                if not facts:
+                    continue
+                candidates.append({
+                    "evidence_id": evidence_id,
+                    "filing_id": str(facts[0]["filing_id"]),
+                    "fact_ids": sorted(str(fact["financial_fact_id"]) for fact in facts),
+                    "financial_points": sorted(({
+                        "account_id": str(fact["account_id"]),
+                        "period": (
+                            fact.get("period_start"), fact.get("period_end"), fact.get("instant_date"),
+                        ),
+                    } for fact in facts), key=lambda point: (point["account_id"], point["period"])),
+                })
+            return candidates
+
+        def independent_event_candidates(corp_code: str, slot: object) -> list[dict[str, object]]:
+            concepts = tuple(str(item) for item in getattr(slot, "search_concepts", ()))
+            terms = tuple(service._expand_event_terms(concepts))
+            candidates: list[dict[str, object]] = []
+            for evidence_id in sorted(event_links):
+                facts = [
+                    fact for fact in event_links[evidence_id]
+                    if filing_is_admitted(str(fact["filing_id"]), corp_code)
+                    and any(
+                        term in str(fact.get("predicate_id") or "")
+                        or term in str(fact.get("predicate_raw") or "")
+                        for term in terms
+                    )
+                ]
+                if getattr(slot, "slot_id", "") == "financing_disclosures":
+                    facts = [
+                        fact for fact in facts
+                        if fact.get("predicate_id") in {"issued_shares", "treasury_disposal_shares"}
+                    ]
+                if not facts:
+                    continue
+                candidates.append({
+                    "evidence_id": evidence_id,
+                    "filing_id": str(facts[0]["filing_id"]),
+                    "fact_ids": sorted(str(fact["event_fact_id"]) for fact in facts),
+                })
+            return candidates
+
+        def independent_text_candidates(
+            corp_code: str,
+            slot: object,
+            *,
+            markers: tuple[str, ...],
+        ) -> list[dict[str, object]]:
+            rows = search.execute(
+                "SELECT evidence_id,filing_id,is_current,lineage_status,fragment_type,text_normalized "
+                "FROM search_document WHERE corp_code=? AND lineage_status IN ('root','resolved') "
+                "ORDER BY evidence_id",
+                (corp_code,),
+            ).fetchall()
+            candidates: list[dict[str, object]] = []
+            for row in rows:
+                item = dict(row)
+                slot_id = str(getattr(slot, "slot_id", ""))
+                if not text_candidate_version_is_admitted(
+                    slot_id,
+                    is_current=bool(item["is_current"]),
+                    lineage_status=str(item["lineage_status"]),
+                ):
+                    continue
+                text = str(item["text_normalized"])
+                if not text_target_is_answer_safe(
+                    str(item["fragment_type"]), text,
+                    markers=markers,
+                    minimum_characters=int(contract.get("minimum_text_characters", 80)),
+                ):
+                    continue
+                candidates.append({
+                    "evidence_id": str(item["evidence_id"]),
+                    "filing_id": str(item["filing_id"]),
+                    "is_current": bool(item["is_current"]),
+                    "lineage_status": str(item["lineage_status"]),
+                    "content_features": {
+                        "fragment_type": str(item["fragment_type"]),
+                        "character_count": len(" ".join(text.split())),
+                        "marker_count": sum(marker in text for marker in markers),
+                    },
+                })
+            return candidates
 
         def source_metadata(evidence_id: str) -> dict[str, object] | None:
             row = base.execute(
@@ -468,83 +664,33 @@ def derive_freeform_source_records(
                 plan = plan_analysis(question, company_candidates=[issuer_name])
                 if plan.analysis_mode != "judgment" or plan.judgment_dimension != dimension:
                     continue
-                result = service.search_analysis(plan, limit=20)
                 expected_slots = [
                     {"slot_id": slot.slot_id, "domain": slot.domain}
                     for slot in plan.required_evidence_slots
                 ]
-                facts_by_evidence: dict[str, list[dict[str, object]]] = defaultdict(list)
-                for fact in (*result.financial_facts, *result.event_facts):
-                    for evidence_id in fact.get("evidence_ids", ()):  # type: ignore[union-attr]
-                        facts_by_evidence[str(evidence_id)].append(dict(fact))
                 candidates_by_slot: dict[str, list[dict[str, object]]] = defaultdict(list)
                 planned_slots = {slot.slot_id: slot for slot in plan.required_evidence_slots}
-                for slot in result.slots:
-                    planned_slot = planned_slots[slot.slot_id]
+                for slot in plan.required_evidence_slots:
                     markers = tuple(str(item) for item in text_markers.get(slot.slot_id, ()))
-                    for ref in slot.evidence:
-                        evidence_id = str(ref.evidence_id)
-                        filing_id = str(ref.filing_id)
-                        if slot.slot_id == "financing_disclosures":
-                            facts = [
-                                fact for fact in event_links.get(evidence_id, ())
-                                if fact.get("predicate_id") in {"issued_shares", "treasury_disposal_shares"}
-                            ]
-                            if not facts:
-                                continue
-                            candidates_by_slot[slot.slot_id].append({
-                                "evidence_id": evidence_id, "filing_id": filing_id,
-                                "fact_ids": sorted(str(fact["event_fact_id"]) for fact in facts),
-                            })
-                        elif planned_slot.domain == "financial":
-                            facts = financial_links.get(evidence_id, ())
-                            if not facts:
-                                continue
-                            candidates_by_slot[slot.slot_id].append({
-                                "evidence_id": evidence_id, "filing_id": filing_id,
-                                "fact_ids": sorted(str(fact["financial_fact_id"]) for fact in facts),
-                                "period_count": len({
-                                    (fact.get("period_start"), fact.get("period_end"), fact.get("instant_date"))
-                                    for fact in facts
-                                }),
-                            })
-                        elif planned_slot.domain == "event":
-                            facts = event_links.get(evidence_id, ())
-                            if not facts:
-                                continue
-                            candidates_by_slot[slot.slot_id].append({
-                                "evidence_id": evidence_id, "filing_id": filing_id,
-                                "fact_ids": sorted(str(fact["event_fact_id"]) for fact in facts),
-                            })
-                        else:
-                            metadata = search_metadata(evidence_id)
-                            if (
-                                metadata is None
-                                or str(metadata["corp_code"]) != corp_code
-                                or not text_target_is_answer_safe(
-                                    str(metadata["fragment_type"]), str(metadata["text_normalized"]),
-                                    markers=markers, minimum_characters=int(contract.get("minimum_text_characters", 80)),
-                                )
-                            ):
-                                continue
-                            candidates_by_slot[slot.slot_id].append({
-                                "evidence_id": evidence_id, "filing_id": filing_id,
-                                "is_current": bool(metadata["is_current"]),
-                                "lineage_status": str(metadata["lineage_status"]),
-                                "content_features": {
-                                    "fragment_type": str(metadata["fragment_type"]),
-                                    "character_count": len(" ".join(str(metadata["text_normalized"]).split())),
-                                    "marker_count": sum(marker in str(metadata["text_normalized"]) for marker in markers),
-                                },
-                            })
+                    if slot.domain == "financial":
+                        candidates_by_slot[slot.slot_id] = independent_financial_candidates(corp_code, slot)
+                    elif slot.domain == "event":
+                        candidates_by_slot[slot.slot_id] = independent_event_candidates(corp_code, slot)
+                    else:
+                        candidates_by_slot[slot.slot_id] = independent_text_candidates(
+                            corp_code, slot, markers=markers,
+                        )
 
                 chosen: dict[str, list[dict[str, object]]] = {}
                 version_pair: dict[str, object] | None = None
                 if dimension == "profitability_financial_health":
                     for slot_id in ("income_trend", "balance_sheet"):
-                        eligible = [item for item in candidates_by_slot[slot_id] if int(item.get("period_count", 0)) >= 2]
+                        eligible = select_period_covered_financial_candidates(
+                            candidates_by_slot[slot_id],
+                            minimum_periods=planned_slots[slot_id].min_periods,
+                        )
                         if eligible:
-                            chosen[slot_id] = eligible[:1]
+                            chosen[slot_id] = eligible
                 elif dimension == "contract_change":
                     eligible = candidates_by_slot["contract_current"]
                     filing_order: list[str] = []
@@ -560,13 +706,18 @@ def derive_freeform_source_records(
                 elif dimension == "correction_materiality":
                     for original in candidates_by_slot["original_disclosure"]:
                         original_version = filing_version(str(original["filing_id"]))
-                        if not original_version or original.get("is_current") is not False:
+                        if (
+                            not original_version
+                            or original.get("is_current") is not False
+                            or str(original_version["lineage_status"]) != "root"
+                        ):
                             continue
                         for current in candidates_by_slot["effective_correction"]:
                             current_version = filing_version(str(current["filing_id"]))
                             if (
                                 current_version
                                 and current.get("is_current") is True
+                                and str(current_version["lineage_status"]) in {"root", "resolved"}
                                 and original_version["event_id"] == current_version["event_id"]
                                 and original["filing_id"] != current["filing_id"]
                             ):
@@ -734,6 +885,8 @@ def build_freeform_manifest(
     contract_sha256: str,
     templates_sha256: str,
     database_sha256: str,
+    overlay_sha256: str,
+    search_index_sha256: str,
 ) -> dict[str, object]:
     """Build a content-free manifest for a canonical Gold artifact."""
 
@@ -741,8 +894,13 @@ def build_freeform_manifest(
         "schema_version": "1.0.0",
         "artifact": "freeform_gold.agent_audited.jsonl",
         "review_status": "agent_audited",
+        "target_selection": "independent_ledger_enumeration",
         "case_count": len(rows),
         "target_count": sum(len(row.get("target_evidence_ids", ())) for row in rows),
+        "unique_target_count": len({
+            str(evidence_id) for row in rows for evidence_id in row.get("target_evidence_ids", ())
+        }),
+        "source_record_count": len({str(row.get("source_record_id")) for row in rows}),
         "dimension_counts": dict(sorted(Counter(str(row["dimension_id"]) for row in rows).items())),
         "route_counts": dict(sorted(Counter(str(row["route"]) for row in rows).items())),
         "split_counts": dict(sorted(Counter(str(row["split"]) for row in rows).items())),
@@ -750,6 +908,8 @@ def build_freeform_manifest(
         "contract_sha256": contract_sha256,
         "templates_sha256": templates_sha256,
         "database_sha256": database_sha256,
+        "overlay_sha256": overlay_sha256,
+        "search_index_sha256": search_index_sha256,
         "content_sha256": canonical_sha256(rows),
     }
     if not _manifest_is_safe(manifest):

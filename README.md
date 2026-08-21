@@ -6,18 +6,18 @@
 
 ## 현재 개발 상태와 인수인계
 
-> **2026-08-21 기준:** Loop 1은 완료가 아니라 `BLOCKED_SERVING_PATH` 상태입니다. Task 1·2는 완료됐지만 Task 3의 유효 Gold 생성이 차단됐으며, 이번 브랜치 변경은 운영 서버에 배포하지 않았습니다. 기존 `Recall@20=0.007936...`과 이를 바탕으로 한 임베딩 적격 판정은 무효이므로 품질 근거나 모델 도입 근거로 사용하지 마세요.
+> **2026-08-22 기준:** Loop 1 구현·평가는 완료됐지만 품질 판정은 `NO-GO / BLOCKED_EXTERNAL`입니다. top-20 결과와 독립적으로 overlay/search 원장에서 만든 120개 질문·234개 target occurrence(19 source records, 36 unique evidence IDs)에서 Recall@20 `0.487179...`를 두 번 재현했습니다. text residual의 최대 개선 가능폭이 5%p를 넘어 embedding pilot은 적격이지만, 외부 provider 비용 실행 전이므로 채택하지 않았습니다. 이번 변경은 운영 서버에 배포하지 않았습니다.
 
 | 항목 | 현재 상태 | 다음 판단 |
 |---|---|---|
 | 작업 브랜치 | `agent/disclosure-db-foundation` | 이 브랜치에서 계속 작업 |
 | Task 1 정책·AnalysisPlan | 구현 및 검증 완료 | 보수적 정책 경계 유지 |
 | Task 2 슬롯 검색·RRF | 구현 및 독립 재검토 PASS | 회귀 테스트 유지 |
-| Task 3 자유형 Gold·검색 평가 | `BLOCKED_SERVING_PATH` | 구조화 financial slot 기간 수 수정 |
-| 임베딩·vector index | 도입 결정 없음 | 유효 text residual 평가 후에만 판정 |
-| 운영 배포 | 이번 Loop 1 변경 미배포 | 유효 GO/NO-GO와 전체 검증 뒤 별도 진행 |
+| Task 3 자유형 Gold·검색 평가 | `NO-GO` | Recall@20 `0.487179...` < `0.95` |
+| 임베딩·vector index | `BLOCKED_EXTERNAL` | pilot 적격, 실제 gain·p95 미측정 |
+| 운영 배포 | 이번 Loop 1 변경 미배포 | dense 측정과 GO 판정 전 금지 |
 
-정확한 차단 원인은 수익성·재무건전성 판단에 `income_trend`와 `balance_sheet` 각각 최소 2개 기간이 필요한데, 구조화 하위 질의가 `QueryPlan.latest_period_count=1`을 유지하는 것입니다. 실제 audited issuer 12개에서 이 조건을 만족한 기업은 `0/12`였고, 빌더는 `dimension_source_coverage_missing:profitability_financial_health:0<3`으로 fail-closed 종료했습니다.
+차단 원인은 두 단계로 해결했습니다. 첫째, 수익성·재무건전성 슬롯 계약의 `min_periods=2`를 구조화 하위 질의에 전달했습니다. 둘째, 질문 전체에서 추론된 손익계산서 `statement_type=IS`가 재무상태표 슬롯까지 전파되어 자산·부채를 차단하던 교차 슬롯 간섭을 제거했습니다. 일반 최신값 lookup은 1개 기간, 명시적 3개년 질문은 3개 기간을 그대로 유지합니다.
 
 다음 작업자는 아래 순서로 시작합니다.
 
@@ -31,12 +31,11 @@ python -m pytest tests/test_freeform_evaluation.py tests/test_dense_retrieval.py
 
 1. [Loop 1 핸드오프](docs/handoffs/2026-08-21-loop1-freeform-retrieval-handoff.md)를 전부 읽습니다.
 2. [설계 문서](docs/superpowers/specs/2026-08-21-freeform-judgment-agent-design.md)와 [구현 계획](docs/superpowers/plans/2026-08-21-freeform-judgment-agent.md)을 확인합니다.
-3. 실패 테스트를 먼저 추가해 judgment financial slot은 2개 기간, 일반 최신값 lookup은 1개 기간, 명시적 3개년 질문은 3개 기간을 유지하도록 고정합니다.
-4. `src/disclosure_db/evidence_service.py`의 structured slot용 `QueryPlan` 생성 경계를 최소 수정합니다.
-5. serving-admitted Gold를 다시 만들고 동일 입력으로 평가를 두 번 실행해 산출물 hash와 지표를 검증합니다.
-6. 유효한 text residual이 확인된 뒤에만 sparse 대비 dense 개선 폭으로 임베딩 도입 여부를 판단합니다.
+3. Loop 1의 독립 Gold와 `data/derived/freeform_retrieval_summary.json`을 고정 기준선으로 유지합니다.
+4. 잔여 text case 36건에 대해 승인된 provider 비용 실행으로 dense pilot을 측정합니다.
+5. dense가 전체 동일 분모에서 +5%p 이상, wrong issuer/version 0, p95 2초 이하일 때만 채택합니다. 그 전에는 Task 4와 NCP 재배포를 시작하지 않습니다.
 
-작업 판단과 검증 결과는 [개발 로그](docs/development-log.md)에 기록합니다. D드라이브의 base DB, live overlay, live search index는 읽기 전용이며 staging 산출물만 새로 만듭니다. credential, 서버 `.env`, provider 원문 응답, 대용량 DB는 Git에 올리지 않습니다. Task 3이 유효한 GO 또는 근거 있는 NO-GO가 되기 전에는 Task 4 이후나 NCP 재배포를 시작하지 않습니다.
+작업 판단과 검증 결과는 [개발 로그](docs/development-log.md)에 기록합니다. D드라이브의 base DB, live overlay, live search index는 읽기 전용이며 staging 산출물만 새로 만듭니다. credential, 서버 `.env`, provider 원문 응답, 대용량 DB는 Git에 올리지 않습니다. Dense pilot과 Task 4 이후, NCP 재배포는 별도 검증·승인 범위입니다.
 
 ## 공식 제약
 

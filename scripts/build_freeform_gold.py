@@ -75,6 +75,8 @@ def main(argv: list[str] | None = None) -> int:
         contract_sha256=_sha256(args.contract),
         templates_sha256=_sha256(args.templates),
         database_sha256=attestation.sha256,
+        overlay_sha256=_sha256(args.overlay),
+        search_index_sha256=_sha256(args.search_index),
     )
     payload = "".join(
         json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n"

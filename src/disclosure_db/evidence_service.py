@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 import time
@@ -194,36 +195,73 @@ class EvidenceService:
         started = time.perf_counter()
         base = plan.base_plan
         query = variants[0] if variants else ""
-        slot_plan = QueryPlan(
-            question=query,
-            company=slot.issuer or base.company,
-            as_of=base.as_of,
-            as_of_source=base.as_of_source,
-            period_start=slot.period_start,
-            period_end=slot.period_end,
-            instant_date=slot.instant_date,
-            scope=base.scope,
-            statement_type=base.statement_type,
-            correction_policy=base.correction_policy,
-            filing_date=slot.filing_date,
-            fact_domain=slot.domain,
-            account_terms=list(slot.search_concepts) if slot.domain == "financial" else [],
-            predicate_terms=list(slot.search_concepts) if slot.domain == "event" else [],
+        evidence: list[EvidenceRef] = []
+        financial_facts: list[dict[str, object]] = []
+        event_facts: list[dict[str, object]] = []
+        financial_fact_ids: set[str] = set()
+        event_fact_ids: set[str] = set()
+        concepts = slot.search_concepts if slot.domain == "financial" else (None,)
+        evidence_limit = min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT)
+        per_query_limit = max(
+            slot.min_periods,
+            math.ceil(evidence_limit / max(1, len(concepts))),
         )
-        bundle = self.search(slot_plan, limit=min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT))
-        for ref in bundle.evidence:
+        rankings: list[list[EvidenceRef]] = []
+        candidate_ids: set[str] = set()
+        for concept in concepts:
+            slot_plan = QueryPlan(
+                question=query,
+                company=slot.issuer or base.company,
+                as_of=base.as_of,
+                as_of_source=base.as_of_source,
+                period_start=slot.period_start,
+                period_end=slot.period_end,
+                instant_date=slot.instant_date,
+                scope=base.scope,
+                # A judgment slot already declares the account concepts it needs.
+                # Reusing a question-level IS/BS classification here can suppress
+                # a sibling slot from the other statement (for example assets in
+                # a profitability-and-financial-health analysis).
+                statement_type=None if slot.domain == "financial" else base.statement_type,
+                correction_policy=base.correction_policy,
+                filing_date=slot.filing_date,
+                fact_domain=slot.domain,
+                account_terms=[concept] if concept is not None else [],
+                predicate_terms=list(slot.search_concepts) if slot.domain == "event" else [],
+                latest_period_count=max(base.latest_period_count, slot.min_periods),
+            )
+            bundle = self.search(slot_plan, limit=min(per_query_limit, MAX_EVIDENCE_PER_SLOT))
+            ranking = list(bundle.evidence)
+            for ref in ranking:
+                ref.locator["analysis_issuer"] = slot.issuer or base.company
+                ref.locator["analysis_version_admitted"] = True
+            rankings.append(ranking)
+            candidate_ids.update(ref.evidence_id for ref in ranking)
+            for fact in bundle.financial_facts:
+                fact_id = str(fact.get("financial_fact_id") or "")
+                if fact_id and fact_id not in financial_fact_ids:
+                    financial_fact_ids.add(fact_id)
+                    financial_facts.append(fact)
+            for fact in bundle.event_facts:
+                fact_id = str(fact.get("event_fact_id") or "")
+                if fact_id and fact_id not in event_fact_ids:
+                    event_fact_ids.add(fact_id)
+                    event_facts.append(fact)
+        evidence = fuse_slot_results(rankings, limit=evidence_limit)
+        for ref in evidence:
             ref.locator["analysis_issuer"] = slot.issuer or base.company
             ref.locator["analysis_version_admitted"] = True
         return (
-            bundle.evidence,
-            bundle.financial_facts,
-            bundle.event_facts,
+            evidence,
+            financial_facts,
+            event_facts,
             {
-                "variant_ids": [0] if variants else [],
-                "candidate_count": len(bundle.evidence),
+                "variant_ids": list(range(len(rankings))) if variants else [],
+                "candidate_count": len(candidate_ids),
                 "sparse_ranks": [
-                    {"variant_id": 0, "rank": rank, "evidence_id": ref.evidence_id}
-                    for rank, ref in enumerate(bundle.evidence, start=1)
+                    {"variant_id": variant_id, "rank": rank, "evidence_id": ref.evidence_id}
+                    for variant_id, ranking in enumerate(rankings)
+                    for rank, ref in enumerate(ranking, start=1)
                 ],
                 "excluded_prompt_injection_count": 0,
                 "wrong_issuer_count": 0,
@@ -279,7 +317,21 @@ class EvidenceService:
                     bounded.append(ref)
                     admitted_ids.add(ref.evidence_id)
             fused = bounded
-            complete = len(fused) >= slot.min_evidence
+            final_slot_ids = {ref.evidence_id for ref in fused}
+            final_financial_facts = self._facts_with_final_evidence(financial_facts, final_slot_ids)
+            final_event_facts = self._facts_with_final_evidence(event_facts, final_slot_ids)
+            period_complete = True
+            if slot.domain == "financial" and slot.min_periods > 1:
+                periods_by_account: dict[str, set[tuple[object, object, object]]] = {}
+                for fact in final_financial_facts:
+                    account_id = str(fact.get("account_id") or "")
+                    period = (fact.get("period_start"), fact.get("period_end"), fact.get("instant_date"))
+                    if account_id and any(value is not None for value in period):
+                        periods_by_account.setdefault(account_id, set()).add(period)
+                period_complete = any(
+                    len(periods) >= slot.min_periods for periods in periods_by_account.values()
+                )
+            complete = len(fused) >= slot.min_evidence and period_complete
             slot_reasons: tuple[str, ...] = () if complete or not slot.mandatory else (f"required_slot_missing:{slot.slot_id}",)
             reasons.extend(slot_reasons)
             safe_diagnostics = dict(diagnostics)
@@ -290,9 +342,8 @@ class EvidenceService:
             slots.append(SlotRetrieval(slot.slot_id, tuple(fused), complete, slot_reasons, safe_diagnostics))
             diagnostics_by_slot[slot.slot_id] = safe_diagnostics
             all_refs.extend(fused)
-            final_slot_ids = {ref.evidence_id for ref in fused}
-            all_financial_facts.extend(self._facts_with_final_evidence(financial_facts, final_slot_ids))
-            all_event_facts.extend(self._facts_with_final_evidence(event_facts, final_slot_ids))
+            all_financial_facts.extend(final_financial_facts)
+            all_event_facts.extend(final_event_facts)
 
         unique_refs: list[EvidenceRef] = []
         seen_ids: set[str] = set()
