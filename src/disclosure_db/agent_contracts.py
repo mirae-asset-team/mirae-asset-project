@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field, fields
 from decimal import Decimal
 from typing import Any
@@ -119,7 +120,7 @@ def to_jsonable(value: Any) -> Any:
         return {key: to_jsonable(item) for key, item in citation.items()}
     if hasattr(value, "__dataclass_fields__"):
         return {item.name: to_jsonable(getattr(value, item.name)) for item in fields(value)}
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return {str(key): to_jsonable(item) for key, item in value.items()}
     if isinstance(value, (set, frozenset)):
         return [to_jsonable(item) for item in sorted(value, key=repr)]

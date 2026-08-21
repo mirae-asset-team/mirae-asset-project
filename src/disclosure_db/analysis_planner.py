@@ -8,7 +8,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from .analysis_contracts import AnalysisPlan, EvidenceSlot, PolicyDecision
+from .analysis_contracts import AnalysisPlan, EvidenceSlot, PolicyDecision, QueryPlanSnapshot
 from .query_planner import plan_query
 
 
@@ -29,6 +29,7 @@ _RECOMMENDATION_PATTERNS = (
     r"(?:예상|기대).{0,20}(?:수익률|수익)",
     r"(?:수익률|수익).{0,20}(?:예상|기대)",
     r"(?:매수|매도|보유|매집|매각|매입).{0,12}(?:해야|할까|해도|추천|의견|결론)",
+    r"(?:사도\s*될까|살까|사는\s*게\s*(?:좋을까|나을까|될까)|팔아도\s*될까|팔까|파는\s*게\s*(?:좋을까|나을까|될까))",
     r"(?:사야|팔아야|들어가도|투자해도|포지션|비중|포트폴리오|숏|롱)",
     r"(?:나에게|저에게|개인\s*투자자|투자\s*성향|위험\s*감수).{0,20}(?:적합|맞|추천|투자)",
 )
@@ -136,12 +137,12 @@ def plan_analysis(
     """Create a bounded plan; prohibited requests receive no evidence slots."""
     text = question.strip()
     policy = classify_policy(text)
-    base_plan = plan_query(
+    base_plan = QueryPlanSnapshot.from_query_plan(plan_query(
         text,
         company_candidates=company_candidates,
         company_hint=company_hint,
         as_of=as_of,
-    )
+    ))
     if policy.action.startswith("refuse_"):
         return AnalysisPlan(
             question=text,
