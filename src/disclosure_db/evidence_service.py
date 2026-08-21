@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from contextlib import closing
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -12,6 +13,17 @@ from typing import Iterable
 
 from .attestation import CorpusAttestation, verify_fast_identity
 from .agent_contracts import CalculationResult, EvidenceBundle, EvidenceRef, QueryPlan
+from .analysis_contracts import AnalysisPlan, EvidenceSlot
+from .freeform_retrieval import (
+    AnalysisRetrieval,
+    MAX_CANDIDATES_PER_VARIANT,
+    MAX_EVIDENCE_PER_SLOT,
+    MAX_TOTAL_EVIDENCE,
+    SlotRetrieval,
+    build_query_variants,
+    fuse_slot_results,
+    has_transaction_action_surface,
+)
 from .financial_overlay import fetch_event_facts, fetch_financial_coverage, fetch_overlay_facts, overlay_matches_base
 from .pipeline import query_database
 from .retrieval_evaluation import compile_retrieval_query, retrieval_tokens
@@ -78,6 +90,191 @@ class EvidenceService:
             }
         except (OSError, json.JSONDecodeError):
             self.event_predicate_aliases = {}
+
+    @staticmethod
+    def _slot_version_as_of(plan: AnalysisPlan) -> str | None:
+        base = plan.base_plan
+        return base.as_of if base.as_of_source == "api" else (
+            None if base.period_start or base.period_end or base.instant_date else base.as_of
+        )
+
+    @staticmethod
+    def _matches_slot_report(ref: EvidenceRef, slot: EvidenceSlot) -> bool:
+        return not slot.report_types or any(report_type in (ref.report_name or "") for report_type in slot.report_types)
+
+    @staticmethod
+    def _matches_slot_issuer(ref: EvidenceRef, slot: EvidenceSlot) -> bool:
+        issuer = ref.locator.get("analysis_issuer") if isinstance(ref.locator, dict) else None
+        return issuer is None or slot.issuer is None or issuer == slot.issuer
+
+    def _search_text_slot(
+        self,
+        plan: AnalysisPlan,
+        slot: EvidenceSlot,
+        variants: tuple[str, ...],
+    ) -> tuple[list[EvidenceRef], dict[str, object]]:
+        """Search an attested index for each bounded text variant and hydrate only safe IDs."""
+        started = time.perf_counter()
+        diagnostics: dict[str, object] = {
+            "variant_ids": list(range(len(variants))),
+            "candidate_count": 0,
+            "wrong_issuer_count": 0,
+            "wrong_version_count": 0,
+            "excluded_prompt_injection_count": 0,
+            "sparse_ranks": [],
+        }
+        if not variants or self.search_database is None or not self.search_database.exists() or self.attestation is None:
+            diagnostics["reason_code"] = "search_index_unavailable"
+            diagnostics["latency_ms"] = int(round((time.perf_counter() - started) * 1000))
+            return [], diagnostics
+        try:
+            from .search_index import SafeSearchIndex
+
+            index = SafeSearchIndex(
+                self.search_database,
+                base_sha256=self.attestation.sha256,
+                expected_base_size=self.attestation.size_bytes,
+            )
+            rankings: list[list[EvidenceRef]] = []
+            version_as_of = self._slot_version_as_of(plan)
+            for variant_id, variant in enumerate(variants):
+                rows = index.search(
+                    variant,
+                    company=slot.issuer or plan.base_plan.company,
+                    as_of=version_as_of,
+                    filed_at=slot.filing_date,
+                    limit=MAX_CANDIDATES_PER_VARIANT,
+                    correction_policy=plan.base_plan.correction_policy,
+                )
+                diagnostics["candidate_count"] = int(diagnostics["candidate_count"]) + len(rows)
+                sparse_ranks = diagnostics["sparse_ranks"]
+                assert isinstance(sparse_ranks, list)
+                for rank, row in enumerate(rows, start=1):
+                    if slot.issuer is not None and row.get("company") not in {None, slot.issuer}:
+                        diagnostics["wrong_issuer_count"] = int(diagnostics["wrong_issuer_count"]) + 1
+                    if str(row.get("lineage_status") or "") not in {"root", "resolved"}:
+                        diagnostics["wrong_version_count"] = int(diagnostics["wrong_version_count"]) + 1
+                    sparse_ranks.append({
+                        "variant_id": variant_id,
+                        "rank": rank,
+                        "evidence_id": str(row["evidence_id"]),
+                    })
+                refs = self._hydrate_ids(
+                    (str(row["evidence_id"]) for row in rows),
+                    as_of=version_as_of,
+                    correction_policy=plan.base_plan.correction_policy,
+                )
+                for ref in refs:
+                    ref.locator["analysis_issuer"] = slot.issuer or plan.base_plan.company
+                    ref.locator["analysis_version_admitted"] = True
+                rankings.append(refs)
+            result = fuse_slot_results(rankings, limit=min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT))
+        except ValueError:
+            diagnostics["reason_code"] = "search_index_attestation_mismatch"
+            result = []
+        except (OSError, sqlite3.Error):
+            diagnostics["reason_code"] = "search_index_sqlite_error"
+            result = []
+        diagnostics["latency_ms"] = int(round((time.perf_counter() - started) * 1000))
+        return result, diagnostics
+
+    def _search_structured_slot(
+        self,
+        plan: AnalysisPlan,
+        slot: EvidenceSlot,
+        variants: tuple[str, ...],
+    ) -> tuple[list[EvidenceRef], list[dict[str, object]], list[dict[str, object]], dict[str, object]]:
+        base = plan.base_plan
+        query = variants[0] if variants else ""
+        slot_plan = QueryPlan(
+            question=query,
+            company=slot.issuer or base.company,
+            as_of=base.as_of,
+            as_of_source=base.as_of_source,
+            period_start=slot.period_start,
+            period_end=slot.period_end,
+            instant_date=slot.instant_date,
+            scope=base.scope,
+            statement_type=base.statement_type,
+            correction_policy=base.correction_policy,
+            fact_domain=slot.domain,
+            account_terms=list(slot.search_concepts) if slot.domain == "financial" else [],
+            predicate_terms=list(slot.search_concepts) if slot.domain == "event" else [],
+        )
+        bundle = self.search(slot_plan, limit=min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT))
+        return (
+            bundle.evidence,
+            bundle.financial_facts,
+            bundle.event_facts,
+            {"variant_ids": list(range(len(variants))), "candidate_count": len(bundle.evidence)},
+        )
+
+    def search_analysis(self, plan: AnalysisPlan, *, limit: int = 20) -> AnalysisRetrieval:
+        """Retrieve each declared analysis slot independently without changing ``search``."""
+        if not plan.policy.action.startswith("refuse_") and has_transaction_action_surface(plan.base_plan.question):
+            return AnalysisRetrieval(complete=False, reason_codes=("policy_transaction_ambiguous",))
+        if plan.analysis_mode != "judgment":
+            return AnalysisRetrieval(complete=False, reason_codes=("analysis_plan_not_judgment",))
+        if not self._base_identity_valid():
+            return AnalysisRetrieval(complete=False, reason_codes=("base_attestation_failed",))
+
+        total_limit = max(0, min(limit, plan.max_evidence or MAX_TOTAL_EVIDENCE, MAX_TOTAL_EVIDENCE))
+        slots: list[SlotRetrieval] = []
+        all_refs: list[EvidenceRef] = []
+        all_financial_facts: list[dict[str, object]] = []
+        all_event_facts: list[dict[str, object]] = []
+        diagnostics_by_slot: dict[str, object] = {}
+        reasons: list[str] = []
+        for slot in plan.required_evidence_slots:
+            variants = build_query_variants(plan, slot)
+            financial_facts: list[dict[str, object]] = []
+            event_facts: list[dict[str, object]] = []
+            if slot.domain == "text":
+                refs, diagnostics = self._search_text_slot(plan, slot, variants)
+            else:
+                refs, financial_facts, event_facts, diagnostics = self._search_structured_slot(plan, slot, variants)
+            prompt_excluded = sum(1 for ref in refs if any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS))
+            wrong_issuer = sum(1 for ref in refs if not self._matches_slot_issuer(ref, slot))
+            wrong_version = sum(1 for ref in refs if ref.lineage_status not in {"root", "resolved"})
+            wrong_report = sum(1 for ref in refs if not self._matches_slot_report(ref, slot))
+            admitted = [
+                ref for ref in refs
+                if not any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS)
+                and self._matches_slot_issuer(ref, slot)
+                and ref.lineage_status in {"root", "resolved"}
+                and self._matches_slot_report(ref, slot)
+            ]
+            fused = fuse_slot_results([admitted], limit=min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT))
+            complete = len(fused) >= slot.min_evidence
+            slot_reasons: tuple[str, ...] = () if complete or not slot.mandatory else (f"required_slot_missing:{slot.slot_id}",)
+            reasons.extend(slot_reasons)
+            safe_diagnostics = dict(diagnostics)
+            safe_diagnostics["excluded_prompt_injection_count"] = int(safe_diagnostics.get("excluded_prompt_injection_count", 0)) + prompt_excluded
+            safe_diagnostics["wrong_issuer_count"] = int(safe_diagnostics.get("wrong_issuer_count", 0)) + wrong_issuer
+            safe_diagnostics["wrong_version_count"] = int(safe_diagnostics.get("wrong_version_count", 0)) + wrong_version
+            safe_diagnostics["wrong_report_type_count"] = wrong_report
+            slots.append(SlotRetrieval(slot.slot_id, tuple(fused), complete, slot_reasons, safe_diagnostics))
+            diagnostics_by_slot[slot.slot_id] = safe_diagnostics
+            all_refs.extend(fused)
+            all_financial_facts.extend(financial_facts)
+            all_event_facts.extend(event_facts)
+
+        unique_refs: list[EvidenceRef] = []
+        seen_ids: set[str] = set()
+        for ref in all_refs:
+            if ref.evidence_id not in seen_ids and len(unique_refs) < total_limit:
+                seen_ids.add(ref.evidence_id)
+                unique_refs.append(ref)
+        complete = not reasons and all(slot.complete or not next(item for item in plan.required_evidence_slots if item.slot_id == slot.slot_id).mandatory for slot in slots)
+        return AnalysisRetrieval(
+            evidence=tuple(unique_refs),
+            slots=tuple(slots),
+            complete=complete,
+            reason_codes=tuple(dict.fromkeys(reasons)),
+            retrieval_diagnostics={"slots": diagnostics_by_slot},
+            financial_facts=tuple(all_financial_facts),
+            event_facts=tuple(all_event_facts),
+        )
 
     def _base_identity_valid(self) -> bool:
         if self.overlay_database is not None or self.search_database is not None:

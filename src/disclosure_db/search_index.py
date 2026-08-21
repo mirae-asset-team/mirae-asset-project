@@ -214,8 +214,12 @@ def rrf_fuse(
 ) -> list[dict[str, object]]:
     fused: dict[str, dict[str, object]] = {}
     for ranking in rankings:
+        seen_in_ranking: set[str] = set()
         for rank, row in enumerate(ranking, start=1):
             evidence_id = str(row["evidence_id"])
+            if evidence_id in seen_in_ranking:
+                continue
+            seen_in_ranking.add(evidence_id)
             target = fused.setdefault(evidence_id, {**row, "rrf_score": 0.0})
             target["rrf_score"] = float(target["rrf_score"]) + 1.0 / (k + rank)
     return sorted(
