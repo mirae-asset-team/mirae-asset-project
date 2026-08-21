@@ -16,6 +16,7 @@ from disclosure_db.evidence_service import EvidenceService
 from disclosure_db.freeform_evaluation import (
     aggregate_freeform_scores,
     decide_embedding_pilot,
+    evaluation_exclusion_reason,
     score_freeform_case,
     semantic_summary_sha256,
 )
@@ -73,6 +74,24 @@ def _indexed_evidence_ids(search_index: Path, evidence_ids: set[str]) -> set[str
         connection.close()
 
 
+def _structured_evidence_ids(overlay: Path, evidence_ids: set[str]) -> set[str]:
+    if not evidence_ids:
+        return set()
+    connection = sqlite3.connect(f"{overlay.resolve().as_uri()}?mode=ro&immutable=1", uri=True)
+    try:
+        marks = ",".join("?" for _ in evidence_ids)
+        return {
+            str(row[0])
+            for table in ("financial_fact_evidence", "event_fact_evidence")
+            for row in connection.execute(
+                f"SELECT evidence_id FROM {table} WHERE evidence_id IN ({marks})",
+                sorted(evidence_ids),
+            )
+        }
+    finally:
+        connection.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", type=Path, required=True)
@@ -106,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     latency_samples: list[float] = []
     all_targets = {str(item) for row in rows for item in row["target_evidence_ids"]}
     indexed_targets = _indexed_evidence_ids(args.search_index, all_targets)
+    serving_targets = indexed_targets | _structured_evidence_ids(args.overlay, all_targets)
+    excluded_cases: list[dict[str, str]] = []
     for case in rows:
         plan = plan_analysis(
             str(case["question"]),
@@ -128,6 +149,12 @@ def main(argv: list[str] | None = None) -> int:
         diagnostics = list(slot_diagnostics.values()) if isinstance(slot_diagnostics, dict) else []
         query_count = sum(len(item.get("variant_ids", ())) for item in diagnostics if isinstance(item, dict))
         candidate_count = sum(int(item.get("candidate_count", 0)) for item in diagnostics if isinstance(item, dict))
+        exclusion = evaluation_exclusion_reason(
+            case, plan, query_count=query_count, serving_evidence_ids=serving_targets,
+        )
+        if exclusion is not None:
+            excluded_cases.append({"case_id": str(case["case_id"]), "reason": exclusion})
+            continue
         score = score_freeform_case(
             case,
             selected,
@@ -137,11 +164,19 @@ def main(argv: list[str] | None = None) -> int:
             latency_ms=elapsed_ms,
         )
         if score["missing_target_evidence_ids"]:
+            target_domains = case.get("target_domains", {})
+            missing_domains = {
+                str(target_domains.get(item, ""))
+                for item in score["missing_target_evidence_ids"]
+                if isinstance(target_domains, dict)
+            }
+            residual_route = next(iter(missing_domains)) if len(missing_domains) == 1 else "mixed"
+            score["route"] = residual_route
             score["exclusion_boundary"] = (
-                "expanded_sparse_not_retrieved_at_20" if case["route"] == "text"
+                "expanded_sparse_not_retrieved_at_20" if residual_route == "text"
                 else "structured_route_target_not_retrieved"
             )
-            if case["route"] != "text":
+            if residual_route != "text":
                 score["hypothesis"] = "structured_target_not_returned_by_audited_route"
             elif any(item not in indexed_targets for item in score["missing_target_evidence_ids"]):
                 score["hypothesis"] = "target_absent_from_search_index"
@@ -160,6 +195,8 @@ def main(argv: list[str] | None = None) -> int:
         "gold_sha256": _sha256(args.gold),
         "metrics": metrics,
         "case_scores": sorted(scores, key=lambda row: str(row["case_id"])),
+        "excluded_cases": sorted(excluded_cases, key=lambda row: row["case_id"]),
+        "excluded_case_count": len(excluded_cases),
         "latency_samples_ms": latency_samples,
     }
     summary["semantic_sha256"] = semantic_summary_sha256(summary)

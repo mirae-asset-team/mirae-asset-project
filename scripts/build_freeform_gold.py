@@ -36,12 +36,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--contract", type=Path, required=True)
     parser.add_argument("--templates", type=Path, required=True)
     parser.add_argument("--database", type=Path, required=True)
+    parser.add_argument("--overlay", type=Path, required=True)
+    parser.add_argument("--search-index", type=Path, required=True)
     parser.add_argument("--attestation", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     args = parser.parse_args(argv)
 
-    inputs = {path.resolve() for path in (args.gold, args.contract, args.templates, args.database, args.attestation)}
+    inputs = {path.resolve() for path in (
+        args.gold, args.contract, args.templates, args.database, args.overlay, args.search_index, args.attestation,
+    )}
     outputs = {args.output.resolve(), args.manifest.resolve()}
     if len(outputs) != 2 or inputs.intersection(outputs):
         raise SystemExit("input_output_path_collision")
@@ -56,7 +60,14 @@ def main(argv: list[str] | None = None) -> int:
     ]
     contract = json.loads(args.contract.read_text(encoding="utf-8"))
     templates = json.loads(args.templates.read_text(encoding="utf-8"))
-    source_records = derive_freeform_source_records(audited_gold, args.database, contract)
+    source_records = derive_freeform_source_records(
+        audited_gold,
+        args.database,
+        contract,
+        overlay_database=args.overlay,
+        search_index=args.search_index,
+        attestation=attestation,
+    )
     rows = build_freeform_gold(source_records, contract, templates)
     manifest = build_freeform_manifest(
         rows,

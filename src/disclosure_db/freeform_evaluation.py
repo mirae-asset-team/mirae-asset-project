@@ -11,8 +11,14 @@ from pathlib import Path
 import sqlite3
 from typing import Iterable, Mapping, Sequence
 
+from .analysis_planner import plan_analysis
+
 
 _FORBIDDEN_MANIFEST_KEYS = ("question", "answer", "excerpt", "credential", "secret", "api_key")
+_PROMPT_INJECTION_MARKERS = (
+    "ignore previous", "ignore all instructions", "system prompt",
+    "이전 지시를 무시", "지시를 무시", "시스템 프롬프트",
+)
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -29,6 +35,74 @@ def canonical_sha256(value: object) -> str:
     """Return the SHA-256 of strict canonical JSON."""
 
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def text_target_is_answer_safe(
+    fragment_type: str,
+    text: str,
+    *,
+    markers: Sequence[str],
+    minimum_characters: int = 80,
+) -> bool:
+    """Accept substantive indexed text, never headings, labels, or unsafe instructions."""
+
+    normalized = " ".join(str(text).split())
+    lowered = normalized.casefold()
+    return bool(
+        fragment_type in {"paragraph", "table_row", "html_text", "pdf_block"}
+        and len(normalized) >= minimum_characters
+        and any(marker in normalized for marker in markers)
+        and not any(marker in lowered for marker in _PROMPT_INJECTION_MARKERS)
+    )
+
+
+def validate_case_plan(case: Mapping[str, object], plan: object) -> tuple[tuple[str, str], ...]:
+    """Require a generated case to execute the declared judgment slot contract."""
+
+    if getattr(plan, "analysis_mode", None) != "judgment":
+        raise ValueError("analysis_plan_not_judgment")
+    if getattr(plan, "judgment_dimension", None) != case.get("dimension_id"):
+        raise ValueError("judgment_dimension_mismatch")
+    raw_expected = case.get("expected_slots")
+    if not isinstance(raw_expected, (list, tuple)):
+        raise ValueError("expected_slots_invalid")
+    expected = tuple(
+        (str(slot.get("slot_id", "")), str(slot.get("domain", "")))
+        for slot in raw_expected
+        if isinstance(slot, Mapping)
+    )
+    actual = tuple(
+        (str(slot.slot_id), str(slot.domain))
+        for slot in getattr(plan, "required_evidence_slots", ())
+    )
+    if not expected or expected != actual:
+        raise ValueError("slot_contract_mismatch")
+    expected_policy = case.get("correction_policy")
+    base_plan = getattr(plan, "base_plan", None)
+    if expected_policy is not None and getattr(base_plan, "correction_policy", None) != expected_policy:
+        raise ValueError("correction_policy_mismatch")
+    return actual
+
+
+def evaluation_exclusion_reason(
+    case: Mapping[str, object],
+    plan: object,
+    *,
+    query_count: int,
+    serving_evidence_ids: set[str],
+) -> str | None:
+    """Return a pre-denominator exclusion reason for invalid executions."""
+
+    try:
+        validate_case_plan(case, plan)
+    except ValueError:
+        return "invalid_plan"
+    if query_count <= 0:
+        return "no_query_executed"
+    targets = set(_string_list(case.get("target_evidence_ids"), "target_evidence_ids"))
+    if not targets.issubset(serving_evidence_ids):
+        return "target_not_serving_admitted"
+    return None
 
 
 def _string_list(value: object, field: str) -> list[str]:
@@ -52,6 +126,60 @@ def _admit_source_record(record: Mapping[str, object], contract: Mapping[str, ob
     source_sha256 = record.get("source_sha256")
     if not isinstance(source_sha256, str) or len(source_sha256) != 64:
         raise ValueError("invalid_source_hash")
+    answerability = record.get("answerability")
+    if not isinstance(answerability, Mapping) or answerability.get("status") != "proved":
+        raise ValueError("answerability_not_proved")
+    raw_slots = record.get("slot_targets")
+    if not isinstance(raw_slots, (list, tuple)) or not raw_slots:
+        raise ValueError("slot_targets_invalid")
+    path_by_domain = {
+        "text": "search_document",
+        "financial": "financial_fact_evidence",
+        "event": "event_fact_evidence",
+    }
+    admitted_evidence: set[str] = set()
+    admitted_filings: set[str] = set()
+    for raw_slot in raw_slots:
+        if not isinstance(raw_slot, Mapping):
+            raise ValueError("slot_target_invalid")
+        domain = str(raw_slot.get("domain", ""))
+        if raw_slot.get("serving_path") != path_by_domain.get(domain):
+            raise ValueError("serving_path_invalid")
+        admitted_evidence.update(_string_list(raw_slot.get("target_evidence_ids"), "slot_target_evidence_ids"))
+        admitted_filings.update(_string_list(raw_slot.get("filing_ids"), "slot_target_filing_ids"))
+        if domain in {"financial", "event"}:
+            _string_list(raw_slot.get("fact_ids"), "slot_fact_ids")
+        elif domain == "text":
+            features = raw_slot.get("content_features")
+            if (
+                not isinstance(features, Mapping)
+                or features.get("fragment_type") == "heading"
+                or int(features.get("character_count", 0)) < 80
+                or int(features.get("marker_count", 0)) < 1
+            ):
+                raise ValueError("text_target_not_answer_safe")
+    if admitted_evidence != set(_string_list(record.get("target_evidence_ids"), "target_evidence_ids")):
+        raise ValueError("slot_target_evidence_mismatch")
+    if not admitted_filings.issubset(set(_string_list(record.get("filing_ids"), "filing_ids"))):
+        raise ValueError("slot_target_filing_mismatch")
+    if "correction_materiality" in set(record.get("supported_dimensions", ())):
+        pair = record.get("version_pair")
+        if not isinstance(pair, Mapping):
+            raise ValueError("correction_pair_required")
+        original_filing = str(pair.get("original_filing_id", ""))
+        current_filing = str(pair.get("current_filing_id", ""))
+        original_evidence = str(pair.get("original_evidence_id", ""))
+        current_evidence = str(pair.get("current_evidence_id", ""))
+        if (
+            not pair.get("event_id")
+            or not original_filing
+            or original_filing == current_filing
+            or {original_filing, current_filing} - admitted_filings
+            or {original_evidence, current_evidence} - admitted_evidence
+            or pair.get("original_is_current") is not False
+            or pair.get("current_is_current") is not True
+        ):
+            raise ValueError("correction_pair_invalid")
 
 
 def _split_name(group_id: str, percentages: Mapping[str, object]) -> str:
@@ -155,8 +283,16 @@ def build_freeform_gold(
             dimension = str(template["dimension_id"])
             if dimension not in supported:
                 continue
-            route_overrides = record.get("routes") if isinstance(record.get("routes"), Mapping) else {}
-            route = str(route_overrides.get(dimension, template["route"]))
+            raw_expected = record.get("expected_slots", record["slot_targets"])
+            if not isinstance(raw_expected, (list, tuple)):
+                raise ValueError("expected_slots_invalid")
+            expected_slots = [
+                {"slot_id": str(slot.get("slot_id", "")), "domain": str(slot.get("domain", ""))}
+                for slot in raw_expected
+                if isinstance(slot, Mapping)
+            ]
+            domains = {slot["domain"] for slot in expected_slots}
+            route = next(iter(domains)) if len(domains) == 1 else "mixed"
             if route not in allowed_routes:
                 raise ValueError("route_invalid")
             template_id = str(template["template_id"])
@@ -173,7 +309,7 @@ def build_freeform_gold(
                 variant_label=template_id,
                 filing_count=len(filing_ids),
             )
-            rows.append({
+            case = {
                 "schema_version": str(contract.get("schema_version", "1.0.0")),
                 "case_id": f"freeform-{canonical_sha256(identity)[:24]}",
                 "dimension_id": dimension,
@@ -182,13 +318,29 @@ def build_freeform_gold(
                 "issuer_corp_code": str(record["issuer_corp_code"]),
                 "filing_ids": filing_ids,
                 "target_evidence_ids": evidence_ids,
+                "target_domains": {
+                    str(evidence_id): str(slot.get("domain", ""))
+                    for slot in record["slot_targets"]
+                    if isinstance(slot, Mapping)
+                    for evidence_id in slot.get("target_evidence_ids", ())
+                },
                 "correction_policy": policy,
                 "route": route,
+                "expected_slots": expected_slots,
                 "source_sha256": str(record["source_sha256"]),
                 "source_record_id": str(record.get("source_record_id", record["source_sha256"])),
                 "paraphrase_template_id": template_id,
                 "review": {"status": "agent_audited"},
-            })
+            }
+            validate_case_plan(
+                case,
+                plan_analysis(
+                    question,
+                    company_candidates=[str(record["issuer_name"])],
+                    as_of=str(record["as_of"]) if record.get("as_of") else None,
+                ),
+            )
+            rows.append(case)
 
     rows = assign_group_splits(rows, contract.get("split_percentages", {"test": 100}))
     validate_freeform_gold(rows, contract)
@@ -200,9 +352,14 @@ def derive_freeform_source_records(
     database: Path,
     contract: Mapping[str, object],
     *,
-    connection: sqlite3.Connection | None = None,
+    overlay_database: Path | None = None,
+    search_index: Path | None = None,
+    attestation: object | None = None,
 ) -> list[dict[str, object]]:
-    """Select deterministic, current, safely parsed corpus evidence for audited issuers."""
+    """Derive only targets returned through trusted serving identities."""
+
+    if overlay_database is None or search_index is None or attestation is None:
+        raise ValueError("serving_databases_required")
 
     issuers: dict[str, str] = {}
     for row in audited_gold:
@@ -222,93 +379,290 @@ def derive_freeform_source_records(
     if not issuers:
         raise ValueError("no_audited_issuers")
 
+    from .evidence_service import EvidenceService
+
     dimensions = _string_list(contract.get("dimensions"), "dimensions")
-    candidate_terms = contract.get("candidate_terms")
-    routes = contract.get("dimension_routes")
-    if not isinstance(candidate_terms, Mapping) or not isinstance(routes, Mapping):
-        raise ValueError("candidate_catalog_invalid")
-    allowed_parse = _string_list(contract.get("allowed_parse_statuses"), "allowed_parse_statuses")
+    seed_questions = contract.get("dimension_seed_questions")
+    text_markers = contract.get("text_markers")
+    if not isinstance(seed_questions, Mapping) or not isinstance(text_markers, Mapping):
+        raise ValueError("serving_admission_catalog_invalid")
     per_dimension = int(contract.get("source_records_per_dimension", 3))
     if per_dimension <= 0:
         raise ValueError("source_records_per_dimension_invalid")
+    per_dimension_overrides = contract.get("source_records_by_dimension", {})
+    if not isinstance(per_dimension_overrides, Mapping):
+        raise ValueError("source_records_by_dimension_invalid")
 
-    owns_connection = connection is None
-    if connection is None:
-        uri = f"{database.resolve().as_uri()}?mode=ro&immutable=1"
-        connection = sqlite3.connect(uri, uri=True)
-    connection.row_factory = sqlite3.Row
+    base = sqlite3.connect(f"{Path(database).resolve().as_uri()}?mode=ro&immutable=1", uri=True)
+    overlay = sqlite3.connect(f"{Path(overlay_database).resolve().as_uri()}?mode=ro&immutable=1", uri=True)
+    search = sqlite3.connect(f"{Path(search_index).resolve().as_uri()}?mode=ro&immutable=1", uri=True)
+    base.row_factory = sqlite3.Row
+    overlay.row_factory = sqlite3.Row
+    search.row_factory = sqlite3.Row
+    service = EvidenceService(
+        Path(database), Path(overlay_database), attestation=attestation, search_database=Path(search_index),
+    )
     try:
-        issuer_marks = ",".join("?" for _ in issuers)
-        parse_marks = ",".join("?" for _ in allowed_parse)
+        authoritative_names = {
+            corp_code: str(row[0])
+            for corp_code in sorted(issuers)
+            if (row := base.execute(
+                "SELECT issuer_name FROM filing WHERE issuer_corp_code=? AND issuer_name<>'' "
+                "ORDER BY filed_at DESC,filing_id DESC LIMIT 1",
+                (corp_code,),
+            ).fetchone()) is not None
+        }
+        financial_links: dict[str, list[dict[str, object]]] = defaultdict(list)
+        for row in overlay.execute(
+            "SELECT ff.*,ffe.evidence_id FROM financial_fact ff "
+            "JOIN financial_fact_evidence ffe ON ffe.financial_fact_id=ff.financial_fact_id "
+            "WHERE ff.validation_status='validated' AND ff.trust_tier='agent_audited' "
+            "ORDER BY ff.financial_fact_id,ffe.evidence_id"
+        ):
+            financial_links[str(row["evidence_id"])].append(dict(row))
+        event_links: dict[str, list[dict[str, object]]] = defaultdict(list)
+        for row in overlay.execute(
+            "SELECT ef.*,efe.evidence_id FROM event_fact ef "
+            "JOIN event_fact_evidence efe ON efe.event_fact_id=ef.event_fact_id "
+            "WHERE ef.trust_tier='agent_audited' ORDER BY ef.event_fact_id,efe.evidence_id"
+        ):
+            event_links[str(row["evidence_id"])].append(dict(row))
+
+        def search_metadata(evidence_id: str) -> dict[str, object] | None:
+            row = search.execute(
+                "SELECT evidence_id,filing_id,source_id,corp_code,is_current,lineage_status,fragment_type,text_normalized "
+                "FROM search_document WHERE evidence_id=?",
+                (evidence_id,),
+            ).fetchone()
+            return dict(row) if row is not None else None
+
+        def source_metadata(evidence_id: str) -> dict[str, object] | None:
+            row = base.execute(
+                "SELECT sd.sha256,sd.parse_status FROM source_document sd JOIN ("
+                "SELECT source_id FROM fragment WHERE evidence_id=? UNION ALL "
+                "SELECT source_id FROM table_cell WHERE evidence_id=?"
+                ") e ON e.source_id=sd.source_id LIMIT 1",
+                (evidence_id, evidence_id),
+            ).fetchone()
+            return dict(row) if row is not None else None
+
+        def filing_version(filing_id: str) -> dict[str, object] | None:
+            row = base.execute(
+                "SELECT event_id,lineage_status,is_current FROM filing_version WHERE filing_id=?",
+                (filing_id,),
+            ).fetchone()
+            return dict(row) if row is not None else None
+
         output: list[dict[str, object]] = []
         for dimension in dimensions:
-            terms = _string_list(candidate_terms.get(dimension), f"candidate_terms:{dimension}")
-            term_clause = " OR ".join("instr(fr.text_normalized, ?) > 0" for _ in terms)
-            sql = f"""
-                SELECT fr.evidence_id, fi.filing_id, fi.issuer_corp_code, fi.issuer_name,
-                       fi.filed_at, sd.sha256 AS source_sha256, sd.parse_status,
-                       fv.lineage_status
-                FROM filing AS fi
-                JOIN filing_version AS fv ON fv.filing_id = fi.filing_id
-                JOIN fragment AS fr ON fr.filing_id = fi.filing_id
-                JOIN source_document AS sd
-                  ON sd.source_id = fr.source_id AND sd.filing_id = fi.filing_id
-                WHERE fi.issuer_corp_code IN ({issuer_marks})
-                  AND fv.lineage_status IN ('root', 'resolved')
-                  AND fv.is_current = 1
-                  AND sd.parse_status IN ({parse_marks})
-                  AND ({term_clause})
-                ORDER BY fi.issuer_corp_code, fi.filed_at DESC, fi.filing_id,
-                         fr.sequence_no, fr.evidence_id
-            """
-            parameters = [*sorted(issuers), *allowed_parse, *terms]
-            candidates = connection.execute(sql, parameters)
-            selected: list[sqlite3.Row] = []
-            seen_filings: set[str] = set()
-            for candidate in candidates:
-                text_row = connection.execute(
-                    "SELECT text_normalized FROM fragment WHERE evidence_id = ?",
-                    (candidate["evidence_id"],),
-                ).fetchone()
-                text = str(text_row[0] if text_row else "").casefold()
-                if any(marker in text for marker in (
-                    "ignore previous", "ignore all instructions", "system prompt",
-                    "이전 지시를 무시", "지시를 무시", "시스템 프롬프트",
-                )):
+            required_records = int(per_dimension_overrides.get(dimension, per_dimension))
+            if required_records <= 0:
+                raise ValueError(f"source_records_per_dimension_invalid:{dimension}")
+            question_template = seed_questions.get(dimension)
+            if not isinstance(question_template, str) or not question_template:
+                raise ValueError(f"dimension_seed_question_missing:{dimension}")
+            selected_for_dimension: list[dict[str, object]] = []
+            for corp_code in sorted(authoritative_names):
+                issuer_name = authoritative_names[corp_code]
+                question = question_template.format(issuer_name=issuer_name)
+                plan = plan_analysis(question, company_candidates=[issuer_name])
+                if plan.analysis_mode != "judgment" or plan.judgment_dimension != dimension:
                     continue
-                if candidate["filing_id"] in seen_filings:
+                result = service.search_analysis(plan, limit=20)
+                expected_slots = [
+                    {"slot_id": slot.slot_id, "domain": slot.domain}
+                    for slot in plan.required_evidence_slots
+                ]
+                facts_by_evidence: dict[str, list[dict[str, object]]] = defaultdict(list)
+                for fact in (*result.financial_facts, *result.event_facts):
+                    for evidence_id in fact.get("evidence_ids", ()):  # type: ignore[union-attr]
+                        facts_by_evidence[str(evidence_id)].append(dict(fact))
+                candidates_by_slot: dict[str, list[dict[str, object]]] = defaultdict(list)
+                planned_slots = {slot.slot_id: slot for slot in plan.required_evidence_slots}
+                for slot in result.slots:
+                    planned_slot = planned_slots[slot.slot_id]
+                    markers = tuple(str(item) for item in text_markers.get(slot.slot_id, ()))
+                    for ref in slot.evidence:
+                        evidence_id = str(ref.evidence_id)
+                        filing_id = str(ref.filing_id)
+                        if slot.slot_id == "financing_disclosures":
+                            facts = [
+                                fact for fact in event_links.get(evidence_id, ())
+                                if fact.get("predicate_id") in {"issued_shares", "treasury_disposal_shares"}
+                            ]
+                            if not facts:
+                                continue
+                            candidates_by_slot[slot.slot_id].append({
+                                "evidence_id": evidence_id, "filing_id": filing_id,
+                                "fact_ids": sorted(str(fact["event_fact_id"]) for fact in facts),
+                            })
+                        elif planned_slot.domain == "financial":
+                            facts = financial_links.get(evidence_id, ())
+                            if not facts:
+                                continue
+                            candidates_by_slot[slot.slot_id].append({
+                                "evidence_id": evidence_id, "filing_id": filing_id,
+                                "fact_ids": sorted(str(fact["financial_fact_id"]) for fact in facts),
+                                "period_count": len({
+                                    (fact.get("period_start"), fact.get("period_end"), fact.get("instant_date"))
+                                    for fact in facts
+                                }),
+                            })
+                        elif planned_slot.domain == "event":
+                            facts = event_links.get(evidence_id, ())
+                            if not facts:
+                                continue
+                            candidates_by_slot[slot.slot_id].append({
+                                "evidence_id": evidence_id, "filing_id": filing_id,
+                                "fact_ids": sorted(str(fact["event_fact_id"]) for fact in facts),
+                            })
+                        else:
+                            metadata = search_metadata(evidence_id)
+                            if (
+                                metadata is None
+                                or str(metadata["corp_code"]) != corp_code
+                                or not text_target_is_answer_safe(
+                                    str(metadata["fragment_type"]), str(metadata["text_normalized"]),
+                                    markers=markers, minimum_characters=int(contract.get("minimum_text_characters", 80)),
+                                )
+                            ):
+                                continue
+                            candidates_by_slot[slot.slot_id].append({
+                                "evidence_id": evidence_id, "filing_id": filing_id,
+                                "is_current": bool(metadata["is_current"]),
+                                "lineage_status": str(metadata["lineage_status"]),
+                                "content_features": {
+                                    "fragment_type": str(metadata["fragment_type"]),
+                                    "character_count": len(" ".join(str(metadata["text_normalized"]).split())),
+                                    "marker_count": sum(marker in str(metadata["text_normalized"]) for marker in markers),
+                                },
+                            })
+
+                chosen: dict[str, list[dict[str, object]]] = {}
+                version_pair: dict[str, object] | None = None
+                if dimension == "profitability_financial_health":
+                    for slot_id in ("income_trend", "balance_sheet"):
+                        eligible = [item for item in candidates_by_slot[slot_id] if int(item.get("period_count", 0)) >= 2]
+                        if eligible:
+                            chosen[slot_id] = eligible[:1]
+                elif dimension == "contract_change":
+                    eligible = candidates_by_slot["contract_current"]
+                    filing_order: list[str] = []
+                    selected_items: list[dict[str, object]] = []
+                    for item in eligible:
+                        if str(item["filing_id"]) not in filing_order:
+                            filing_order.append(str(item["filing_id"]))
+                            selected_items.append(item)
+                        if len(filing_order) == 2:
+                            break
+                    if len(filing_order) == 2:
+                        chosen["contract_current"] = selected_items
+                elif dimension == "correction_materiality":
+                    for original in candidates_by_slot["original_disclosure"]:
+                        original_version = filing_version(str(original["filing_id"]))
+                        if not original_version or original.get("is_current") is not False:
+                            continue
+                        for current in candidates_by_slot["effective_correction"]:
+                            current_version = filing_version(str(current["filing_id"]))
+                            if (
+                                current_version
+                                and current.get("is_current") is True
+                                and original_version["event_id"] == current_version["event_id"]
+                                and original["filing_id"] != current["filing_id"]
+                            ):
+                                chosen = {
+                                    "original_disclosure": [original],
+                                    "effective_correction": [current],
+                                }
+                                version_pair = {
+                                    "event_id": str(original_version["event_id"]),
+                                    "original_filing_id": str(original["filing_id"]),
+                                    "current_filing_id": str(current["filing_id"]),
+                                    "original_evidence_id": str(original["evidence_id"]),
+                                    "current_evidence_id": str(current["evidence_id"]),
+                                    "original_is_current": False,
+                                    "current_is_current": True,
+                                }
+                                break
+                        if version_pair:
+                            break
+                else:
+                    for slot in plan.required_evidence_slots:
+                        if candidates_by_slot[slot.slot_id]:
+                            chosen[slot.slot_id] = candidates_by_slot[slot.slot_id][:1]
+
+                mandatory_slots = {slot.slot_id for slot in plan.required_evidence_slots if slot.mandatory}
+                if not mandatory_slots.issubset(chosen):
                     continue
-                selected.append(candidate)
-                seen_filings.add(str(candidate["filing_id"]))
-                if len(selected) == per_dimension:
-                    break
-            if len(selected) < per_dimension:
-                raise ValueError(
-                    f"dimension_source_coverage_missing:{dimension}:{len(selected)}<{per_dimension}"
-                )
-            route = routes.get(dimension)
-            if not isinstance(route, str) or not route:
-                raise ValueError(f"dimension_route_missing:{dimension}")
-            for candidate in selected:
-                evidence_id = str(candidate["evidence_id"])
-                output.append({
-                    "source_record_id": f"{dimension}:{evidence_id}",
-                    "issuer_name": str(candidate["issuer_name"] or issuers[str(candidate["issuer_corp_code"])]),
-                    "issuer_corp_code": str(candidate["issuer_corp_code"]),
-                    "filing_ids": [str(candidate["filing_id"])],
-                    "target_evidence_ids": [evidence_id],
-                    "correction_policy": "current",
-                    "source_sha256": str(candidate["source_sha256"]),
-                    "lineage_status": str(candidate["lineage_status"]),
-                    "parse_status": str(candidate["parse_status"]),
+                slot_targets: list[dict[str, object]] = []
+                target_ids: list[str] = []
+                filing_ids: list[str] = []
+                for slot in plan.required_evidence_slots:
+                    items = chosen.get(slot.slot_id, [])
+                    if not items:
+                        continue
+                    evidence_ids = sorted({str(item["evidence_id"]) for item in items})
+                    slot_filings = sorted({str(item["filing_id"]) for item in items})
+                    target: dict[str, object] = {
+                        "slot_id": slot.slot_id,
+                        "domain": slot.domain,
+                        "serving_path": {
+                            "text": "search_document",
+                            "financial": "financial_fact_evidence",
+                            "event": "event_fact_evidence",
+                        }[slot.domain],
+                        "target_evidence_ids": evidence_ids,
+                        "filing_ids": slot_filings,
+                    }
+                    if slot.domain == "text":
+                        target["content_features"] = items[0]["content_features"]
+                    else:
+                        target["fact_ids"] = sorted({
+                            str(fact_id) for item in items for fact_id in item.get("fact_ids", ())
+                        })
+                    slot_targets.append(target)
+                    target_ids.extend(evidence_ids)
+                    filing_ids.extend(slot_filings)
+                source_rows = [source_metadata(evidence_id) for evidence_id in sorted(set(target_ids))]
+                if any(row is None or row.get("parse_status") != "success" for row in source_rows):
+                    continue
+                source_hashes = sorted({str(row["sha256"]) for row in source_rows if row is not None})
+                record: dict[str, object] = {
+                    "source_record_id": f"{dimension}:{corp_code}:{canonical_sha256(sorted(set(target_ids)))[:16]}",
+                    "issuer_name": issuer_name,
+                    "issuer_corp_code": corp_code,
+                    "filing_ids": sorted(set(filing_ids)),
+                    "target_evidence_ids": sorted(set(target_ids)),
+                    "correction_policy": str(plan.base_plan.correction_policy),
+                    "source_sha256": canonical_sha256(source_hashes),
+                    "source_sha256s": source_hashes,
+                    "lineage_status": "resolved" if version_pair else "root",
+                    "parse_status": "success",
                     "supported_dimensions": [dimension],
-                    "routes": {dimension: route},
-                    "as_of": str(candidate["filed_at"])[:10],
-                })
+                    "expected_slots": expected_slots,
+                    "slot_targets": slot_targets,
+                    "answerability": {
+                        "status": "proved",
+                        "requirement_count": len(mandatory_slots),
+                        "target_count": len(set(target_ids)),
+                        "filing_count": len(set(filing_ids)),
+                    },
+                }
+                if version_pair is not None:
+                    record["version_pair"] = version_pair
+                selected_for_dimension.append(record)
+                if len(selected_for_dimension) == required_records:
+                    break
+            if len(selected_for_dimension) < required_records:
+                raise ValueError(
+                    f"dimension_source_coverage_missing:{dimension}:{len(selected_for_dimension)}<{required_records}"
+                )
+            output.extend(selected_for_dimension)
         return sorted(output, key=canonical_sha256)
     finally:
-        if owns_connection:
-            connection.close()
+        base.close()
+        overlay.close()
+        search.close()
 
 
 def validate_freeform_gold(rows: Sequence[Mapping[str, object]], contract: Mapping[str, object]) -> None:
@@ -324,7 +678,8 @@ def validate_freeform_gold(rows: Sequence[Mapping[str, object]], contract: Mappi
     required = {
         "case_id", "dimension_id", "question", "issuer_name", "issuer_corp_code",
         "filing_ids", "target_evidence_ids", "correction_policy", "route",
-        "source_sha256", "group_id", "split", "paraphrase_template_id", "review",
+        "target_domains", "expected_slots", "source_sha256", "group_id", "split",
+        "paraphrase_template_id", "review",
     }
     for row in rows:
         missing = required - set(row)
@@ -345,6 +700,13 @@ def validate_freeform_gold(rows: Sequence[Mapping[str, object]], contract: Mappi
             raise ValueError(f"route_invalid:{row['route']}")
         _string_list(row["filing_ids"], "filing_ids")
         _string_list(row["target_evidence_ids"], "target_evidence_ids")
+        target_domains = row.get("target_domains")
+        if (
+            not isinstance(target_domains, Mapping)
+            or set(str(key) for key in target_domains) != set(row["target_evidence_ids"])
+            or any(value not in {"text", "financial", "event"} for value in target_domains.values())
+        ):
+            raise ValueError("target_domains_invalid")
         if len(str(row["source_sha256"])) != 64:
             raise ValueError("invalid_source_hash")
     if rows and dimensions != allowed_dimensions:
@@ -583,10 +945,27 @@ def decide_embedding_pilot(
 
     dense = summary.get("dense_pilot")
     if isinstance(dense, Mapping):
-        dense_recall = float(dense.get("target_recall_at_20", 0))
-        measured_gain = dense_recall - sparse_recall
+        if dense.get("scope") != "overall" or int(dense.get("target_count", 0)) != target_count:
+            raise ValueError("dense_denominator_mismatch")
+        sparse_hits = int(dense.get("sparse_target_hits_at_20", -1))
+        dense_hits = int(dense.get("dense_target_hits_at_20", -1))
+        if sparse_hits < 0 or dense_hits < 0:
+            raise ValueError("dense_hit_counts_invalid")
+        if "target_hits_at_20" in summary and sparse_hits != int(summary["target_hits_at_20"]):
+            raise ValueError("dense_sparse_hits_mismatch")
+        dense_sparse_recall = sparse_hits / target_count
+        dense_recall = dense_hits / target_count
+        if (
+            abs(dense_sparse_recall - sparse_recall) > 1e-12
+            or abs(float(dense.get("sparse_recall_at_20", -1)) - dense_sparse_recall) > 1e-12
+            or abs(float(dense.get("dense_recall_at_20", -1)) - dense_recall) > 1e-12
+        ):
+            raise ValueError("dense_recall_schema_mismatch")
+        measured_gain = dense_recall - dense_sparse_recall
+        if abs(float(dense.get("measured_gain", math.inf)) - measured_gain) > 1e-12:
+            raise ValueError("dense_gain_schema_mismatch")
         dense_safety = int(dense.get("wrong_issuer_count", 0)) + int(dense.get("wrong_version_count", 0))
-        p95 = float(dense.get("latency_ms", {}).get("p95", 0)) if isinstance(dense.get("latency_ms"), Mapping) else math.inf
+        p95 = float(dense.get("p95_ms", math.inf))
         adopted = measured_gain + 1e-12 >= minimum_gain and dense_safety == 0 and p95 <= 2000
         return {
             **base,

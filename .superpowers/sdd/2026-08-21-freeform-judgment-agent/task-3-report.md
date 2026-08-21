@@ -116,3 +116,21 @@ The independent review invalidates the prior `0.0079365079` Recall@20 and the de
 Authorized serving repairs are TDD-green: text correction policy `both` now admits root/superseded plus current resolved versions while `current` remains current-only and `original` remains root-only; issuer, `as_of`, filing-date, lineage and report admission remain enforced. Financing event retrieval now uses only the admitted `issued_shares` and `treasury_disposal_shares` predicate IDs. Governance uses substantive indexed disclosure text and rejects headings, short labels and marker-free content.
 
 The real serving-admission build then failed closed on a new blocker: profitability requires two-period evidence in both mandatory financial slots, but the structured judgment subquery retains `QueryPlan.latest_period_count=1`. Across all 12 audited issuers, zero source groups contained two serving-returned periods for both `income_trend` and `balance_sheet`; the command ended with `dimension_source_coverage_missing:profitability_financial_health:0<3` before replacing any generated artifact. No replacement metric, dense eligibility decision, or Loop 1 GO claim exists. Further work requires explicit authority to change that Task 2 structured-slot period bound.
+
+## WIP handoff after Loop 1 stop
+
+Implemented and committed as WIP:
+
+- Gold source admission is constrained to actual serving identities: `search_document` for substantive text, `financial_fact_evidence` for financial facts, and `event_fact_evidence` for event facts. Generated cases must prove answerability, preserve exact multi-slot target unions, and use `agent_audited` only.
+- Generated questions are checked against the executed planner for judgment mode, expected dimension, exact slot IDs/domains, and correction policy. Lookup/static-route mismatches, no-query executions, and targets absent from the trusted serving inventory are excluded before the evaluation denominator.
+- Correction cases require distinct original/current evidence and filing identities from one correction lineage. Text admission rejects headings, short labels, marker-free fragments, and unsafe content.
+- The build CLI requires the immutable overlay and search-index identities. Dense-pilot code enforces an absolute 20,000-fragment cap, trusted corpus/search and known-evidence identity, manifest count/cap/input/hash invariants, and a canonical same-denominator measured-decision schema with overall gain, zero safety regression, and top-level p95.
+- Contracts and templates encode answerability markers, per-dimension source-group requirements, judgment-routed seed questions, multi-slot routes, and correction paraphrases that may share the single valid serving evidence group.
+
+Incomplete and intentionally not claimed:
+
+- No replacement canonical Gold of at least 120 valid cases was generated. No generated Gold, manifest, retrieval summary, or embedding decision was replaced.
+- The two real build/evaluation cycles, semantic determinism hashes, full retrieval metrics, and embedding gate were not run because the build failed before a valid denominator existed. The prior metric and eligibility remain invalid.
+- The WIP interfaces and regressions are prepared for the next worker, but Loop 1 remains `BLOCKED_SERVING_PATH`, not complete or quality-qualified.
+
+Exact blocker: the structured subquery created for each judgment financial slot inherits `QueryPlan.latest_period_count=1`. Profitability requires at least two distinct periods in both `income_trend` and `balance_sheet`; therefore all 12 audited issuers fail answerability (`0/12`) despite additional periods existing outside the executed serving result. The next worker must obtain authority to make the smallest structured-slot serving change that requests the dimension-required period count, then rerun the fail-closed build and both real evaluation cycles without weakening targets or gates.
