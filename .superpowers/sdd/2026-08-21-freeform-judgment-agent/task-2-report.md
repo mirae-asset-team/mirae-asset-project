@@ -29,3 +29,13 @@
 - Diagnostics contain no raw question or evidence excerpt.
 - No claim uses a human-verification designation.
 - D-drive corpus source, live overlay, and live index were not written, promoted, or changed.
+
+## Fix Round 1/5 — Independent Review Corrections
+
+- Structured slots now mark evidence already admitted by the audited route before final fusion. Historical point-in-time results, original versions, and both-version retrieval remain admitted when the route accepted them.
+- Structured `QueryPlan` values now carry each slot's filing date. Structured financial and event facts are rebound twice: once to final slot evidence and again to the final 20-node aggregate evidence set.
+- The transaction-action guard now independently inspects both public `AnalysisPlan` question fields and never disables itself based on a supplied policy action. Any detected surface returns `policy_transaction_ambiguous` before retrieval.
+- Text retrieval records prompt-injection exclusions before fusion and restores index result order after safe hydration. Structured retrieval now records actual sparse ranks and latency. Diagnostics remain content-free.
+- The 20-node bound is enforced while assigning per-slot results, so the union of every slot's evidence and the aggregate evidence list are both bounded.
+- TDD: seven new direct public-contract, structured-version/date, fact-binding, ordering/diagnostic, and total-bound tests first failed against the review commit and now pass.
+- Verification: focused/listed regression passed `54` tests with `4` subtests; compileall using a temporary bytecode prefix and `git diff --check` passed.

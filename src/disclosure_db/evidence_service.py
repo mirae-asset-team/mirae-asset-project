@@ -159,15 +159,22 @@ class EvidenceService:
                         "rank": rank,
                         "evidence_id": str(row["evidence_id"]),
                     })
-                refs = self._hydrate_ids(
+                hydrated = self._hydrate_ids(
                     (str(row["evidence_id"]) for row in rows),
                     as_of=version_as_of,
                     correction_policy=plan.base_plan.correction_policy,
                 )
+                by_id = {ref.evidence_id: ref for ref in hydrated}
+                refs = [by_id[str(row["evidence_id"])] for row in rows if str(row["evidence_id"]) in by_id]
+                safe_refs: list[EvidenceRef] = []
                 for ref in refs:
                     ref.locator["analysis_issuer"] = slot.issuer or plan.base_plan.company
                     ref.locator["analysis_version_admitted"] = True
-                rankings.append(refs)
+                    if any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS):
+                        diagnostics["excluded_prompt_injection_count"] = int(diagnostics["excluded_prompt_injection_count"]) + 1
+                        continue
+                    safe_refs.append(ref)
+                rankings.append(safe_refs)
             result = fuse_slot_results(rankings, limit=min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT))
         except ValueError:
             diagnostics["reason_code"] = "search_index_attestation_mismatch"
@@ -184,6 +191,7 @@ class EvidenceService:
         slot: EvidenceSlot,
         variants: tuple[str, ...],
     ) -> tuple[list[EvidenceRef], list[dict[str, object]], list[dict[str, object]], dict[str, object]]:
+        started = time.perf_counter()
         base = plan.base_plan
         query = variants[0] if variants else ""
         slot_plan = QueryPlan(
@@ -197,21 +205,36 @@ class EvidenceService:
             scope=base.scope,
             statement_type=base.statement_type,
             correction_policy=base.correction_policy,
+            filing_date=slot.filing_date,
             fact_domain=slot.domain,
             account_terms=list(slot.search_concepts) if slot.domain == "financial" else [],
             predicate_terms=list(slot.search_concepts) if slot.domain == "event" else [],
         )
         bundle = self.search(slot_plan, limit=min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT))
+        for ref in bundle.evidence:
+            ref.locator["analysis_issuer"] = slot.issuer or base.company
+            ref.locator["analysis_version_admitted"] = True
         return (
             bundle.evidence,
             bundle.financial_facts,
             bundle.event_facts,
-            {"variant_ids": list(range(len(variants))), "candidate_count": len(bundle.evidence)},
+            {
+                "variant_ids": [0] if variants else [],
+                "candidate_count": len(bundle.evidence),
+                "sparse_ranks": [
+                    {"variant_id": 0, "rank": rank, "evidence_id": ref.evidence_id}
+                    for rank, ref in enumerate(bundle.evidence, start=1)
+                ],
+                "excluded_prompt_injection_count": 0,
+                "wrong_issuer_count": 0,
+                "wrong_version_count": 0,
+                "latency_ms": int(round((time.perf_counter() - started) * 1000)),
+            },
         )
 
     def search_analysis(self, plan: AnalysisPlan, *, limit: int = 20) -> AnalysisRetrieval:
         """Retrieve each declared analysis slot independently without changing ``search``."""
-        if not plan.policy.action.startswith("refuse_") and has_transaction_action_surface(plan.base_plan.question):
+        if any(has_transaction_action_surface(question) for question in (plan.question, plan.base_plan.question)):
             return AnalysisRetrieval(complete=False, reason_codes=("policy_transaction_ambiguous",))
         if plan.analysis_mode != "judgment":
             return AnalysisRetrieval(complete=False, reason_codes=("analysis_plan_not_judgment",))
@@ -223,6 +246,7 @@ class EvidenceService:
         all_refs: list[EvidenceRef] = []
         all_financial_facts: list[dict[str, object]] = []
         all_event_facts: list[dict[str, object]] = []
+        admitted_ids: set[str] = set()
         diagnostics_by_slot: dict[str, object] = {}
         reasons: list[str] = []
         for slot in plan.required_evidence_slots:
@@ -235,7 +259,11 @@ class EvidenceService:
                 refs, financial_facts, event_facts, diagnostics = self._search_structured_slot(plan, slot, variants)
             prompt_excluded = sum(1 for ref in refs if any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS))
             wrong_issuer = sum(1 for ref in refs if not self._matches_slot_issuer(ref, slot))
-            wrong_version = sum(1 for ref in refs if ref.lineage_status not in {"root", "resolved"})
+            wrong_version = sum(
+                1 for ref in refs
+                if ref.lineage_status not in {"root", "resolved"}
+                or (ref.is_current is False and not ref.locator.get("analysis_version_admitted"))
+            )
             wrong_report = sum(1 for ref in refs if not self._matches_slot_report(ref, slot))
             admitted = [
                 ref for ref in refs
@@ -245,6 +273,12 @@ class EvidenceService:
                 and self._matches_slot_report(ref, slot)
             ]
             fused = fuse_slot_results([admitted], limit=min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT))
+            bounded: list[EvidenceRef] = []
+            for ref in fused:
+                if ref.evidence_id in admitted_ids or len(admitted_ids) < total_limit:
+                    bounded.append(ref)
+                    admitted_ids.add(ref.evidence_id)
+            fused = bounded
             complete = len(fused) >= slot.min_evidence
             slot_reasons: tuple[str, ...] = () if complete or not slot.mandatory else (f"required_slot_missing:{slot.slot_id}",)
             reasons.extend(slot_reasons)
@@ -256,8 +290,9 @@ class EvidenceService:
             slots.append(SlotRetrieval(slot.slot_id, tuple(fused), complete, slot_reasons, safe_diagnostics))
             diagnostics_by_slot[slot.slot_id] = safe_diagnostics
             all_refs.extend(fused)
-            all_financial_facts.extend(financial_facts)
-            all_event_facts.extend(event_facts)
+            final_slot_ids = {ref.evidence_id for ref in fused}
+            all_financial_facts.extend(self._facts_with_final_evidence(financial_facts, final_slot_ids))
+            all_event_facts.extend(self._facts_with_final_evidence(event_facts, final_slot_ids))
 
         unique_refs: list[EvidenceRef] = []
         seen_ids: set[str] = set()
@@ -272,8 +307,8 @@ class EvidenceService:
             complete=complete,
             reason_codes=tuple(dict.fromkeys(reasons)),
             retrieval_diagnostics={"slots": diagnostics_by_slot},
-            financial_facts=tuple(all_financial_facts),
-            event_facts=tuple(all_event_facts),
+            financial_facts=tuple(self._facts_with_final_evidence(all_financial_facts, set(seen_ids))),
+            event_facts=tuple(self._facts_with_final_evidence(all_event_facts, set(seen_ids))),
         )
 
     def _base_identity_valid(self) -> bool:
