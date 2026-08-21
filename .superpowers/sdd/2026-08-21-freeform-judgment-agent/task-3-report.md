@@ -1,6 +1,8 @@
 # Task 3 report — canonical free-form Gold and evidence-based embedding decision
 
-Status: IMPLEMENTED; LOOP 1 QUALITY NO-GO; DENSE PILOT BLOCKED_EXTERNAL
+Status: BLOCKED_SERVING_PATH; NO VALID REPLACEMENT METRIC OR DENSE DECISION
+
+> **Superseded quality result:** The earlier Recall@20 and embedding-eligibility sections below are retained only as an audit trail. Review proved that their denominator contained unreachable or invalid targets. They are invalid for quality, gating, or model-installation decisions. The authoritative Loop 1 disposition is the fail-closed fix-round handoff at the end of this report.
 
 Base: `016cd198e49993a3aad72eb3f7c4b1a9d156ced2`
 
@@ -106,3 +108,11 @@ All values matched exactly before and after both real cycles and the conditional
 - Sparse p95 exceeds 2 seconds, although the 2-second requirement is formally a dense-adoption constraint in this task.
 - The dense pilot has no measured gain, safety regression result, cost, or p95 because external execution is blocked; embeddings must not be adopted from this artifact.
 - The 71 structured-route mismatches and 42 targets absent from the live search index indicate upstream Gold-to-serving admission/route alignment work. This report deliberately does not reopen immutable Task 1/2 implementation or change Gold targets to hide that gap.
+
+## Fix round 1 status — blocked before a replacement quality denominator
+
+The independent review invalidates the prior `0.0079365079` Recall@20 and the derived embedding eligibility. Neither value is retained as quality evidence or as a basis for model installation.
+
+Authorized serving repairs are TDD-green: text correction policy `both` now admits root/superseded plus current resolved versions while `current` remains current-only and `original` remains root-only; issuer, `as_of`, filing-date, lineage and report admission remain enforced. Financing event retrieval now uses only the admitted `issued_shares` and `treasury_disposal_shares` predicate IDs. Governance uses substantive indexed disclosure text and rejects headings, short labels and marker-free content.
+
+The real serving-admission build then failed closed on a new blocker: profitability requires two-period evidence in both mandatory financial slots, but the structured judgment subquery retains `QueryPlan.latest_period_count=1`. Across all 12 audited issuers, zero source groups contained two serving-returned periods for both `income_trend` and `balance_sheet`; the command ended with `dimension_source_coverage_missing:profitability_financial_health:0<3` before replacing any generated artifact. No replacement metric, dense eligibility decision, or Loop 1 GO claim exists. Further work requires explicit authority to change that Task 2 structured-slot period bound.

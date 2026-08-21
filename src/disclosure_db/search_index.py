@@ -272,9 +272,9 @@ class SafeSearchIndex:
             clauses.append("d.lineage_status IN ('root','resolved')")
             if correction_policy == "corrected":
                 clauses.append("d.is_correction=1")
-            if as_of is None:
+            if as_of is None and correction_policy != "both":
                 clauses.append("d.is_current=1")
-            else:
+            elif as_of is not None:
                 clauses.append("d.effective_from<=? AND (d.effective_to IS NULL OR ? < d.effective_to)")
                 params.extend([as_of, as_of])
         return (" AND ".join(clauses) or "1=1"), params

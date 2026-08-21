@@ -68,6 +68,49 @@ def _seed_filing_date_base(path: Path) -> None:
     connection.close()
 
 
+def _seed_correction_pair_base(path: Path) -> None:
+    _seed_base(path)
+    connection = sqlite3.connect(path)
+    connection.execute(
+        "UPDATE filing_version SET effective_to='2024-02-01', is_current=0 WHERE filing_id='f_safe'"
+    )
+    connection.execute(
+        "UPDATE filing SET issuer_corp_code='00000001', issuer_name='테스트', listed_name='테스트상장', "
+        "reporter_name='테스트보고', is_correction=1 WHERE filing_id='f_unresolved'"
+    )
+    connection.execute(
+        "UPDATE filing_version SET event_id='e_safe', version_no=2, parent_filing_id='f_safe', "
+        "lineage_status='resolved', lineage_confidence='high', "
+        "effective_from='2024-02-01', effective_to=NULL, is_current=1 WHERE filing_id='f_unresolved'"
+    )
+    connection.execute(
+        "UPDATE fragment SET text_raw='계약금액 정정', text_normalized='계약금액 정정' "
+        "WHERE evidence_id='ev_unresolved'"
+    )
+    connection.execute(
+        "INSERT INTO filing VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("f_other", "doc_other", "99999999", "999999", "다른회사", "다른회사", "다른회사", "IT", "IT", "periodic", "사업보고서", "사업보고서", "사업보고서", "사업보고서", "2024-02-02", 2023, 12, 1, "xml", 1),
+    )
+    connection.execute(
+        "INSERT INTO source_document VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("s_other", "f_other", "main", "other.xml", ".xml", "dart_xml", "utf-8", "utf-8", "d" * 64, 10, "2024-02-02T00:00:00Z", "test", "1", "success", 1, 0, "[]", json.dumps({"image_reference_count": 0})),
+    )
+    connection.execute(
+        "INSERT INTO filing_event VALUES(?,?,?,?,?)",
+        ("e_other", "99999999", "periodic", "other", "test"),
+    )
+    connection.execute(
+        "INSERT INTO filing_version VALUES(?,?,?,?,?,?,?,?,?,?)",
+        ("f_other", "e_other", 1, None, "root", "high", "2024-02-02", None, 1, "test"),
+    )
+    connection.execute(
+        "INSERT INTO fragment VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("ev_other", "f_other", "s_other", "paragraph", 0, "[]", None, None, "{}", "계약금액 정정", "계약금액 정정", "1"),
+    )
+    connection.commit()
+    connection.close()
+
+
 class SearchIndexTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -188,6 +231,41 @@ class SearchIndexTests(unittest.TestCase):
         build_search_index(self.base, self.index, self.attestation)
         index = SafeSearchIndex(self.index, base_sha256=self.attestation.sha256, expected_base_size=self.attestation.size_bytes)
         self.assertEqual([row["evidence_id"] for row in index.search("계약금액", company="테스트", as_of=None, correction_policy="corrected")], ["ev_unresolved"])
+
+    def test_correction_policies_preserve_version_issuer_and_date_boundaries(self) -> None:
+        base = Path(self.temp.name) / "correction_pair.sqlite"
+        index_path = Path(self.temp.name) / "correction_pair_search.sqlite"
+        _seed_correction_pair_base(base)
+        attestation = CorpusAttestation(
+            hashlib.sha256(base.read_bytes()).hexdigest(),
+            base.stat().st_size,
+            base.stat().st_mtime_ns,
+            "semantic-v1",
+        )
+        build_search_index(base, index_path, attestation)
+        index = SafeSearchIndex(index_path, base_sha256=attestation.sha256)
+
+        current = index.search("계약금액", company="00000001", as_of=None, correction_policy="current")
+        original = index.search("계약금액", company="00000001", as_of=None, correction_policy="original")
+        both = index.search("계약금액", company="00000001", as_of=None, correction_policy="both")
+
+        self.assertEqual([row["evidence_id"] for row in current], ["ev_unresolved"])
+        self.assertEqual([row["evidence_id"] for row in original], ["ev_safe"])
+        self.assertEqual({row["evidence_id"] for row in both}, {"ev_safe", "ev_unresolved"})
+        self.assertEqual(
+            [row["evidence_id"] for row in index.search(
+                "계약금액", company="00000001", as_of="2024-01-15", correction_policy="both",
+            )],
+            ["ev_safe"],
+        )
+        self.assertEqual(
+            [row["evidence_id"] for row in index.search(
+                "계약금액", company="00000001", as_of=None,
+                filed_at="2024-01-02", correction_policy="both",
+            )],
+            ["ev_unresolved"],
+        )
+        self.assertNotIn("ev_other", {row["evidence_id"] for row in both})
 
     def test_company_aliases_filter_index(self) -> None:
         build_search_index(self.base, self.index, self.attestation)

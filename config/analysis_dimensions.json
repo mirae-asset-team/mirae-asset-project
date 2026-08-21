@@ -31,7 +31,7 @@
       "max_evidence": 10,
       "slots": [
         {"slot_id": "debt_position", "domain": "financial", "search_concepts": ["부채총계", "차입금", "사채"], "min_evidence": 1, "max_evidence": 5, "mandatory": true, "absence_reason_code": "debt_position_missing"},
-        {"slot_id": "financing_disclosures", "domain": "event", "search_concepts": ["차입", "사채", "유상증자", "상환"], "min_evidence": 1, "max_evidence": 5, "mandatory": true, "absence_reason_code": "financing_disclosures_missing"}
+        {"slot_id": "financing_disclosures", "domain": "event", "search_concepts": ["issued_shares", "treasury_disposal_shares"], "min_evidence": 1, "max_evidence": 5, "mandatory": true, "absence_reason_code": "financing_disclosures_missing"}
       ]
     },
     {
@@ -52,7 +52,7 @@
       "allowed_conclusions": ["risk_signal", "stable", "mixed", "insufficient_evidence"],
       "max_evidence": 6,
       "slots": [
-        {"slot_id": "governance_events", "domain": "event", "search_concepts": ["지배구조", "내부자", "임원", "최대주주"], "min_evidence": 1, "max_evidence": 6, "mandatory": true, "absence_reason_code": "governance_events_missing"}
+        {"slot_id": "governance_events", "domain": "text", "search_concepts": ["지배구조", "내부통제", "최대주주", "이사회"], "min_evidence": 1, "max_evidence": 6, "mandatory": true, "absence_reason_code": "governance_events_missing"}
       ]
     },
     {
