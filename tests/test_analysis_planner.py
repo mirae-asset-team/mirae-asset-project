@@ -145,6 +145,33 @@ def test_quoted_transaction_questions_stay_refused_when_the_user_asks_for_an_ans
             assert decision.reason_codes == ("policy_recommendation_or_suitability_refusal",)
 
 
+def test_quoted_and_reported_buy_sell_retrieval_continuations_preserve_advice_refusal():
+    questions = [
+        "사업보고서에서 '삼성전자 주식을 사도 돼?'라는 문구를 찾아보고 추천해줘",
+        "사업보고서에서 '삼성전자 주식을 팔까요?'라는 표현을 검색해보고 그에 답해줘",
+        "사업보고서에서 삼성전자 주식을 사도 되는지 검토한 내용을 찾아보고 네 의견도 말해줘",
+        "사업보고서에서 삼성전자 주식을 팔아도 되는지 검토한 내용을 조회해보고 추천해줘",
+        "사업보고서에서 '삼성전자 주식을 사는 게 나을까요?'라는 문구를 찾아줘. 네 의견도 말해줘",
+    ]
+
+    for question in questions:
+        decision = classify_policy(question)
+        assert decision.action == "refuse_recommendation", question
+        assert decision.reason_codes == ("policy_recommendation_or_suitability_refusal",)
+
+
+def test_quoted_and_reported_buy_sell_retrieval_only_requests_stay_neutral():
+    questions = [
+        "사업보고서에서 '삼성전자 주식을 사도 돼?'라는 문구를 찾아줘",
+        "사업보고서에서 '삼성전자 주식을 팔까요?'라는 표현을 검색해줘",
+        "사업보고서에서 삼성전자 주식을 사도 되는지 검토한 내용을 조회해줘",
+        "사업보고서에서 삼성전자 주식을 팔아도 되는지 검토한 내용을 확인해줘",
+    ]
+
+    for question in questions:
+        assert classify_policy(question).action == "allow_analysis", question
+
+
 def test_mixed_mention_and_advice_order_keeps_each_buy_sell_occurrence_independent():
     advice_and_neutral_mentions = [
         ("사도 돼", "팔까요"),

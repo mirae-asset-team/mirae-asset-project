@@ -46,22 +46,26 @@ _NEUTRAL_QUOTED_MENTION_TAIL = re.compile(
     rf"\s*(?:(?:라는|이란)\s*)?(?:문구|표현|기재|언급|내용)"
     rf"\s*(?:을|를|이|가|은|는)?\s*"
     rf"(?P<source>{_DISCLOSURE_SOURCE_TEXT}\s*(?:에|에서|의)?\s*)?"
-    rf"(?:찾|검색|조회|확인|있는지|있었는지|나오는지|포함(?:됐|되었|되어|된|되)?는지)"
+    rf"(?P<retrieval>찾|검색|조회|확인|있는지|있었는지|나오는지|포함(?:됐|되었|되어|된|되)?는지)"
 )
 _REPORTED_TRANSACTION_MENTION_TAIL = re.compile(
     rf"\s*(?:검토|논의|확인|언급|기재)(?:한|했던|된|됐던)\s*"
     rf"(?:내용|문구|표현|기록|대목)\s*(?:을|를|이|가|은|는)?\s*"
     rf"(?P<source>{_DISCLOSURE_SOURCE_TEXT}\s*(?:에|에서|의)?\s*)?"
-    rf"(?:찾|검색|조회|확인|있는지|있었는지|나오는지)"
+    rf"(?P<retrieval>찾|검색|조회|확인|있는지|있었는지|나오는지)"
 )
-_TRANSACTION_RESPONSE_REQUEST = re.compile(
-    r"(?:그\s*)?(?:질문|내용)\s*(?:에|에는|을|를)?\s*(?:직접\s*)?"
-    r"(?:답해|답변|대답|결론|판단|추천)"
+_ADVISORY_CONTINUATION_TEXT = (
+    r"(?:"
+    r"(?:추천|조언)\s*(?:(?:을|를|도)\s*)?(?:해|하|부탁|말|줘)"
+    r"|(?:(?:내|네|제|저의|당신의)\s*)?(?:판단|결론|의견|생각)"
+    r"\s*(?:도|을|를|은|는)?\s*(?:말|알려|내|제시|해|줘)"
+    r"|(?:(?:그|이|해당)\s*(?:(?:질문|내용|문구|표현)\s*)?(?:에|에는|대해)?\s*)?"
+    r"(?:답해|답변|대답)"
+    r")"
 )
-_NEXT_CLAUSE_TRANSACTION_RESPONSE_REQUEST = re.compile(
-    r"\s*(?:(?:그리고|이어서|또)\s*)?(?:그|이)\s*질문"
-    r"\s*(?:에|에는|을|를)?\s*(?:직접\s*)?"
-    r"(?:답해|답변|대답|결론|판단|추천)"
+_ADVISORY_CONTINUATION = re.compile(_ADVISORY_CONTINUATION_TEXT)
+_NEXT_CLAUSE_ADVISORY_CONTINUATION = re.compile(
+    rf"\s*(?:(?:그리고|이어서|또)\s*)?{_ADVISORY_CONTINUATION_TEXT}"
 )
 _CLAUSE_BOUNDARIES = ".!?。！？\n"
 _RECOMMENDATION_PATTERNS = (
@@ -108,16 +112,16 @@ def _has_disclosure_source_before(text: str, offset: int) -> bool:
     return bool(_DISCLOSURE_SOURCE.search(text[_clause_start(text, offset):offset]))
 
 
-def _has_transaction_response_request_after(text: str, offset: int) -> bool:
+def _has_advisory_continuation_after(text: str, offset: int) -> bool:
     current_clause_end = _clause_end(text, offset)
-    if _TRANSACTION_RESPONSE_REQUEST.search(text[offset:current_clause_end]):
+    if _ADVISORY_CONTINUATION.search(text[offset:current_clause_end]):
         return True
     if current_clause_end == len(text):
         return False
     next_clause_start = current_clause_end + 1
     next_clause_end = _clause_end(text, next_clause_start)
     return bool(
-        _NEXT_CLAUSE_TRANSACTION_RESPONSE_REQUEST.match(
+        _NEXT_CLAUSE_ADVISORY_CONTINUATION.match(
             text[next_clause_start:next_clause_end]
         )
     )
@@ -135,7 +139,7 @@ def _neutral_quoted_transaction_ranges(text: str) -> tuple[tuple[int, int], ...]
                 continue
             if not (_has_disclosure_source_before(text, quoted.start("mention")) or tail["source"]):
                 continue
-            if _has_transaction_response_request_after(text, quoted.end()):
+            if _has_advisory_continuation_after(text, tail.start("retrieval")):
                 continue
             ranges.append((quoted.start("mention"), quoted.end("mention")))
     return tuple(ranges)
@@ -153,7 +157,7 @@ def _is_neutral_transaction_mention(
     return (
         tail is not None
         and bool(_has_disclosure_source_before(text, start) or tail["source"])
-        and not _has_transaction_response_request_after(text, end)
+        and not _has_advisory_continuation_after(text, tail.start("retrieval"))
     )
 
 
