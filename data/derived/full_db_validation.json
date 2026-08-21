@@ -1,0 +1,192 @@
+{
+  "database": "D:/mirae-asset-project/db/semantic-v1_129f5b0/disclosure_corpus_semantic_v1.sqlite",
+  "database_bytes": 38773280768,
+  "integrity_check": "ok",
+  "integrity_check_mode": "quick",
+  "integrity_attestation": null,
+  "foreign_key_violations": 0,
+  "counts": {
+    "filing": 4204,
+    "source_document": 4622,
+    "parser_error": 281502,
+    "fragment": 8437771,
+    "table_record": 1556755,
+    "table_cell": 36697165,
+    "fact": 155552,
+    "fact_evidence": 517013,
+    "filing_event": 3741,
+    "filing_version": 4204,
+    "quality_issue": 4174,
+    "fragment_fts": 8437771,
+    "schema_migration": 2,
+    "financial_fact": 0,
+    "financial_fact_evidence": 0
+  },
+  "filings_by_group": {
+    "exchange": 1469,
+    "holding": 1083,
+    "major": 598,
+    "periodic": 1054
+  },
+  "parse_status": {
+    "partial": 2,
+    "success": 4620
+  },
+  "detected_formats": {
+    "dart_xml": 3147,
+    "exchange_html": 1469,
+    "pdf": 3,
+    "viewer_html": 3
+  },
+  "lineage_status": {
+    "missing_original": 2,
+    "resolved": 463,
+    "root": 3200,
+    "unresolved": 539
+  },
+  "fact_validation_status": {
+    "candidate": 155552
+  },
+  "financial_fact_validation_status": {},
+  "quality_issue_rules": [
+    {
+      "severity": "warning",
+      "dimension": "validity",
+      "rule_id": "recovery_parser_used",
+      "count": 1838
+    },
+    {
+      "severity": "warning",
+      "dimension": "coverage",
+      "rule_id": "missing_binary_asset",
+      "count": 1790
+    },
+    {
+      "severity": "warning",
+      "dimension": "consistency",
+      "rule_id": "correction_lineage_unresolved",
+      "count": 539
+    },
+    {
+      "severity": "warning",
+      "dimension": "coverage",
+      "rule_id": "pdf_table_structure_unvalidated",
+      "count": 3
+    },
+    {
+      "severity": "warning",
+      "dimension": "consistency",
+      "rule_id": "missing_original",
+      "count": 2
+    },
+    {
+      "severity": "warning",
+      "dimension": "validity",
+      "rule_id": "parse_partial",
+      "count": 2
+    }
+  ],
+  "invariants": {
+    "source_file_count_mismatch": 0,
+    "facts_without_evidence": 0,
+    "events_without_one_current": 0,
+    "fragment_cell_evidence_collisions": 0,
+    "filings_without_source": 0,
+    "successful_sources_without_fragment": 0
+  },
+  "expected_counts": {
+    "filings": 4204,
+    "sources": 4622,
+    "mismatches": {
+      "filings": 0,
+      "sources": 0
+    },
+    "policy": "optional external contract; internal source_file_count reconciliation is always enforced"
+  },
+  "retrieval_projection_invariants": {
+    "fts_fragment_count_difference": 0,
+    "fts_rowid_orphans": 0
+  },
+  "semantic_schema_invariants": {
+    "required_tables_missing": 0,
+    "semantic_migration_record_missing": 0,
+    "legacy_fact_type_rows": 0,
+    "fts_not_external_content": 0,
+    "fts_sync_triggers_missing": 0,
+    "fact_evidence_filing_mismatch": 0,
+    "validated_fact_without_evidence": 0,
+    "legacy_quality_rule_alias_rows": 0,
+    "financial_evidence_filing_mismatch": 0,
+    "validated_financial_fact_without_evidence": 0
+  },
+  "semantic_schema_gate_passed": true,
+  "semantic_schema_gate_required": true,
+  "query_sanity": [
+    {
+      "text": "계약금액",
+      "company": "삼성전자",
+      "latency_ms": 118.166,
+      "result_count": 10,
+      "top_evidence_id": "ev1_ef04eb6e5310669fb4c294a6fec6154f",
+      "top_filing_id": "20241118000328"
+    },
+    {
+      "text": "감사의견",
+      "company": "005930",
+      "latency_ms": 63.306,
+      "result_count": 10,
+      "top_evidence_id": "ev1_081ddf46d4cb835317339b44a687c79b",
+      "top_filing_id": "20240312000736"
+    },
+    {
+      "text": "자기주식취득결정",
+      "company": null,
+      "latency_ms": 44.682,
+      "result_count": 10,
+      "top_evidence_id": "ev1_35a1a2e5995f7fd856ca36cd72e87979",
+      "top_filing_id": "20241118000328"
+    },
+    {
+      "text": "보유주식등의 수",
+      "company": null,
+      "latency_ms": 168.809,
+      "result_count": 10,
+      "top_evidence_id": "ev1_704e2cd99b5e80c8211701cb41167b97",
+      "top_filing_id": "20250905000381"
+    },
+    {
+      "text": "매출액",
+      "company": "현대자동차",
+      "latency_ms": 132.024,
+      "result_count": 10,
+      "top_evidence_id": "ev1_25a6dcd308839ef42d738de7408d2768",
+      "top_filing_id": "20240313001451"
+    }
+  ],
+  "structure_gate_passed": true,
+  "retrieval_smoke_gate_passed": true,
+  "retrieval_relevance_gate_status": "not_evaluated_without_human_gold",
+  "semantic_answer_gate_status": "not_evaluated_without_human_gold_and_canonical_facts",
+  "semantic_blockers": {
+    "candidate_facts_not_answerable": 155552,
+    "unresolved_lineage": 539,
+    "missing_original": 2,
+    "human_gold_approved": null,
+    "human_gold_status": "not_provided",
+    "validated_financial_facts": 0
+  },
+  "gold_validation": null,
+  "retrieval_gold_evaluation": null,
+  "evaluation_contract": {
+    "path": "config/evaluation_contract.json",
+    "version": "0.3.0",
+    "status": "human_gold_v1_approved",
+    "question_type_count": 8,
+    "gate_groups": [
+      "answer_block",
+      "not_evaluated",
+      "structure_fail",
+      "warning"
+    ]
+  }
+}

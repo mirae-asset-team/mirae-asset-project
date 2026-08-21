@@ -1,0 +1,17 @@
+{
+  "status": "ok",
+  "expected_base_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563",
+  "base_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563",
+  "base_size_bytes": 38773280768,
+  "base_hash_mode": "precomputed_external_attestation",
+  "gold_input_sha256": "5aedc3c7a1232989db251557b61f1c7f2d459077455bfd1dfc8bad8de5b6d997",
+  "seed_input_sha256": "80fc26f17cc3d17abc8a82c6517851374eedfe3e06c0a145d7b2479f7dc545e5",
+  "candidate_count": 31,
+  "fact_limit": 0,
+  "audited_count": 8,
+  "human_passthrough_count": 23,
+  "rejected_count": 0,
+  "reason_counts": {},
+  "output_count": 31,
+  "generator": "deterministic_agent_gold_v1"
+}

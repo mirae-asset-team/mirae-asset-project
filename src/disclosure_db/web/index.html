@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>미래에셋 공시 에이전트</title>
+    <link rel="stylesheet" href="/static/app.css">
+  </head>
+  <body>
+    <div id="app-shell" class="app-shell">
+      <aside id="sidebar" class="sidebar" aria-label="대화 기록">
+        <div class="sidebar-brand">
+          <span class="brand-mark" aria-hidden="true">M</span>
+          <span aria-hidden="true">공시 리서치</span>
+          <button id="sidebar-close" class="sidebar-close" type="button" aria-label="대화 목록 닫기">×</button>
+        </div>
+        <button id="new-chat" class="new-chat" type="button"><span aria-hidden="true">＋</span> 새 대화</button>
+        <label class="sr-only" for="history-search">대화 검색</label>
+        <div class="search-wrap">
+          <span aria-hidden="true">⌕</span>
+          <input id="history-search" type="search" autocomplete="off" placeholder="대화 검색">
+        </div>
+        <p class="history-label">최근 대화</p>
+        <ol id="conversation-list"></ol>
+        <button id="clear-history" class="secondary-button" type="button">기록 전체 삭제</button>
+      </aside>
+      <main class="chat" aria-labelledby="app-title">
+        <header class="chat-header">
+          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="대화 목록 열기">☰</button>
+          <h1 id="app-title">미래에셋 공시 에이전트</h1>
+          <div class="service-cluster">
+            <p id="service-status" role="status" aria-live="polite">공시 DB 확인 중</p>
+            <details id="service-info" class="service-info">
+              <summary>서비스 정보</summary>
+              <div class="service-popover">
+                <p id="provider-mode">답변 엔진 확인 중</p>
+                <p>데이터 버전 <span id="corpus-revision">확인 중</span></p>
+                <p id="legal-company-count">재무 DB 법인 수 확인 중</p>
+                <p class="coverage-title">최신 연도 검증 현황</p>
+                <ul id="financial-coverage-list" class="financial-coverage-list">
+                  <li>확인 중</li>
+                </ul>
+              </div>
+            </details>
+          </div>
+        </header>
+        <section class="examples" aria-label="질문 예시">
+          <span>예시 질문</span>
+          <button type="button" data-example="삼성전자의 최근 사업보고서 기준 매출액을 알려줘">최근 매출액</button>
+          <button type="button" data-example="삼성전자의 최근 공시에서 정정 전후 수치를 비교해줘">정정 전후 비교</button>
+        </section>
+        <ol id="messages" class="messages" aria-live="polite">
+          <li class="empty-message">
+            <p class="empty-kicker">DISCLOSURE RESEARCH</p>
+            <h2>기업 공시를 근거와 함께 살펴보세요</h2>
+            <p>회사명과 궁금한 항목을 함께 입력하면 검증 가능한 공시만 찾아 답합니다.</p>
+            <div id="corpus-facts" class="corpus-facts" aria-label="공시 데이터 특징">
+              <span id="company-count-fact">검색명·법인 수 확인 중</span>
+              <span>정정 공시 계보 확인</span>
+              <span>인용 근거 열람</span>
+            </div>
+          </li>
+        </ol>
+        <form id="question-form" class="question-form">
+          <label class="sr-only" for="question-input">공시 질문</label>
+          <div class="composer">
+            <textarea id="question-input" maxlength="4000" required placeholder="회사명과 궁금한 공시 내용을 입력하세요."></textarea>
+            <button id="send-question" type="submit">질문하기 <span aria-hidden="true">↑</span></button>
+          </div>
+          <p class="composer-note">공시에서 확인할 수 없는 내용은 답변을 보류합니다.</p>
+        </form>
+      </main>
+    </div>
+    <script type="module" src="/static/app.js"></script>
+  </body>
+</html>

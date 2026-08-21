@@ -1,0 +1,109 @@
+{
+  "migration_id": "semantic_layer_v1",
+  "source_database": "data/derived/disclosure_corpus.sqlite",
+  "output_database": "data/derived/disclosure_corpus_semantic_v1.sqlite",
+  "output_bytes": 38773280768,
+  "quick_check": "ok",
+  "foreign_key_violations": 0,
+  "before": {
+    "schema_sha256": "21e77158b8d6e1f572bde431879df578e0720746aa0e0eeccdd58776115d844e",
+    "core_counts": {
+      "filing": 4204,
+      "source_document": 4622,
+      "fragment": 8437771,
+      "table_record": 1556755,
+      "table_cell": 36697165,
+      "fact": 155552,
+      "fact_evidence": 517013,
+      "filing_event": 3748,
+      "filing_version": 4204,
+      "quality_issue": 4178,
+      "fragment_fts": 8437771
+    },
+    "latest_pipeline_run": [
+      "run_20260813T090649Z_1f4cefcb",
+      "success",
+      "2026-08-13T14:22:04.785568+00:00"
+    ]
+  },
+  "after": {
+    "schema_sha256": "7351e7537a9ffdbab0e5c289910a0b70eef7c61aae424453f37f48aea26b8349",
+    "core_counts": {
+      "filing": 4204,
+      "source_document": 4622,
+      "fragment": 8437771,
+      "table_record": 1556755,
+      "table_cell": 36697165,
+      "fact": 155552,
+      "fact_evidence": 517013,
+      "filing_event": 3741,
+      "filing_version": 4204,
+      "quality_issue": 4176,
+      "fragment_fts": 8437771
+    },
+    "latest_pipeline_run": [
+      "run_20260813T090649Z_1f4cefcb",
+      "success",
+      "2026-08-13T14:22:04.785568+00:00"
+    ]
+  },
+  "semantic_counts": {
+    "schema_migration": 1,
+    "financial_fact": 0,
+    "financial_fact_evidence": 0
+  },
+  "triggers": [
+    "fact_evidence_preserve_validated_delete",
+    "fact_evidence_same_filing_insert",
+    "fact_evidence_same_filing_update",
+    "fact_validation_requires_evidence",
+    "fact_validation_requires_evidence_insert",
+    "financial_fact_evidence_preserve_validated_delete",
+    "financial_fact_evidence_same_filing_insert",
+    "financial_fact_evidence_same_filing_update",
+    "financial_fact_validation_requires_evidence",
+    "financial_fact_validation_requires_evidence_insert",
+    "fragment_fts_ad",
+    "fragment_fts_ai",
+    "fragment_fts_au"
+  ],
+  "details": {
+    "renamed_fact_rows": 155552,
+    "lineage_stats": {
+      "missing_original": 2,
+      "resolved": 463,
+      "root": 3200,
+      "unresolved": 539,
+      "events": 3741
+    },
+    "changed_filing_versions": 13,
+    "fts_rebuilt": true,
+    "quality_refresh": {
+      "lineage": 541,
+      "pdf": 3
+    }
+  },
+  "source_file_sha256": null,
+  "source_fingerprint": {
+    "schema_sha256": "21e77158b8d6e1f572bde431879df578e0720746aa0e0eeccdd58776115d844e",
+    "core_counts": {
+      "filing": 4204,
+      "source_document": 4622,
+      "fragment": 8437771,
+      "table_record": 1556755,
+      "table_cell": 36697165,
+      "fact": 155552,
+      "fact_evidence": 517013,
+      "filing_event": 3748,
+      "filing_version": 4204,
+      "quality_issue": 4178,
+      "fragment_fts": 8437771
+    },
+    "latest_pipeline_run": [
+      "run_20260813T090649Z_1f4cefcb",
+      "success",
+      "2026-08-13T14:22:04.785568+00:00"
+    ]
+  },
+  "elapsed_seconds": 3036.981
+}

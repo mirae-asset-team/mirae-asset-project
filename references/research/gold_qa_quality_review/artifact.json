@@ -1,0 +1,152 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "Gold QA 품질 검수 결과",
+    "description": "gold_qa.jsonl 20행과 38GB 기준 원장의 근거 참조를 읽기 전용으로 대조한 결과",
+    "generatedAt": "2026-08-14T19:36:15+09:00",
+    "sources": [
+      {
+        "id": "gold-audit",
+        "label": "Gold QA와 SQLite 근거 대조",
+        "query": {
+          "engine": "Python 3 + SQLite read-only",
+          "language": "python",
+          "sql": "WITH headline(rows,approved,evidence_refs,evidence_mismatches) AS (VALUES (20,0,9,0)) SELECT * FROM headline; WITH issue_counts(code,issue,count,denominator,severity,rate) AS (VALUES ('A','모델→human',20,20,'Critical',1.0),('B','reviewer 없음',20,20,'Critical',1.0),('C','정정 근거 없음',2,4,'High',0.5),('D','숫자 text',1,20,'High',0.05),('E','근거 불일치',0,9,'Critical',0.0),('F','ID 중복',0,20,'High',0.0)) SELECT * FROM issue_counts;",
+          "description": "JSONL 전수 파싱, 교차필드 규칙 검사, evidence_id·filing_id·SHA·lineage·effective interval 대조",
+          "executed_at": "2026-08-14T19:36:15+09:00",
+          "tables_used": ["data/derived/gold_qa.jsonl", "data/derived/gold_candidates.jsonl", "data/derived/disclosure_corpus.sqlite"],
+          "filters": ["gold_qa.jsonl 전체 20행", "SQLite mode=ro", "모든 evidence 참조"]
+        }
+      }
+    ],
+    "cards": [
+      {"id": "rows", "dataset": "headline", "sourceId": "gold-audit", "description": "JSON 파싱에 성공한 QA 레코드 수", "metrics": [{"label": "QA 레코드", "field": "rows", "format": "number"}]},
+      {"id": "approved", "dataset": "headline", "sourceId": "gold-audit", "description": "독립 reviewer가 승인한 레코드 수", "metrics": [{"label": "Approved", "field": "approved", "format": "number"}]},
+      {"id": "evidence", "dataset": "headline", "sourceId": "gold-audit", "description": "실DB에서 찾은 evidence 참조 수", "metrics": [{"label": "근거 참조", "field": "evidence_refs", "format": "number"}]},
+      {"id": "mismatch", "dataset": "headline", "sourceId": "gold-audit", "description": "ID·filing·SHA·lineage·유효기간 불일치 수", "metrics": [{"label": "근거 불일치", "field": "evidence_mismatches", "format": "number"}]}
+    ],
+    "charts": [
+      {
+        "id": "issue-counts",
+        "title": "Gold 승격을 막는 규칙 위반",
+        "subtitle": "20개 QA 레코드 전수 검사, 동일 레코드가 여러 규칙에 중복될 수 있음",
+        "showDescription": true,
+        "type": "bar",
+        "dataset": "issue_counts",
+        "sourceId": "gold-audit",
+        "encodings": {
+          "x": {"field": "code", "type": "nominal", "label": "검사 코드"},
+          "y": {"field": "count", "type": "quantitative", "label": "영향 레코드 수"},
+          "tooltip": [
+            {"field": "count", "type": "quantitative", "label": "영향 레코드 수"},
+            {"field": "issue", "type": "nominal", "label": "검사 항목"},
+            {"field": "severity", "type": "nominal", "label": "심각도"},
+            {"field": "denominator", "type": "quantitative", "label": "검사 모집단"}
+          ]
+        },
+        "xAxisTitle": "검사 코드",
+        "yAxisTitle": "검사 항목",
+        "valueFormat": "number",
+        "maxRows": 6,
+        "layout": "full"
+      }
+    ],
+    "tables": [
+      {
+        "id": "findings",
+        "title": "검수 발견사항과 조치",
+        "subtitle": "현재 Gold 승격 여부에 영향을 주는 항목만 수록",
+        "dataset": "findings",
+        "defaultSort": {"field": "priority", "direction": "asc"},
+        "density": "spacious",
+        "sourceId": "gold-audit",
+        "layout": "full",
+        "columns": [
+          {"field": "priority", "label": "우선순위", "type": "number"},
+          {"field": "severity", "label": "심각도", "type": "text"},
+          {"field": "finding", "label": "발견", "type": "text"},
+          {"field": "evidence", "label": "실측 근거", "type": "text"},
+          {"field": "action", "label": "필요 조치", "type": "text"}
+        ]
+      },
+      {
+        "id": "blocked-records",
+        "title": "개별 수정이 필요한 레코드",
+        "subtitle": "시스템 공통 승인 문제 외에 내용·근거 계약을 별도로 위반한 QA",
+        "dataset": "blocked_records",
+        "defaultSort": {"field": "question_id", "direction": "asc"},
+        "density": "dense",
+        "sourceId": "gold-audit",
+        "layout": "full",
+        "columns": [
+          {"field": "question_id", "label": "question_id", "type": "text"},
+          {"field": "issue", "label": "문제", "type": "text"},
+          {"field": "action", "label": "수정", "type": "text"}
+        ]
+      }
+    ],
+    "blocks": [
+      {"id": "title", "type": "markdown", "body": "# Gold QA 품질 검수 결과", "layout": "full"},
+      {"id": "summary", "type": "markdown", "sourceId": "gold-audit", "body": "## 기술 요약\n\n**현재 `gold_qa.jsonl`은 Gold가 아니라 모델 생성 QA 후보입니다.** 20행 모두 `annotator=grok-4.6-source-db`인데 `answer_origin=human_verified`로 기록됐고, reviewer가 없는 상태에서 `review.status=reviewed`입니다. 독립적인 사람이 원문을 대조하기 전에는 학습·평가 정답으로 사용하면 안 됩니다.\n\n긍정적인 부분도 있습니다. JSON 파싱 오류와 question_id 중복은 0건이며, 기록된 evidence 9개는 현재 SQLite에서 모두 발견됐습니다. filing ID, source SHA-256, lineage, current 상태와 유효기간 불일치도 0건입니다.", "layout": "full"},
+      {"id": "metrics", "type": "metric-strip", "cardIds": ["rows", "approved", "evidence", "mismatch"]},
+      {"id": "finding-intro", "type": "markdown", "body": "## 사람 검수 부재가 전체 레코드의 승격을 막습니다\n\n아래 막대는 오류가 있는 서로 다른 QA 수를 뜻합니다. 같은 레코드가 `모델 작성`과 `reviewer 없음`에 동시에 포함되므로 항목 합계를 전체 행 수로 해석하면 안 됩니다. 가장 먼저 작성자·검수자 계약을 바로잡아야 하며, 그 뒤에 개별 근거 문제를 수정해야 합니다.", "layout": "full"},
+      {"id": "chart", "type": "chart", "chartId": "issue-counts", "layout": "full"},
+      {"id": "findings-title", "type": "markdown", "body": "## 근거 연결은 정확하지만 의미 승인과 후보 커버리지는 부족합니다\n\n실DB에 연결된 9개 근거는 식별자와 버전 메타데이터가 모두 일치했습니다. 그러나 answerable 정정 질문 2건은 evidence가 0개이며, 19개 후보 문서 중 evidence로 직접 감사됐음을 증명할 수 있는 filing은 6개뿐입니다. PDF와 근거 없음 질문은 evidence가 비어 있을 수 있지만, 이 경우에도 어떤 후보 문서를 감사했는지 별도 audit locator가 필요합니다.", "layout": "full"},
+      {"id": "scope", "type": "markdown", "sourceId": "gold-audit", "body": "## 검사 범위와 정의\n\n검사 단위는 `gold_qa.jsonl`의 JSONL 한 행입니다. 총 20행을 전수 검사했고, 비교 기준은 `gold_annotation_schema.json`, 핸드오프의 Gold 금지 규칙, 현재 38GB SQLite 원장입니다. evidence 검사는 `table_cell`과 `fragment`에서 ID를 찾고 filing, SHA-256, lineage status, is_current, effective_from/to를 대조했습니다.\n\n질문 유형은 table_cell 7, unanswerable 5, correction_aware 4, single_filing_fact 3, adversarial 1개입니다. period_comparison, cross_company_comparison, multi_filing_synthesis는 0개이므로 전체 평가 계약의 대표 표본은 아닙니다.", "layout": "full"},
+      {"id": "method", "type": "markdown", "body": "## 검수 방법\n\n1. 모든 줄을 JSON으로 파싱하고 question_id 중복과 enum·교차필드 규칙을 검사했습니다.\n2. answerability와 answer.kind, 숫자 표기, as_of와 version_basis, PDF 표 검증 상태를 대조했습니다.\n3. SQLite를 `mode=ro`로 열어 모든 evidence 참조를 원장의 cell 또는 fragment와 대조했습니다.\n4. 후보 19행과 Gold QA의 evidence filing 분포를 비교했습니다.\n\n원장과 Gold 파일은 수정하지 않았습니다.", "layout": "full"},
+      {"id": "limitations", "type": "markdown", "body": "## 한계와 강건성 확인\n\n이번 검수는 구조·메타데이터 전수 검사와 9개 근거의 원장 대조입니다. 사람이 공시 원문 화면을 열어 답의 의미를 독립 확인한 작업은 아닙니다. 따라서 evidence mismatch 0건은 식별자 연결이 정확하다는 뜻이지, 표 header·unit·PDF 의미까지 정확하다는 뜻은 아닙니다. 특히 q009와 q010의 근거 셀은 DB header path가 비어 있어 원문 코드와 사람 대조가 필요합니다.", "layout": "full"},
+      {"id": "blocked-title", "type": "markdown", "body": "## 우선 수정할 개별 레코드\n\n공통 승인 상태를 모두 `candidate`로 되돌린 뒤 아래 레코드를 먼저 고쳐야 합니다. q005는 두 숫자를 text 답 하나로 합쳤고, q019·q020은 정정 판단을 답하면서 evidence가 없습니다.", "layout": "full"},
+      {"id": "next", "type": "markdown", "body": "## 권장 다음 단계\n\n1. 파일 이름 또는 상태를 `candidate`로 명시하고 20행의 `answer_origin`과 `review.status`를 정정합니다.\n2. 작성자와 다른 팀원이 원문을 열어 한 행씩 검수하고 reviewer·reviewed_at을 기록합니다.\n3. q005를 복수 numeric operand 구조로 바꾸고 q019·q020에는 version/event evidence를 추가합니다.\n4. candidate filing ID를 Gold 행에 별도 기록해 19개 문서 audit 커버리지를 측정합니다.\n5. 교차필드 validator가 0건 실패할 때만 `approved`로 승격합니다.\n\n현재 파일을 검색·RAG 평가 정답이나 튜닝 데이터로 사용하지 마십시오.", "layout": "full"},
+      {"id": "questions", "type": "markdown", "body": "## 팀이 결정할 질문\n\n- Grok이 만든 20개 QA를 폐기할지, 질문 후보만 남겨 사람이 답을 새로 쓸지 결정해야 합니다.\n- 정정 lineage와 PDF 감사 상태를 일반 evidence와 분리한 audit evidence 구조가 필요한지 확정해야 합니다.\n- 첫 Gold 범위를 후보 문서 19개 전부로 할지, 질문 유형별 최소 수를 먼저 맞출지 정해야 합니다.", "layout": "full"}
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "generatedAt": "2026-08-14T19:36:15+09:00",
+    "status": "ready",
+    "datasets": {
+      "headline": [{"rows": 20, "approved": 0, "evidence_refs": 9, "evidence_mismatches": 0}],
+      "issue_counts": [
+        {"code": "A", "issue": "모델→human", "count": 20, "denominator": 20, "severity": "Critical", "rate": 1.0},
+        {"code": "B", "issue": "reviewer 없음", "count": 20, "denominator": 20, "severity": "Critical", "rate": 1.0},
+        {"code": "C", "issue": "정정 근거 없음", "count": 2, "denominator": 4, "severity": "High", "rate": 0.5},
+        {"code": "D", "issue": "숫자 text", "count": 1, "denominator": 20, "severity": "High", "rate": 0.05},
+        {"code": "E", "issue": "근거 불일치", "count": 0, "denominator": 9, "severity": "Critical", "rate": 0.0},
+        {"code": "F", "issue": "ID 중복", "count": 0, "denominator": 20, "severity": "High", "rate": 0.0}
+      ],
+      "findings": [
+        {"priority": 1, "severity": "Critical", "finding": "사람 검수 provenance가 사실과 다름", "evidence": "20/20 annotator가 grok-4.6-source-db, answer_origin은 human_verified", "action": "모두 candidate로 취급하고 사람이 답을 원문에서 재작성"},
+        {"priority": 2, "severity": "Critical", "finding": "독립 reviewer 없이 reviewed 표시", "evidence": "20/20 reviewer=null, review.status=reviewed", "action": "검수 전 candidate, 다른 팀원 대조 후에만 approved"},
+        {"priority": 3, "severity": "High", "finding": "정정 판단 근거 구조 부족", "evidence": "q019·q020 answerable이지만 evidence 0개", "action": "event_id·version_filing_ids·lineage snapshot 근거 추가"},
+        {"priority": 4, "severity": "High", "finding": "숫자 답 계약 우회", "evidence": "q005가 두 계약금액을 answer.kind=text로 저장", "action": "복수 numeric 값과 각 evidence를 구조화"},
+        {"priority": 5, "severity": "Medium", "finding": "19개 후보 문서 audit 증명 불가", "evidence": "evidence가 연결된 filing은 6개뿐이고 candidate_id 필드 없음", "action": "audited_candidate_id·audit evidence를 별도 기록"},
+        {"priority": 6, "severity": "Medium", "finding": "질문 유형 커버리지 부족", "evidence": "period/cross-company/multi-filing 유형 각 0개", "action": "첫 승인 뒤 평가 계약의 빈 유형을 추가"},
+        {"priority": 7, "severity": "Pass", "finding": "기록된 evidence 연결 무결성", "evidence": "9/9 존재, ID·filing·SHA·lineage·유효기간 불일치 0", "action": "현재 evidence ID는 유지 가능"}
+      ],
+      "blocked_records": [
+        {"question_id": "q005_bio_amount_change_as_of_july", "issue": "두 숫자를 text 한 줄로 저장", "action": "최초값·정정값을 각각 numeric operand와 evidence로 기록"},
+        {"question_id": "q019_korea_zinc_annual_not_current", "issue": "현재 유효본 여부를 답하지만 evidence 0", "action": "event/version lineage 근거 추가"},
+        {"question_id": "q020_bio_aug_different_contract_not_same_event", "issue": "다른 event 판단을 답하지만 evidence 0", "action": "양쪽 filing과 event 판정 근거 추가"},
+        {"question_id": "q009_rainbow_new_common_shares", "issue": "DB row/column header path가 모두 비어 있음", "action": "원문 TE ACODE를 사람이 대조하고 audit notes에 기록"},
+        {"question_id": "q010_skhynix_treasury_disposal_shares", "issue": "DB row/column header path가 모두 비어 있음", "action": "원문 TE ACODE를 사람이 대조하고 audit notes에 기록"}
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "gold-audit",
+      "label": "Gold QA와 SQLite 근거 대조",
+      "query": {
+        "engine": "Python 3 + SQLite read-only",
+        "language": "python",
+        "sql": "WITH headline(rows,approved,evidence_refs,evidence_mismatches) AS (VALUES (20,0,9,0)) SELECT * FROM headline; WITH issue_counts(code,issue,count,denominator,severity,rate) AS (VALUES ('A','모델→human',20,20,'Critical',1.0),('B','reviewer 없음',20,20,'Critical',1.0),('C','정정 근거 없음',2,4,'High',0.5),('D','숫자 text',1,20,'High',0.05),('E','근거 불일치',0,9,'Critical',0.0),('F','ID 중복',0,20,'High',0.0)) SELECT * FROM issue_counts;",
+        "description": "JSONL 전수 파싱, 교차필드 규칙 검사, evidence_id·filing_id·SHA·lineage·effective interval 대조",
+        "executed_at": "2026-08-14T19:36:15+09:00",
+        "tables_used": ["data/derived/gold_qa.jsonl", "data/derived/gold_candidates.jsonl", "data/derived/disclosure_corpus.sqlite"],
+        "filters": ["gold_qa.jsonl 전체 20행", "SQLite mode=ro", "모든 evidence 참조"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "base_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563",
+  "base_size_bytes": 38773280768,
+  "indexed_rows": 329323,
+  "trigram_rows": 298128,
+  "quick_check": "ok",
+  "promoted_output_path": "D:\\mirae-asset-project\\db\\agent\\agent_search.sqlite",
+  "elapsed_ms": 228079,
+  "revision": "safe-search-v1"
+}
