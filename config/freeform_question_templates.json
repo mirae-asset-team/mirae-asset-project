@@ -1,0 +1,53 @@
+{
+  "schema_version": "1.0.0",
+  "templates": [
+    {"template_id": "profitability-01", "dimension_id": "profitability_financial_health", "route": "financial", "template": "{issuer_name}의 수익성과 재무건전성을 매출액·영업이익·부채 공시로 분석해줘."},
+    {"template_id": "profitability-02", "dimension_id": "profitability_financial_health", "route": "financial", "template": "{issuer_name} 수익성 및 재무건전성의 공시상 추세를 확인해줘."},
+    {"template_id": "profitability-03", "dimension_id": "profitability_financial_health", "route": "financial", "template": "공시 근거로 {issuer_name}의 수익성과 재무건전성 변화를 정리해줘."},
+    {"template_id": "profitability-04", "dimension_id": "profitability_financial_health", "route": "financial", "template": "{issuer_name}의 매출액, 영업이익, 부채를 바탕으로 수익성과 재무건전성을 살펴봐줘."},
+    {"template_id": "profitability-05", "dimension_id": "profitability_financial_health", "route": "financial", "template": "{issuer_name} 공시에서 수익성 추세와 재무건전성 변화를 찾아줘."},
+    {"template_id": "profitability-06", "dimension_id": "profitability_financial_health", "route": "financial", "template": "수익성과 재무건전성 관점에서 {issuer_name}의 공시 근거를 종합해줘."},
+
+    {"template_id": "contract-01", "dimension_id": "contract_change", "route": "event", "template": "{issuer_name}의 계약 조건과 계약 변경 내역을 공시로 확인해줘."},
+    {"template_id": "contract-02", "dimension_id": "contract_change", "route": "event", "template": "{issuer_name} 계약금액·계약기간과 이후 변경 또는 종료를 찾아줘."},
+    {"template_id": "contract-03", "dimension_id": "contract_change", "route": "event", "template": "공시 기준으로 {issuer_name}의 주요 계약 변경을 정리해줘."},
+    {"template_id": "contract-04", "dimension_id": "contract_change", "route": "event", "template": "{issuer_name} 수주 계약의 현재 조건과 변경 이력을 확인해줘."},
+    {"template_id": "contract-05", "dimension_id": "contract_change", "route": "event", "template": "{issuer_name} 계약 공시에서 계약상대, 금액, 기간의 변화를 찾아줘."},
+    {"template_id": "contract-06", "dimension_id": "contract_change", "route": "event", "template": "계약 변경 관점에서 {issuer_name}의 관련 공시를 종합해줘."},
+
+    {"template_id": "financing-01", "dimension_id": "financing_pressure", "route": "event", "template": "{issuer_name}의 차입·사채·유상증자·상환 공시로 자금조달 압력을 분석해줘."},
+    {"template_id": "financing-02", "dimension_id": "financing_pressure", "route": "event", "template": "{issuer_name} 자금조달과 상환 사건을 공시에서 확인해줘."},
+    {"template_id": "financing-03", "dimension_id": "financing_pressure", "route": "event", "template": "공시 근거로 {issuer_name}의 차입과 채무 부담 신호를 정리해줘."},
+    {"template_id": "financing-04", "dimension_id": "financing_pressure", "route": "event", "template": "{issuer_name}의 사채 발행, 증자, 상환 내역을 찾아줘."},
+    {"template_id": "financing-05", "dimension_id": "financing_pressure", "route": "event", "template": "{issuer_name} 공시상 자금조달 압력과 부채 관련 사건을 살펴봐줘."},
+    {"template_id": "financing-06", "dimension_id": "financing_pressure", "route": "event", "template": "차입과 자본조달 관점에서 {issuer_name} 공시를 종합해줘."},
+
+    {"template_id": "correction-01", "dimension_id": "correction_materiality", "route": "text", "template": "{issuer_name} 정정공시가 최초 공시를 어떻게 수정했는지 확인해줘."},
+    {"template_id": "correction-02", "dimension_id": "correction_materiality", "route": "text", "template": "{issuer_name}의 최초 공시와 유효 정정 공시를 비교해줘."},
+    {"template_id": "correction-03", "dimension_id": "correction_materiality", "route": "text", "template": "공시 근거로 {issuer_name} 정정 내용의 중요성을 살펴봐줘."},
+    {"template_id": "correction-04", "dimension_id": "correction_materiality", "route": "text", "template": "{issuer_name} 공시에서 정정 전후 수정 사항을 찾아줘."},
+    {"template_id": "correction-05", "dimension_id": "correction_materiality", "route": "text", "template": "{issuer_name}의 정정공시로 결론이 달라지는지 확인해줘."},
+    {"template_id": "correction-06", "dimension_id": "correction_materiality", "route": "text", "template": "정정 중요성 관점에서 {issuer_name}의 관련 공시를 종합해줘."},
+
+    {"template_id": "governance-01", "dimension_id": "governance_signal", "route": "event", "template": "{issuer_name}의 지배구조, 임원, 최대주주 관련 공시 신호를 분석해줘."},
+    {"template_id": "governance-02", "dimension_id": "governance_signal", "route": "event", "template": "{issuer_name} 내부자와 임원 변동 사건을 공시에서 찾아줘."},
+    {"template_id": "governance-03", "dimension_id": "governance_signal", "route": "event", "template": "공시 근거로 {issuer_name}의 지배구조 변화를 정리해줘."},
+    {"template_id": "governance-04", "dimension_id": "governance_signal", "route": "event", "template": "{issuer_name} 최대주주와 주요 임원 관련 사건을 확인해줘."},
+    {"template_id": "governance-05", "dimension_id": "governance_signal", "route": "event", "template": "{issuer_name} 공시에서 내부자 또는 지배구조 위험 신호를 살펴봐줘."},
+    {"template_id": "governance-06", "dimension_id": "governance_signal", "route": "event", "template": "지배구조 신호 관점에서 {issuer_name} 공시를 종합해줘."},
+
+    {"template_id": "risk-01", "dimension_id": "business_risk", "route": "text", "template": "{issuer_name}가 공시한 사업 위험요인과 리스크를 분석해줘."},
+    {"template_id": "risk-02", "dimension_id": "business_risk", "route": "text", "template": "{issuer_name} 사업의 주요 위험과 불확실성을 공시에서 찾아줘."},
+    {"template_id": "risk-03", "dimension_id": "business_risk", "route": "text", "template": "공시 근거로 {issuer_name}의 사업 위험요인을 정리해줘."},
+    {"template_id": "risk-04", "dimension_id": "business_risk", "route": "text", "template": "{issuer_name} 사업의 내용에서 확인되는 위험과 리스크를 살펴봐줘."},
+    {"template_id": "risk-05", "dimension_id": "business_risk", "route": "text", "template": "{issuer_name} 공시상 핵심 불확실성과 위험요인은 무엇인지 확인해줘."},
+    {"template_id": "risk-06", "dimension_id": "business_risk", "route": "text", "template": "사업 위험 관점에서 {issuer_name}의 공시 근거를 종합해줘."},
+
+    {"template_id": "management-01", "dimension_id": "management_discussion", "route": "text", "template": "{issuer_name} 경영진의 공시 설명과 사업의 내용을 분석해줘."},
+    {"template_id": "management-02", "dimension_id": "management_discussion", "route": "text", "template": "{issuer_name}의 경영진 설명과 매출액·영업이익 결과가 일치하는지 확인해줘."},
+    {"template_id": "management-03", "dimension_id": "management_discussion", "route": "text", "template": "공시 근거로 {issuer_name} 경영진의 사업 전망을 정리해줘."},
+    {"template_id": "management-04", "dimension_id": "management_discussion", "route": "text", "template": "{issuer_name} 사업의 내용과 경영진 논의를 재무 결과와 함께 살펴봐줘."},
+    {"template_id": "management-05", "dimension_id": "management_discussion", "route": "text", "template": "{issuer_name} 공시에서 경영진 설명과 보고된 성과를 찾아줘."},
+    {"template_id": "management-06", "dimension_id": "management_discussion", "route": "text", "template": "경영진 논의 관점에서 {issuer_name}의 공시 근거를 종합해줘."}
+  ]
+}

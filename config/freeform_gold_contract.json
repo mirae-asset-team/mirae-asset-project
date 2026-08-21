@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0.0",
+  "minimum_cases": 120,
+  "source_records_per_dimension": 3,
+  "dimensions": [
+    "profitability_financial_health",
+    "contract_change",
+    "financing_pressure",
+    "correction_materiality",
+    "governance_signal",
+    "business_risk",
+    "management_discussion"
+  ],
+  "allowed_routes": ["text", "event", "financial", "mixed"],
+  "allowed_correction_policies": ["current", "original", "both"],
+  "allowed_parse_statuses": ["success"],
+  "split_percentages": {"train": 0, "validation": 0, "test": 100},
+  "dimension_routes": {
+    "profitability_financial_health": "financial",
+    "contract_change": "event",
+    "financing_pressure": "event",
+    "correction_materiality": "text",
+    "governance_signal": "event",
+    "business_risk": "text",
+    "management_discussion": "text"
+  },
+  "candidate_terms": {
+    "profitability_financial_health": ["매출액", "영업이익", "당기순이익", "부채총계"],
+    "contract_change": ["계약금액", "계약기간", "계약상대", "계약 변경"],
+    "financing_pressure": ["차입", "사채", "유상증자", "상환"],
+    "correction_materiality": ["정정", "수정"],
+    "governance_signal": ["지배구조", "내부자", "임원", "최대주주"],
+    "business_risk": ["위험요인", "리스크", "불확실성"],
+    "management_discussion": ["경영진", "사업의 내용", "전망"]
+  }
+}

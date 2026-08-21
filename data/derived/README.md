@@ -42,3 +42,22 @@ account/scope/period를 원본에 임의 적재하지 않도록 한 결과입니
 `semantic_schema_gate_passed=true`, FTS rowid orphan 0, evidence filing mismatch 0,
 unresolved 539, missing-original 2입니다. 검색 관련성 통과는 evidence-addressable 8문항·9근거의
 회사/후보 filing 조건부 범위에만 적용됩니다.
+
+## Free-form retrieval Loop 1
+
+- `freeform_gold.agent_audited.jsonl`: 승인·agent-audited issuer와 안전한 current corpus evidence에서
+  결정론적으로 만든 126개 free-form 검색 사례. 7개 non-peer dimension, 42개 paraphrase template을
+  포함하며 생성 레코드는 모두 `agent_audited`이다.
+- `freeform_gold_manifest.json`: Gold 입력·contract·template·database 및 canonical content SHA-256과
+  dimension/route/split별 건수만 기록한다. 원문 질의·답변·excerpt는 포함하지 않는다.
+- `freeform_retrieval_summary.json`: 실제 `plan_analysis` + `EvidenceService.search_analysis` 경로의
+  exact evidence-ID Recall@5/20, MRR, slot completeness, issuer/version 안전성, query/candidate 수,
+  p50/p95 및 case-ID 기반 residual 진단이다.
+- `embedding_decision.json`: Recall@20 0.95 및 residual text 최대 개선폭 0.05 고정 gate의 결정 기록이다.
+- `dense_pilot_manifest.json`, `dense_pilot_summary.json`: residual text gate는 pilot eligible이지만 외부
+  provider access가 없어 `BLOCKED_EXTERNAL`인 상태를 기록한다. 모델은 공식 CLOVA Studio Embedding v2의
+  `bge-m3`, dimension은 1024, fragment cap은 20,000이며 vector record는 생성하지 않았다.
+
+현재 Loop 1 결과는 Recall@20 `1/126`으로 quality gate 미달이다. Gold target이나 threshold는 변경하지
+않았고, wrong issuer/version hard failure는 0이다. 상세 실패 ID와 content-free hypothesis는 retrieval
+summary에 보존한다.

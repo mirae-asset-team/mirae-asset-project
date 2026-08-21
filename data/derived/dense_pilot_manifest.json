@@ -1,0 +1,19 @@
+{
+  "cost": {
+    "actual": null,
+    "currency": "KRW",
+    "estimated": null
+  },
+  "dimension": 1024,
+  "fragment_cap": 20000,
+  "fragment_count": 0,
+  "gold_sha256": "ab098ae462baa65ed816c2b9c6abc9b61b26a79d848fc47786f0039f33367107",
+  "model": "bge-m3",
+  "provider": "naver_clova_studio",
+  "reason": "provider_access_unavailable",
+  "residual_input_sha256": "b9cac70df39c0327486f5df8e16181be08485dbf4d35f3be1f499c7c01316e31",
+  "retrieval_summary_sha256": "916569e01e3ea1d3c0b00ba2ee7446b2ef73c514e26792f9f65568974335e072",
+  "schema_version": "1.0.0",
+  "status": "BLOCKED_EXTERNAL",
+  "vector_records_sha256": null
+}
