@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -23,16 +24,41 @@ _PROMPT_INJECTION_MARKERS = (
     "시스템 프롬프트",
 )
 _ANALYSIS_MARKERS = ("공시", "사업보고서", "분기보고서", "반기보고서", "판단", "분석", "개선", "악화", "위험요인")
+_DIRECT_TRANSACTION_ACTION = re.compile(
+    r"(?:"
+    r"사(?:도|면)?(?:돼요?|되(?:나|나요|는지|요)?|될(?:까|까요)?)"
+    r"|살(?:까|까요)"
+    r"|사는게(?:좋(?:을까|을까요)|나을까|나을까요|될까|될까요)"
+    r"|팔(?:아도|면)?(?:돼요?|되(?:나|나요|는지|요)?|될(?:까|까요)?)"
+    r"|팔(?:까|까요)"
+    r"|파는게(?:좋(?:을까|을까요)|나을까|나을까요|될까|될까요)"
+    r")"
+)
+_HISTORICAL_ACTION_REFERENCE = re.compile(
+    r"(?:사(?:도|면)?(?:돼요?|되(?:나|나요|는지|요)?|될(?:까|까요)?)"
+    r"|팔(?:아도|면)?(?:돼요?|되(?:나|나요|는지|요)?|될(?:까|까요)?))"
+    r"(?:라는|이란|문구|표현|기재|언급)"
+)
 _RECOMMENDATION_PATTERNS = (
     r"목표\s*주가",
     r"(?:주가|가격).{0,20}(?:오를|내릴|상승|하락|방향|전망|예상)",
     r"(?:예상|기대).{0,20}(?:수익률|수익)",
     r"(?:수익률|수익).{0,20}(?:예상|기대)",
     r"(?:매수|매도|보유|매집|매각|매입).{0,12}(?:해야|할까|해도|추천|의견|결론)",
-    r"(?:사도\s*될까|살까|사는\s*게\s*(?:좋을까|나을까|될까)|팔아도\s*될까|팔까|파는\s*게\s*(?:좋을까|나을까|될까))",
     r"(?:사야|팔아야|들어가도|투자해도|포지션|비중|포트폴리오|숏|롱)",
     r"(?:나에게|저에게|개인\s*투자자|투자\s*성향|위험\s*감수).{0,20}(?:적합|맞|추천|투자)",
 )
+
+
+def _normalized_intent_text(text: str) -> str:
+    return re.sub(r"[\s\W_]+", "", unicodedata.normalize("NFKC", text).casefold())
+
+
+def _is_direct_transaction_action(text: str) -> bool:
+    normalized = _normalized_intent_text(text)
+    if ("공시" in normalized or "보고서" in normalized) and _HISTORICAL_ACTION_REFERENCE.search(normalized):
+        return False
+    return bool(_DIRECT_TRANSACTION_ACTION.search(normalized))
 
 
 def _unique_strings(value: object, *, field_name: str) -> tuple[str, ...]:
@@ -89,7 +115,7 @@ def classify_policy(question: str) -> PolicyDecision:
     """Apply recommendation, injection, and bounded-analysis policy in precedence order."""
     text = question.strip()
     folded = text.casefold()
-    if any(re.search(pattern, text) for pattern in _RECOMMENDATION_PATTERNS):
+    if _is_direct_transaction_action(text) or any(re.search(pattern, text) for pattern in _RECOMMENDATION_PATTERNS):
         return PolicyDecision("refuse_recommendation", ("policy_recommendation_or_suitability_refusal",))
     if any(marker in folded for marker in _PROMPT_INJECTION_MARKERS):
         return PolicyDecision("refuse_prompt_injection", ("policy_prompt_injection_refusal",))

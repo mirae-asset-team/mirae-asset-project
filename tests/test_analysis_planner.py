@@ -5,7 +5,7 @@ import json
 import pytest
 
 from disclosure_db.agent_contracts import QueryPlan, to_jsonable
-from disclosure_db.analysis_contracts import AnalysisPlan, PolicyDecision
+from disclosure_db.analysis_contracts import AnalysisPlan, PolicyDecision, QueryPlanSnapshot
 from disclosure_db.analysis_planner import classify_policy, plan_analysis
 
 
@@ -62,6 +62,28 @@ def test_short_form_stock_transaction_advice_is_refused_with_the_stable_reason_c
         decision = classify_policy(question)
         assert decision.action == "refuse_recommendation"
         assert decision.reason_codes == ("policy_recommendation_or_suitability_refusal",)
+
+
+def test_normalized_korean_buy_sell_action_questions_are_refused_without_blocking_historical_lookup():
+    questions = [
+        "삼성전자 주식을 사도 돼?",
+        "삼성전자 주식을 사도 되나",
+        "삼성전자 주식을 사도 되나요!!!",
+        "삼성전자 주식 살까",
+        "삼성전자 주식 살까요??",
+        "삼성전자 주식을 팔아도 돼?",
+        "삼성전자 주식 팔까?",
+        "삼성전자 주식 팔까요？！",
+        "삼성전자 주식을   사도   돼  ？",
+    ]
+
+    for question in questions:
+        decision = classify_policy(question)
+        assert decision.action == "refuse_recommendation"
+        assert decision.reason_codes == ("policy_recommendation_or_suitability_refusal",)
+
+    historical_lookup = classify_policy("삼성전자 사업보고서에서 '사도 돼'라는 표현이 있는지 찾아줘")
+    assert historical_lookup.action == "allow_analysis"
 
 
 def test_historical_risk_factor_analysis_is_not_blocked_by_outlook_word_alone():
@@ -182,3 +204,36 @@ def test_analysis_plan_converts_direct_query_plan_inputs_to_an_immutable_snapsho
     assert plan.base_plan.reason_codes == ("original",)
     with pytest.raises(AttributeError):
         plan.base_plan.reason_codes.append("mutated")
+
+
+def test_public_query_plan_snapshot_copies_nested_collections_before_embedding():
+    reason_codes = ["original"]
+    account_terms = ["매출액"]
+    period = {"period_type": "duration", "start": "2024-01-01", "end": "2024-12-31", "instant": None}
+    snapshot = QueryPlanSnapshot(
+        question="삼성전자 매출액은?",
+        reason_codes=reason_codes,
+        account_terms=account_terms,
+        target_periods=[period],
+    )
+    plan = AnalysisPlan(
+        question=snapshot.question,
+        analysis_mode="lookup",
+        policy=PolicyDecision("allow_lookup"),
+        base_plan=snapshot,
+    )
+    before = json.dumps(to_jsonable(plan), ensure_ascii=False, sort_keys=True)
+
+    reason_codes.append("mutated")
+    account_terms.append("영업이익")
+    period["start"] = "1999-01-01"
+
+    assert plan.base_plan.reason_codes == ("original",)
+    assert plan.base_plan.account_terms == ("매출액",)
+    assert plan.base_plan.target_periods[0]["start"] == "2024-01-01"
+    assert json.dumps(to_jsonable(plan), ensure_ascii=False, sort_keys=True) == before
+
+
+def test_public_query_plan_snapshot_rejects_invalid_nested_period_values_deterministically():
+    with pytest.raises(ValueError, match="target_periods values must be strings or None"):
+        QueryPlanSnapshot(question="q", target_periods=[{"start": object()}])

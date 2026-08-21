@@ -10,6 +10,27 @@ from types import MappingProxyType
 from .agent_contracts import QueryPlan
 
 
+def _normalized_string_tuple(value: object, field_name: str) -> tuple[str, ...]:
+    if not isinstance(value, (list, tuple)) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{field_name} must be a sequence of strings")
+    return tuple(value)
+
+
+def _normalized_target_periods(value: object) -> tuple[Mapping[str, str | None], ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("target_periods must be a sequence of mappings")
+    periods: list[Mapping[str, str | None]] = []
+    for period in value:
+        if not isinstance(period, Mapping):
+            raise ValueError("target_periods must be a sequence of mappings")
+        if not all(isinstance(key, str) for key in period):
+            raise ValueError("target_periods keys must be strings")
+        if not all(item is None or isinstance(item, str) for item in period.values()):
+            raise ValueError("target_periods values must be strings or None")
+        periods.append(MappingProxyType(dict(sorted(period.items()))))
+    return tuple(periods)
+
+
 @dataclass(frozen=True, slots=True)
 class PolicyDecision:
     action: str
@@ -61,6 +82,12 @@ class QueryPlanSnapshot:
     threshold_value: Decimal | None = None
     threshold_inclusive: bool = False
     top_n: int = 10
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "account_terms", _normalized_string_tuple(self.account_terms, "account_terms"))
+        object.__setattr__(self, "reason_codes", _normalized_string_tuple(self.reason_codes, "reason_codes"))
+        object.__setattr__(self, "predicate_terms", _normalized_string_tuple(self.predicate_terms, "predicate_terms"))
+        object.__setattr__(self, "target_periods", _normalized_target_periods(self.target_periods))
 
     @classmethod
     def from_query_plan(cls, plan: QueryPlan) -> "QueryPlanSnapshot":
