@@ -34,10 +34,8 @@ _DIRECT_TRANSACTION_ACTION = re.compile(
     r"|파는게(?:좋(?:을까|을까요)|나을까|나을까요|될까|될까요)"
     r")"
 )
-_HISTORICAL_ACTION_REFERENCE = re.compile(
-    r"(?:사(?:도|면)?(?:돼요?|되(?:나|나요|는지|요)?|될(?:까|까요)?)"
-    r"|팔(?:아도|면)?(?:돼요?|되(?:나|나요|는지|요)?|될(?:까|까요)?))"
-    r"(?:라는|이란|문구|표현|기재|언급)"
+_QUOTED_TRANSACTION_MENTION = re.compile(
+    r"[\"'“”‘’](?P<mention>.+?)[\"'“”‘’]\s*(?:(?:라는|이란)\s*)?(?:문구|표현|기재|언급|내용)"
 )
 _RECOMMENDATION_PATTERNS = (
     r"목표\s*주가",
@@ -54,11 +52,29 @@ def _normalized_intent_text(text: str) -> str:
     return re.sub(r"[\s\W_]+", "", unicodedata.normalize("NFKC", text).casefold())
 
 
+def _without_quoted_transaction_mentions(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    return _QUOTED_TRANSACTION_MENTION.sub(
+        lambda match: " " if _DIRECT_TRANSACTION_ACTION.search(_normalized_intent_text(match["mention"])) else match[0],
+        normalized,
+    )
+
+
+def _is_reported_transaction_mention(text: str, match: re.Match[str]) -> bool:
+    before = text[max(0, match.start() - 80):match.start()]
+    after = text[match.end():match.end() + 80]
+    return (
+        ("공시" in before or "보고서" in before)
+        and any(marker in after for marker in ("검토", "논의", "내용", "문구", "표현", "기재", "언급", "찾", "확인"))
+    )
+
+
 def _is_direct_transaction_action(text: str) -> bool:
-    normalized = _normalized_intent_text(text)
-    if ("공시" in normalized or "보고서" in normalized) and _HISTORICAL_ACTION_REFERENCE.search(normalized):
-        return False
-    return bool(_DIRECT_TRANSACTION_ACTION.search(normalized))
+    normalized = _normalized_intent_text(_without_quoted_transaction_mentions(text))
+    return any(
+        not _is_reported_transaction_mention(normalized, match)
+        for match in _DIRECT_TRANSACTION_ACTION.finditer(normalized)
+    )
 
 
 def _unique_strings(value: object, *, field_name: str) -> tuple[str, ...]:

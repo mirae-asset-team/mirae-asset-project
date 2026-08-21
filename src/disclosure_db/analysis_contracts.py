@@ -36,6 +36,9 @@ class PolicyDecision:
     action: str
     reason_codes: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "reason_codes", _normalized_string_tuple(self.reason_codes, "reason_codes"))
+
 
 @dataclass(frozen=True, slots=True)
 class EvidenceSlot:
@@ -52,6 +55,16 @@ class EvidenceSlot:
     max_evidence: int = 4
     mandatory: bool = True
     absence_reason_code: str = "required_evidence_missing"
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "report_types", _normalized_string_tuple(self.report_types, "report_types"))
+        object.__setattr__(self, "search_concepts", _normalized_string_tuple(self.search_concepts, "search_concepts"))
+
+
+def _normalized_evidence_slots(value: object) -> tuple[EvidenceSlot, ...]:
+    if not isinstance(value, (list, tuple)) or not all(isinstance(item, EvidenceSlot) for item in value):
+        raise ValueError("required_evidence_slots must contain EvidenceSlot values")
+    return tuple(value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,3 +151,11 @@ class AnalysisPlan:
     def __post_init__(self) -> None:
         if isinstance(self.base_plan, QueryPlan):
             object.__setattr__(self, "base_plan", QueryPlanSnapshot.from_query_plan(self.base_plan))
+        if not isinstance(self.policy, PolicyDecision):
+            raise ValueError("policy must be a PolicyDecision")
+        if not isinstance(self.base_plan, QueryPlanSnapshot):
+            raise ValueError("base_plan must be a QueryPlan or QueryPlanSnapshot")
+        object.__setattr__(self, "subquestions", _normalized_string_tuple(self.subquestions, "subquestions"))
+        object.__setattr__(self, "required_evidence_slots", _normalized_evidence_slots(self.required_evidence_slots))
+        object.__setattr__(self, "allowed_conclusions", _normalized_string_tuple(self.allowed_conclusions, "allowed_conclusions"))
+        object.__setattr__(self, "reason_codes", _normalized_string_tuple(self.reason_codes, "reason_codes"))

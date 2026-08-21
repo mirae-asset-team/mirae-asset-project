@@ -5,7 +5,7 @@ import json
 import pytest
 
 from disclosure_db.agent_contracts import QueryPlan, to_jsonable
-from disclosure_db.analysis_contracts import AnalysisPlan, PolicyDecision, QueryPlanSnapshot
+from disclosure_db.analysis_contracts import AnalysisPlan, EvidenceSlot, PolicyDecision, QueryPlanSnapshot
 from disclosure_db.analysis_planner import classify_policy, plan_analysis
 
 
@@ -84,6 +84,33 @@ def test_normalized_korean_buy_sell_action_questions_are_refused_without_blockin
 
     historical_lookup = classify_policy("삼성전자 사업보고서에서 '사도 돼'라는 표현이 있는지 찾아줘")
     assert historical_lookup.action == "allow_analysis"
+
+
+def test_transaction_mentions_are_excluded_span_by_span_but_mixed_advice_is_refused():
+    mention_phrases = [
+        "사도 돼", "사도 되나", "사도 되나요", "사도 되는지", "사도 될까", "사도 될까요",
+        "사면 돼", "살까", "살까요", "사는 게 좋을까", "사는 게 좋을까요",
+        "사는 게 나을까", "사는 게 나을까요", "사는 게 될까", "사는 게 될까요",
+        "팔아도 돼", "팔아도 되나", "팔아도 되나요", "팔아도 되는지", "팔아도 될까", "팔아도 될까요",
+        "팔면 돼", "팔까", "팔까요", "파는 게 좋을까", "파는 게 좋을까요",
+        "파는 게 나을까", "파는 게 나을까요", "파는 게 될까", "파는 게 될까요",
+    ]
+
+    for phrase in mention_phrases:
+        decision = classify_policy(f"사업보고서에서 '{phrase}'라는 문구를 찾아줘")
+        assert decision.action == "allow_analysis"
+
+    reported = classify_policy("사업보고서에서 주식을 사도 되는지 검토한 내용을 찾아줘")
+    assert reported.action == "allow_analysis"
+
+    mixed_questions = [
+        "사업보고서에서 '사도 돼'라는 표현을 찾고 삼성전자 주식도 사도 돼?",
+        "사업보고서에서 주식을 팔아도 되는지 검토한 내용을 찾고 삼성전자 주식 팔까요?",
+    ]
+    for question in mixed_questions:
+        decision = classify_policy(question)
+        assert decision.action == "refuse_recommendation"
+        assert decision.reason_codes == ("policy_recommendation_or_suitability_refusal",)
 
 
 def test_historical_risk_factor_analysis_is_not_blocked_by_outlook_word_alone():
@@ -237,3 +264,55 @@ def test_public_query_plan_snapshot_copies_nested_collections_before_embedding()
 def test_public_query_plan_snapshot_rejects_invalid_nested_period_values_deterministically():
     with pytest.raises(ValueError, match="target_periods values must be strings or None"):
         QueryPlanSnapshot(question="q", target_periods=[{"start": object()}])
+
+
+def test_public_analysis_contracts_copy_all_outer_and_nested_collections():
+    policy_reasons = ["policy"]
+    report_types = ["사업보고서"]
+    search_concepts = ["위험요인"]
+    subquestions = ["질문"]
+    slots = []
+    allowed_conclusions = ["stable"]
+    reason_codes = ["plan"]
+    policy = PolicyDecision("allow_analysis", policy_reasons)
+    slot = EvidenceSlot("risk", "text", report_types=report_types, search_concepts=search_concepts)
+    slots.append(slot)
+    plan = AnalysisPlan(
+        question="질문",
+        analysis_mode="judgment",
+        policy=policy,
+        base_plan=QueryPlanSnapshot("질문"),
+        subquestions=subquestions,
+        required_evidence_slots=slots,
+        allowed_conclusions=allowed_conclusions,
+        reason_codes=reason_codes,
+    )
+    before = json.dumps(to_jsonable(plan), ensure_ascii=False, sort_keys=True)
+
+    policy_reasons.append("mutated")
+    report_types.append("분기보고서")
+    search_concepts.append("불확실성")
+    subquestions.append("변조")
+    slots.append(EvidenceSlot("other", "text"))
+    allowed_conclusions.append("mixed")
+    reason_codes.append("mutated")
+
+    assert plan.policy.reason_codes == ("policy",)
+    assert plan.required_evidence_slots[0].report_types == ("사업보고서",)
+    assert plan.required_evidence_slots[0].search_concepts == ("위험요인",)
+    assert plan.subquestions == ("질문",)
+    assert [item.slot_id for item in plan.required_evidence_slots] == ["risk"]
+    assert plan.allowed_conclusions == ("stable",)
+    assert plan.reason_codes == ("plan",)
+    assert json.dumps(to_jsonable(plan), ensure_ascii=False, sort_keys=True) == before
+
+
+def test_public_analysis_contracts_reject_invalid_collection_members():
+    with pytest.raises(ValueError, match="reason_codes must be a sequence of strings"):
+        PolicyDecision("allow_lookup", [object()])
+    with pytest.raises(ValueError, match="report_types must be a sequence of strings"):
+        EvidenceSlot("slot", "text", report_types=[object()])
+    with pytest.raises(ValueError, match="subquestions must be a sequence of strings"):
+        AnalysisPlan("q", "lookup", PolicyDecision("allow_lookup"), QueryPlanSnapshot("q"), subquestions=[object()])
+    with pytest.raises(ValueError, match="required_evidence_slots must contain EvidenceSlot values"):
+        AnalysisPlan("q", "lookup", PolicyDecision("allow_lookup"), QueryPlanSnapshot("q"), required_evidence_slots=["slot"])
