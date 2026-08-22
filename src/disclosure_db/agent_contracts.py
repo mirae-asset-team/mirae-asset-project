@@ -40,6 +40,14 @@ class QueryPlan:
     requires_complete_evidence_set: bool = False
     filing_date: str | None = None
     account_id: str | None = None
+    account_status: str = "unknown"
+    account_match_type: str | None = None
+    account_support_level: str | None = None
+    account_retrieval_route: str | None = None
+    account_candidates: list[str] = field(default_factory=list)
+    account_warning: str | None = None
+    required_account_ids: list[str] = field(default_factory=list)
+    account_formula: dict[str, object] | None = None
     latest_period_count: int = 1
     threshold_value: Decimal | None = None
     threshold_inclusive: bool = False

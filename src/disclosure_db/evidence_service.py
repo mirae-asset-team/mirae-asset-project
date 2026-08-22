@@ -26,6 +26,7 @@ from .freeform_retrieval import (
     has_transaction_action_surface,
 )
 from .financial_overlay import fetch_event_facts, fetch_financial_coverage, fetch_overlay_facts, overlay_matches_base
+from .financial_accounts import load_financial_account_catalog, resolve_financial_account
 from .pipeline import query_database
 from .retrieval_evaluation import compile_retrieval_query, retrieval_tokens
 from .reranker import ClovaReranker
@@ -75,12 +76,22 @@ class EvidenceService:
                 Path(__file__).resolve().parents[2] / "config",
             )
         )
-        aliases_path = config_directory / "financial_account_aliases.json"
-        try:
-            raw_aliases = json.loads(aliases_path.read_text(encoding="utf-8"))
-            self.account_aliases = {str(key): [str(item) for item in values] for key, values in raw_aliases.items()}
-        except (OSError, json.JSONDecodeError):
-            self.account_aliases = {}
+        catalog_path = config_directory / "financial_account_catalog.json"
+        self.financial_account_catalog = None
+        if catalog_path.exists():
+            self.financial_account_catalog = load_financial_account_catalog(catalog_path)
+            self.account_aliases = self.financial_account_catalog.alias_expansions()
+        else:
+            aliases_path = config_directory / "financial_account_aliases.json"
+            try:
+                raw_aliases = json.loads(aliases_path.read_text(encoding="utf-8"))
+                self.account_aliases = {
+                    str(key): [str(item) for item in values]
+                    for key, values in raw_aliases.items()
+                    if isinstance(values, list)
+                }
+            except (OSError, json.JSONDecodeError):
+                self.account_aliases = {}
         predicate_path = config_directory / "agent_gold_predicates.json"
         try:
             predicate_payload = json.loads(predicate_path.read_text(encoding="utf-8"))
@@ -209,6 +220,18 @@ class EvidenceService:
         rankings: list[list[EvidenceRef]] = []
         candidate_ids: set[str] = set()
         for concept in concepts:
+            resolution = resolve_financial_account(
+                str(concept or ""),
+                catalog=self.financial_account_catalog,
+            ) if slot.domain == "financial" else None
+            slot_domain = slot.domain
+            if resolution is not None:
+                if resolution.support_level == "retrieval_only":
+                    slot_domain = "text"
+                elif resolution.support_level == "derived":
+                    slot_domain = "financial_derived"
+                elif resolution.status in {"ambiguous", "unsupported"}:
+                    slot_domain = "none"
             slot_plan = QueryPlan(
                 question=query,
                 company=slot.issuer or base.company,
@@ -225,10 +248,19 @@ class EvidenceService:
                 statement_type=None if slot.domain == "financial" else base.statement_type,
                 correction_policy=base.correction_policy,
                 filing_date=slot.filing_date,
-                fact_domain=slot.domain,
+                fact_domain=slot_domain,
                 account_terms=[concept] if concept is not None else [],
                 predicate_terms=list(slot.search_concepts) if slot.domain == "event" else [],
                 latest_period_count=max(base.latest_period_count, slot.min_periods),
+                account_id=resolution.canonical_id if resolution is not None else None,
+                account_status=resolution.status if resolution is not None else "unknown",
+                account_match_type=resolution.match_type if resolution is not None else None,
+                account_support_level=resolution.support_level if resolution is not None else None,
+                account_retrieval_route=resolution.retrieval_route if resolution is not None else None,
+                account_candidates=list(resolution.candidates) if resolution is not None else [],
+                account_warning=resolution.warning if resolution is not None else None,
+                required_account_ids=list(resolution.required_accounts) if resolution is not None else [],
+                account_formula=dict(resolution.formula) if resolution is not None and resolution.formula is not None else None,
             )
             bundle = self.search(slot_plan, limit=min(per_query_limit, MAX_EVIDENCE_PER_SLOT))
             ranking = list(bundle.evidence)
@@ -496,6 +528,28 @@ class EvidenceService:
             )
         if plan.operation in {"count_above", "list_above", "rank"}:
             return self._search_corpus_financial(plan)
+        if plan.account_status in {"ambiguous", "unsupported"} or "financial_account_unknown" in plan.reason_codes:
+            reason = (
+                "financial_account_clarification_required"
+                if plan.account_status == "ambiguous"
+                else "financial_account_unsupported"
+                if plan.account_status == "unsupported"
+                else "financial_account_unknown"
+            )
+            return EvidenceBundle(
+                question=plan.question,
+                answerable=False,
+                reason_codes=list(dict.fromkeys([*plan.reason_codes, reason])),
+            )
+        if plan.fact_domain == "financial_derived" or (
+            plan.account_support_level == "derived"
+            and not (plan.operation == "growth_rate" and len(plan.required_account_ids) == 1)
+        ):
+            return EvidenceBundle(
+                question=plan.question,
+                answerable=False,
+                reason_codes=list(dict.fromkeys([*plan.reason_codes, "derived_metric_calculation_not_implemented"])),
+            )
         refs: list[EvidenceRef] = []
         financial_facts: list[dict[str, object]] = []
         event_facts: list[dict[str, object]] = []
@@ -522,6 +576,11 @@ class EvidenceService:
                 plan.period_end if plan.statement_type == "BS" and period_end_lte is None else None
             )
             exact_duration = not period_end_lte and instant_date is None
+            lookup_account_id = (
+                plan.required_account_ids[0]
+                if plan.account_support_level == "derived" and len(plan.required_account_ids) == 1
+                else plan.account_id
+            )
             financial_facts = fetch_overlay_facts(
                 self.base_database,
                 self.overlay_database,
@@ -531,9 +590,9 @@ class EvidenceService:
                 period_end=plan.period_end if exact_duration else None,
                 period_end_lte=period_end_lte,
                 instant_date=instant_date,
-                account_id=plan.account_id,
-                account_terms=[] if plan.account_id else account_terms,
-                statement_type=None if plan.account_id else plan.statement_type,
+                account_id=lookup_account_id,
+                account_terms=[] if lookup_account_id else account_terms,
+                statement_type=None if lookup_account_id else plan.statement_type,
                 scope=plan.scope,
                 correction_policy=plan.correction_policy,
                 limit=min(limit, max(plan.latest_period_count, 2 if plan.operation in {"growth_rate", "difference", "ratio"} else 1)),

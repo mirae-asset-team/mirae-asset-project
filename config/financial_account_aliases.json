@@ -1,8 +1,6 @@
 {
-  "매출액": ["매출액", "수익(매출액)", "영업수익"],
-  "영업이익": ["영업이익", "영업손익"],
-  "당기순이익": ["당기순이익", "당기순손익"],
-  "자산총계": ["자산총계"],
-  "부채총계": ["부채총계"],
-  "자본총계": ["자본총계"]
+  "schema_version": "deprecated-financial-account-aliases-v1",
+  "deprecated": true,
+  "replacement": "financial_account_catalog.json",
+  "note": "Runtime financial aliases are generated from the central catalog."
 }

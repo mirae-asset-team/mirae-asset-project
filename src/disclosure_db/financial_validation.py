@@ -10,17 +10,11 @@ from contextlib import closing
 from pathlib import Path
 from typing import Iterable, Mapping
 
+from .financial_accounts import load_financial_account_catalog
 from .financial_extraction import extract_table_candidates
 
 
-_ACCOUNTS = (
-    "revenue",
-    "operating_income",
-    "net_income",
-    "total_assets",
-    "total_liabilities",
-    "total_equity",
-)
+_ACCOUNTS = load_financial_account_catalog().structured_account_ids()
 _ACCOUNT_ORDER = {account: index for index, account in enumerate(_ACCOUNTS)}
 _CORE_FIELDS = (
     "filing_id",
