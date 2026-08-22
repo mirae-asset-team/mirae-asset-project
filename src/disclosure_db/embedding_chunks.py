@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from contextlib import closing
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 import hashlib
+from itertools import chain, groupby
 import json
 import os
 from pathlib import Path
 import re
 import sqlite3
-from typing import Iterable, Iterator, Mapping, Sequence
+from typing import Callable, Iterable, Iterator, Mapping, Sequence
 
 
 CHUNK_VERSION = "chunk-v1"
@@ -28,6 +28,7 @@ _OUTPUT_NAMES = {
     "manifest": "manifest.json",
 }
 _REQUIRED_TABLES = {"source_document", "fragment", "table_record", "table_cell"}
+_QUERY_STRATEGY = "chunk-keyset-v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +176,14 @@ def load_chunk_config(path: Path | str = DEFAULT_CONFIG_PATH) -> ChunkConfig:
     config = ChunkConfig(**value)
     config.validate()
     return config
+
+
+def _chunk_identity_sha256(config: ChunkConfig) -> str:
+    """Keep chunk IDs independent from page and checkpoint tuning."""
+    value = asdict(config)
+    value["batch_size"] = ChunkConfig.__dataclass_fields__["batch_size"].default
+    value["checkpoint_every_groups"] = ChunkConfig.__dataclass_fields__["checkpoint_every_groups"].default
+    return _semantic_sha256(value)
 
 
 def _source_format(value: object) -> str:
@@ -429,84 +438,301 @@ def _input_counts(connection: sqlite3.Connection) -> dict[str, int]:
     }
 
 
-def _stream_groups(
-    cursor: sqlite3.Cursor,
+_SOURCE_PAGE_SQL = """
+SELECT source_id,filing_id,detected_format,parse_status AS source_parse_status
+FROM source_document
+WHERE source_id > ?
+ORDER BY source_id
+LIMIT ?
+"""
+
+
+_SOURCE_RESUME_PAGE_SQL = """
+SELECT source_id,filing_id,detected_format,parse_status AS source_parse_status
+FROM source_document
+WHERE source_id >= ?
+ORDER BY source_id
+LIMIT ?
+"""
+
+
+_NARRATIVE_PAGE_SQL = """
+SELECT rowid AS fragment_rowid,evidence_id,filing_id,source_id,fragment_type,sequence_no,
+       section_path_json,text_normalized
+FROM fragment INDEXED BY idx_fragment_source
+WHERE source_id=?
+  AND (sequence_no,rowid) > (?,?)
+  AND fragment_type <> 'table_row'
+ORDER BY sequence_no,rowid
+LIMIT ?
+"""
+
+
+_TABLE_PAGE_SQL = """
+SELECT tr.table_id,tr.filing_id,tr.source_id,tr.sequence_no AS table_sequence_no,
+       tr.section_path_json,tr.caption,tr.unit_text,tr.parse_status AS table_parse_status,
+       s.detected_format,s.parse_status AS source_parse_status
+FROM table_record tr
+JOIN source_document s ON s.source_id=tr.source_id
+WHERE tr.table_id > ?
+ORDER BY tr.table_id
+LIMIT ?
+"""
+
+
+_TABLE_CELL_PAGE_SQL = """
+SELECT rowid AS cell_rowid,row_index,column_index,cell_kind,column_header_path_json,
+       evidence_id,text_normalized
+FROM table_cell INDEXED BY idx_cell_table
+WHERE table_id=?
+  AND (row_index,column_index,rowid) > (?,?,?)
+ORDER BY row_index,column_index,rowid
+LIMIT ?
+"""
+
+
+_TABLE_ROW_PAGE_SQL = """
+SELECT rowid AS fragment_rowid,
+       CAST(json_extract(locator_json,'$.row') AS INTEGER) AS row_index,
+       evidence_id,text_normalized
+FROM fragment INDEXED BY idx_fragment_table_row
+WHERE table_id=?
+  AND rowid>?
+  AND fragment_type='table_row'
+ORDER BY rowid
+LIMIT ?
+"""
+
+
+def explain_chunk_query_plans(connection: sqlite3.Connection) -> dict[str, tuple[str, ...]]:
+    """Return plans for every corpus-scale page query against the installed schema."""
+    queries = {
+        "source_page": (_SOURCE_PAGE_SQL, ("", 10)),
+        "narrative_page": (_NARRATIVE_PAGE_SQL, ("source", -1, 0, 10)),
+        "table_page": (_TABLE_PAGE_SQL, ("", 10)),
+        "table_cell_page": (_TABLE_CELL_PAGE_SQL, ("table", -1, -1, 0, 10)),
+        "table_row_page": (_TABLE_ROW_PAGE_SQL, ("table", 0, 10)),
+    }
+    return {
+        name: tuple(str(row[3]) for row in connection.execute(f"EXPLAIN QUERY PLAN {sql}", params))
+        for name, (sql, params) in queries.items()
+    }
+
+
+def _source_pages(
+    connection: sqlite3.Connection,
     *,
-    key_fields: Sequence[str],
     batch_size: int,
-) -> Iterator[tuple[tuple[str, ...], list[sqlite3.Row]]]:
-    current_key: tuple[str, ...] | None = None
-    rows: list[sqlite3.Row] = []
+    resume_source_id: str | None,
+) -> Iterator[sqlite3.Row]:
+    cursor = resume_source_id or ""
+    include_cursor = resume_source_id is not None
     while True:
-        batch = cursor.fetchmany(batch_size)
+        sql = _SOURCE_RESUME_PAGE_SQL if include_cursor else _SOURCE_PAGE_SQL
+        batch = connection.execute(sql, (cursor, batch_size)).fetchmany(batch_size)
         if not batch:
-            break
+            return
         for row in batch:
-            key = tuple(str(row[field]) for field in key_fields)
-            if current_key is not None and key != current_key:
-                yield current_key, rows
-                rows = []
-            current_key = key
-            rows.append(row)
-    if current_key is not None:
-        yield current_key, rows
+            yield row
+        if len(batch) < batch_size:
+            return
+        cursor = str(batch[-1]["source_id"])
+        include_cursor = False
 
 
-_NARRATIVE_SQL = """
-SELECT fr.evidence_id,fr.filing_id,fr.source_id,fr.fragment_type,fr.sequence_no,
-       fr.section_path_json,fr.text_normalized,s.detected_format,s.parse_status AS source_parse_status
-FROM fragment fr
-JOIN source_document s ON s.source_id=fr.source_id
-WHERE fr.fragment_type <> 'table_row'
-ORDER BY fr.filing_id,fr.source_id,fr.section_path_json,fr.sequence_no,fr.evidence_id
-"""
+def _narrative_rows(
+    connection: sqlite3.Connection,
+    *,
+    batch_size: int,
+    start_cursor: Mapping[str, object] | None,
+) -> Iterator[dict[str, object]]:
+    resume_source_id = str(start_cursor["source_id"]) if start_cursor else None
+    for source in _source_pages(
+        connection,
+        batch_size=batch_size,
+        resume_source_id=resume_source_id,
+    ):
+        source_id = str(source["source_id"])
+        if start_cursor and source_id == resume_source_id:
+            sequence_no = int(start_cursor.get("sequence_no", -1))
+            fragment_rowid = int(start_cursor.get("fragment_rowid", 0))
+        else:
+            sequence_no = -1
+            fragment_rowid = 0
+        while True:
+            batch = connection.execute(
+                _NARRATIVE_PAGE_SQL,
+                (source_id, sequence_no, fragment_rowid, batch_size),
+            ).fetchmany(batch_size)
+            if not batch:
+                break
+            for row in batch:
+                yield {
+                    **dict(row),
+                    "detected_format": source["detected_format"],
+                    "source_parse_status": source["source_parse_status"],
+                }
+            if len(batch) < batch_size:
+                break
+            sequence_no = int(batch[-1]["sequence_no"])
+            fragment_rowid = int(batch[-1]["fragment_rowid"])
 
 
-_TABLE_SQL = """
-SELECT tr.table_id,tr.filing_id,tr.source_id,tr.sequence_no AS table_sequence_no,
-       tr.section_path_json,tr.caption,tr.unit_text,tr.parse_status AS table_parse_status,
-       s.detected_format,s.parse_status AS source_parse_status,
-       'meta' AS record_kind,-1 AS row_index,-1 AS column_index,'' AS cell_kind,
-       '[]' AS column_header_path_json,'' AS evidence_id,'' AS text_normalized
-FROM table_record tr
-JOIN source_document s ON s.source_id=tr.source_id
-UNION ALL
-SELECT tr.table_id,tr.filing_id,tr.source_id,tr.sequence_no AS table_sequence_no,
-       tr.section_path_json,tr.caption,tr.unit_text,tr.parse_status AS table_parse_status,
-       s.detected_format,s.parse_status AS source_parse_status,
-       'cell' AS record_kind,tc.row_index,tc.column_index,tc.cell_kind,
-       tc.column_header_path_json,tc.evidence_id,tc.text_normalized
-FROM table_record tr
-JOIN source_document s ON s.source_id=tr.source_id
-JOIN table_cell tc ON tc.table_id=tr.table_id
-UNION ALL
-SELECT tr.table_id,tr.filing_id,tr.source_id,tr.sequence_no AS table_sequence_no,
-       tr.section_path_json,tr.caption,tr.unit_text,tr.parse_status AS table_parse_status,
-       s.detected_format,s.parse_status AS source_parse_status,
-       'row' AS record_kind,CAST(json_extract(fr.locator_json,'$.row') AS INTEGER) AS row_index,
-       -1 AS column_index,'row' AS cell_kind,'[]' AS column_header_path_json,
-       fr.evidence_id,fr.text_normalized
-FROM table_record tr
-JOIN source_document s ON s.source_id=tr.source_id
-JOIN fragment fr ON fr.table_id=tr.table_id AND fr.fragment_type='table_row'
-ORDER BY table_id,row_index,record_kind,column_index,evidence_id
-"""
+class _TrackedRows:
+    def __init__(self, rows: Iterable[Mapping[str, object]]) -> None:
+        self._rows = iter(rows)
+        self.last: Mapping[str, object] | None = None
+
+    def __iter__(self) -> Iterator[Mapping[str, object]]:
+        for row in self._rows:
+            self.last = row
+            yield row
+
+    def cursor(self) -> dict[str, object]:
+        for _ in self:
+            pass
+        if self.last is None:
+            raise RuntimeError("narrative_group_not_consumed")
+        return {
+            "source_id": str(self.last["source_id"]),
+            "sequence_no": int(self.last["sequence_no"]),
+            "fragment_rowid": int(self.last["fragment_rowid"]),
+        }
+
+
+def _narrative_groups(
+    connection: sqlite3.Connection,
+    *,
+    batch_size: int,
+    start_cursor: Mapping[str, object] | None,
+) -> Iterator[tuple[tuple[str, ...], _TrackedRows]]:
+    rows = _narrative_rows(connection, batch_size=batch_size, start_cursor=start_cursor)
+    key = lambda row: (str(row["filing_id"]), str(row["source_id"]), str(row["section_path_json"]))
+    for group_key, group_rows in groupby(rows, key=key):
+        tracked = _TrackedRows(group_rows)
+        yield group_key, tracked
+
+
+def _table_pages(
+    connection: sqlite3.Connection,
+    *,
+    batch_size: int,
+    start_table_id: str | None,
+) -> Iterator[sqlite3.Row]:
+    table_id = start_table_id or ""
+    while True:
+        batch = connection.execute(_TABLE_PAGE_SQL, (table_id, batch_size)).fetchmany(batch_size)
+        if not batch:
+            return
+        for row in batch:
+            yield row
+        if len(batch) < batch_size:
+            return
+        table_id = str(batch[-1]["table_id"])
+
+
+def _table_cells(
+    connection: sqlite3.Connection,
+    *,
+    table_id: str,
+    batch_size: int,
+) -> Iterator[sqlite3.Row]:
+    row_index, column_index, cell_rowid = -1, -1, 0
+    while True:
+        batch = connection.execute(
+            _TABLE_CELL_PAGE_SQL,
+            (table_id, row_index, column_index, cell_rowid, batch_size),
+        ).fetchmany(batch_size)
+        if not batch:
+            return
+        for row in batch:
+            yield row
+        if len(batch) < batch_size:
+            return
+        row_index = int(batch[-1]["row_index"])
+        column_index = int(batch[-1]["column_index"])
+        cell_rowid = int(batch[-1]["cell_rowid"])
+
+
+def _table_row_fragments(
+    connection: sqlite3.Connection,
+    *,
+    table_id: str,
+    batch_size: int,
+) -> Iterator[sqlite3.Row]:
+    fragment_rowid = 0
+    previous_row_index = -1
+    while True:
+        batch = connection.execute(
+            _TABLE_ROW_PAGE_SQL,
+            (table_id, fragment_rowid, batch_size),
+        ).fetchmany(batch_size)
+        if not batch:
+            return
+        for row in batch:
+            row_index = int(row["row_index"])
+            if row_index < previous_row_index:
+                raise ChunkGroupError("table_row_order_not_monotonic")
+            previous_row_index = row_index
+            yield row
+        if len(batch) < batch_size:
+            return
+        fragment_rowid = int(batch[-1]["fragment_rowid"])
+
+
+def _logical_row_groups(
+    rows: Iterable[sqlite3.Row],
+) -> Iterator[tuple[int, list[sqlite3.Row]]]:
+    # DB fetches stay bounded; one logical row stays intact for complete evidence linkage.
+    for row_index, group in groupby(rows, key=lambda row: int(row["row_index"])):
+        yield row_index, list(group)
+
+
+def _merged_table_rows(
+    connection: sqlite3.Connection,
+    *,
+    table_id: str,
+    batch_size: int,
+) -> Iterator[tuple[int, list[sqlite3.Row], list[sqlite3.Row]]]:
+    cell_groups = iter(_logical_row_groups(
+        _table_cells(connection, table_id=table_id, batch_size=batch_size),
+    ))
+    fragment_groups = iter(_logical_row_groups(
+        _table_row_fragments(connection, table_id=table_id, batch_size=batch_size),
+    ))
+    cell_item = next(cell_groups, None)
+    fragment_item = next(fragment_groups, None)
+    while cell_item is not None or fragment_item is not None:
+        row_index = min(
+            item[0] for item in (cell_item, fragment_item) if item is not None
+        )
+        cells = cell_item[1] if cell_item is not None and cell_item[0] == row_index else []
+        fragments = fragment_item[1] if fragment_item is not None and fragment_item[0] == row_index else []
+        yield row_index, cells, fragments
+        if cell_item is not None and cell_item[0] == row_index:
+            cell_item = next(cell_groups, None)
+        if fragment_item is not None and fragment_item[0] == row_index:
+            fragment_item = next(fragment_groups, None)
 
 
 def _narrative_records(
-    rows: Sequence[sqlite3.Row],
+    rows: Iterable[Mapping[str, object]],
     *,
     config: ChunkConfig,
     config_sha256: str,
 ) -> Iterator[dict[str, object]]:
-    first = rows[0]
+    iterator = iter(rows)
+    try:
+        first = next(iterator)
+    except StopIteration:
+        return
     section = _section_path(first["section_path_json"])
     source_format = _source_format(first["detected_format"])
     quality_status = "unverified" if source_format == "pdf" or first["source_parse_status"] != "success" else "verified"
     prefix = _prefix_tokens(section_path=section, config=config)
     units = (
         TextUnit(str(row["text_normalized"]), (str(row["evidence_id"]),), int(row["sequence_no"]))
-        for row in rows if str(row["text_normalized"]).strip()
+        for row in chain((first,), iterator) if str(row["text_normalized"]).strip()
     )
     for ordinal, body in enumerate(_chunk_body_tokens(units, prefix_count=len(prefix), config=config)):
         yield _chunk_record(
@@ -534,95 +760,91 @@ def _json_string_list(value: object) -> list[str]:
 
 
 def _table_records(
-    rows: Sequence[sqlite3.Row],
+    connection: sqlite3.Connection,
+    table: Mapping[str, object],
     *,
     config: ChunkConfig,
     config_sha256: str,
 ) -> Iterator[dict[str, object]]:
-    first = rows[0]
-    section = _section_path(first["section_path_json"])
-    source_format = _source_format(first["detected_format"])
-    cells_by_row: dict[int, list[sqlite3.Row]] = defaultdict(list)
-    row_fragments: dict[int, sqlite3.Row] = {}
-    for row in rows:
-        if row["record_kind"] == "cell":
-            cells_by_row[int(row["row_index"])].append(row)
-        elif row["record_kind"] == "row":
-            row_fragments[int(row["row_index"])] = row
-    for cells in cells_by_row.values():
-        cells.sort(key=lambda item: (int(item["column_index"]), str(item["evidence_id"])))
-
-    data_rows = [
-        row_index for row_index, cells in cells_by_row.items()
-        if any(str(cell["cell_kind"]) == "data" and str(cell["text_normalized"]).strip() for cell in cells)
-    ]
-    first_data_row = min(data_rows) if data_rows else None
-    header_rows = {
-        row_index for row_index, cells in cells_by_row.items()
-        if first_data_row is None or row_index < first_data_row
-        if any(str(cell["cell_kind"]) == "header" and str(cell["text_normalized"]).strip() for cell in cells)
-    }
-    header_cells = [
-        cell for row_index in sorted(header_rows) for cell in cells_by_row[row_index]
-        if str(cell["text_normalized"]).strip()
-    ]
+    section = _section_path(table["section_path_json"])
+    source_format = _source_format(table["detected_format"])
+    merged_rows = iter(_merged_table_rows(
+        connection,
+        table_id=str(table["table_id"]),
+        batch_size=config.batch_size,
+    ))
     header_texts: list[str] = []
     header_ids: list[str] = []
-    for cell in header_cells:
-        text = str(cell["text_normalized"]).strip()
-        if text and text not in header_texts:
-            header_texts.append(text)
-        header_ids.append(str(cell["evidence_id"]))
-        for value in _json_string_list(cell["column_header_path_json"]):
-            if value and value not in header_texts:
-                header_texts.append(value)
-    for row_index in header_rows:
-        if row_index in row_fragments:
-            header_ids.append(str(row_fragments[row_index]["evidence_id"]))
+    first_body: tuple[int, list[sqlite3.Row], list[sqlite3.Row]] | None = None
+    for row in merged_rows:
+        _, cells, fragments = row
+        if any(
+            str(cell["cell_kind"]) == "data" and str(cell["text_normalized"]).strip()
+            for cell in cells
+        ):
+            first_body = row
+            break
+        for cell in cells:
+            text = str(cell["text_normalized"]).strip()
+            if not text:
+                continue
+            if text not in header_texts:
+                header_texts.append(text)
+            header_ids.append(str(cell["evidence_id"]))
+            for value in _json_string_list(cell["column_header_path_json"]):
+                if value and value not in header_texts:
+                    header_texts.append(value)
+        header_ids.extend(str(fragment["evidence_id"]) for fragment in fragments)
+        if count_tokens(" | ".join(header_texts)) >= config.max_tokens:
+            raise ChunkGroupError("table_header_exceeds_token_budget")
+    if first_body is None:
+        raise ChunkGroupError("table_without_data_rows")
 
     table_context = {
-        "caption": first["caption"],
+        "caption": table["caption"],
         "header": " | ".join(header_texts),
-        "unit": first["unit_text"],
+        "unit": table["unit_text"],
         "header_evidence_ids": sorted(set(header_ids)),
     }
     prefix = _prefix_tokens(section_path=section, config=config, table_context=table_context)
-    body_rows = sorted((set(cells_by_row) | set(row_fragments)) - header_rows)
-    if not body_rows:
-        body_rows = sorted(set(cells_by_row) | set(row_fragments))
-    units: list[TextUnit] = []
-    for row_index in body_rows:
-        cells = cells_by_row.get(row_index, [])
-        row_fragment = row_fragments.get(row_index)
-        text = str(row_fragment["text_normalized"]).strip() if row_fragment is not None else ""
-        if not text:
-            text = " | ".join(
-                str(cell["text_normalized"]).strip()
-                for cell in cells if str(cell["text_normalized"]).strip()
-            )
-        evidence_ids = [str(cell["evidence_id"]) for cell in cells]
-        if row_fragment is not None:
-            evidence_ids.append(str(row_fragment["evidence_id"]))
-        if text:
-            units.append(TextUnit(text, tuple(sorted(set(evidence_ids))), row_index))
-    if not units:
-        raise ChunkGroupError("table_without_chunkable_rows")
+
+    def body_units() -> Iterator[TextUnit]:
+        emitted = False
+        for row_index, cells, fragments in chain((first_body,), merged_rows):
+            fragment_texts = [
+                str(fragment["text_normalized"]).strip()
+                for fragment in fragments if str(fragment["text_normalized"]).strip()
+            ]
+            text = " | ".join(fragment_texts)
+            if not text:
+                text = " | ".join(
+                    str(cell["text_normalized"]).strip()
+                    for cell in cells if str(cell["text_normalized"]).strip()
+                )
+            evidence_ids = [str(cell["evidence_id"]) for cell in cells]
+            evidence_ids.extend(str(fragment["evidence_id"]) for fragment in fragments)
+            if text:
+                emitted = True
+                yield TextUnit(text, tuple(sorted(set(evidence_ids))), row_index)
+        if not emitted:
+            raise ChunkGroupError("table_without_chunkable_rows")
+
     quality_status = (
         "verified"
         if source_format != "pdf"
-        and first["source_parse_status"] == "success"
-        and first["table_parse_status"] == "success"
+        and table["source_parse_status"] == "success"
+        and table["table_parse_status"] == "success"
         else "unverified"
     )
-    table_verified = source_format != "pdf" and first["table_parse_status"] == "success"
-    for ordinal, body in enumerate(_chunk_body_tokens(units, prefix_count=len(prefix), config=config)):
+    table_verified = source_format != "pdf" and table["table_parse_status"] == "success"
+    for ordinal, body in enumerate(_chunk_body_tokens(body_units(), prefix_count=len(prefix), config=config)):
         yield _chunk_record(
-            filing_id=str(first["filing_id"]),
-            source_id=str(first["source_id"]),
+            filing_id=str(table["filing_id"]),
+            source_id=str(table["source_id"]),
             source_format=source_format,
             quality_status=quality_status,
             section_path=section,
-            table_id=str(first["table_id"]),
+            table_id=str(table["table_id"]),
             chunk_kind="table",
             table_structure_verified=table_verified,
             ordinal=ordinal,
@@ -632,7 +854,7 @@ def _table_records(
         )
 
 
-def _summary(stats: ChunkStats, *, pdf_source_count: int) -> dict[str, object]:
+def _summary(stats: ChunkStats, *, pdf_source_count: int | None) -> dict[str, object]:
     return {
         "total_chunk_count": stats.total_chunks,
         "chunk_count_by_source_format": {
@@ -654,6 +876,7 @@ def _checkpoint_value(
     status: str,
     phase: str,
     phase_groups_completed: int,
+    phase_cursor: Mapping[str, object] | None,
     source_identity: Mapping[str, object],
     config_sha256: str,
     offsets: Mapping[str, int],
@@ -663,8 +886,10 @@ def _checkpoint_value(
         "schema_version": CHUNK_SCHEMA_VERSION,
         "chunk_version": CHUNK_VERSION,
         "status": status,
+        "query_strategy": _QUERY_STRATEGY,
         "phase": phase,
         "phase_groups_completed": phase_groups_completed,
+        "phase_cursor": dict(phase_cursor) if phase_cursor is not None else None,
         "source_identity": dict(source_identity),
         "config_sha256": config_sha256,
         "output_offsets": dict(offsets),
@@ -680,7 +905,14 @@ def _prepare_output(
     overwrite: bool,
     source_identity: Mapping[str, object],
     config_sha256: str,
-) -> tuple[_OutputWriter | None, str, int, ChunkStats, dict[str, object] | None]:
+) -> tuple[
+    _OutputWriter | None,
+    str,
+    int,
+    Mapping[str, object] | None,
+    ChunkStats,
+    dict[str, object] | None,
+]:
     output_dir.mkdir(parents=True, exist_ok=True)
     paths = {key: output_dir / name for key, name in _OUTPUT_NAMES.items()}
     if resume:
@@ -689,14 +921,24 @@ def _prepare_output(
             raise ValueError("checkpoint_source_identity_mismatch")
         if checkpoint.get("config_sha256") != config_sha256:
             raise ValueError("checkpoint_config_mismatch")
+        strategy = checkpoint.get("query_strategy")
+        completed_groups = int(checkpoint.get("phase_groups_completed", 0))
+        if strategy not in (None, _QUERY_STRATEGY):
+            raise ValueError("checkpoint_query_strategy_mismatch")
+        if strategy is None and completed_groups:
+            raise ValueError("checkpoint_query_strategy_mismatch")
         if checkpoint.get("status") == "complete":
             manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
-            return None, "complete", 0, ChunkStats.from_dict(checkpoint["stats"]), manifest
+            return None, "complete", 0, None, ChunkStats.from_dict(checkpoint["stats"]), manifest
+        phase_cursor = checkpoint.get("phase_cursor")
+        if phase_cursor is not None and not isinstance(phase_cursor, dict):
+            raise ValueError("checkpoint_phase_cursor_invalid")
         writer = _OutputWriter(output_dir, offsets=checkpoint.get("output_offsets", {}))
         return (
             writer,
             str(checkpoint.get("phase", "narrative")),
-            int(checkpoint.get("phase_groups_completed", 0)),
+            completed_groups,
+            phase_cursor,
             ChunkStats.from_dict(checkpoint.get("stats", {})),
             None,
         )
@@ -708,7 +950,7 @@ def _prepare_output(
             if path.is_dir():
                 raise IsADirectoryError(path)
             path.unlink()
-    return _OutputWriter(output_dir), "narrative", 0, ChunkStats(), None
+    return _OutputWriter(output_dir), "narrative", 0, None, ChunkStats(), None
 
 
 def build_embedding_chunks(
@@ -733,8 +975,9 @@ def build_embedding_chunks(
     config.validate()
     config_value = asdict(config)
     config_sha256 = _semantic_sha256(config_value)
+    chunk_identity_sha256 = _chunk_identity_sha256(config)
     source_identity = _database_identity(database)
-    writer, phase, phase_groups_completed, stats, completed_manifest = _prepare_output(
+    writer, phase, phase_groups_completed, phase_cursor, stats, completed_manifest = _prepare_output(
         output_dir,
         resume=resume,
         overwrite=overwrite,
@@ -749,43 +992,42 @@ def build_embedding_chunks(
             manifest_path=str(paths["manifest"]),
             checkpoint_path=str(paths["checkpoint"]),
             summary=completed_manifest["summary"],
-        )
+    )
     assert writer is not None
     processed_this_run = 0
-    phase_skip = phase_groups_completed
 
-    def save_checkpoint(status: str, active_phase: str, completed: int) -> None:
+    def save_checkpoint(
+        status: str,
+        active_phase: str,
+        completed: int,
+        cursor: Mapping[str, object] | None,
+    ) -> None:
         offsets = writer.flush()
         _atomic_json(paths["checkpoint"], _checkpoint_value(
             status=status,
             phase=active_phase,
             phase_groups_completed=completed,
+            phase_cursor=cursor,
             source_identity=source_identity,
             config_sha256=config_sha256,
             offsets=offsets,
             stats=stats,
         ))
 
-    def process_phase(
-        connection: sqlite3.Connection,
+    def process_work(
         *,
         active_phase: str,
-        sql: str,
-        key_fields: Sequence[str],
-    ) -> tuple[bool, int]:
+        work: Iterable[tuple[
+            tuple[str, ...],
+            Iterable[Mapping[str, object]],
+            Callable[[], Mapping[str, object]],
+        ]],
+    ) -> tuple[bool, int, Mapping[str, object] | None]:
         nonlocal processed_this_run
-        completed = phase_skip if phase == active_phase else 0
-        for index, (group_key, rows) in enumerate(_stream_groups(
-            connection.execute(sql), key_fields=key_fields, batch_size=config.batch_size
-        )):
-            if index < completed:
-                continue
+        completed = phase_groups_completed if phase == active_phase else 0
+        cursor = phase_cursor if phase == active_phase else None
+        for group_key, records, cursor_factory in work:
             try:
-                records = (
-                    _narrative_records(rows, config=config, config_sha256=config_sha256)
-                    if active_phase == "narrative"
-                    else _table_records(rows, config=config, config_sha256=config_sha256)
-                )
                 for record in records:
                     if int(record["token_count"]) > config.max_tokens:
                         raise ChunkGroupError("chunk_max_tokens_exceeded")
@@ -797,29 +1039,47 @@ def build_embedding_chunks(
                     "group_key": list(group_key),
                     "reason": str(exc),
                 }, stats)
+            cursor = cursor_factory()
             completed += 1
             stats.groups_completed += 1
             processed_this_run += 1
             should_checkpoint = completed % config.checkpoint_every_groups == 0
             should_stop = max_groups is not None and processed_this_run >= max_groups
             if should_checkpoint or should_stop:
-                save_checkpoint("checkpointed", active_phase, completed)
+                save_checkpoint("checkpointed", active_phase, completed, cursor)
             if should_stop:
-                return False, completed
-        return True, completed
+                return False, completed, cursor
+        return True, completed, cursor
 
     if not resume:
-        save_checkpoint("running", "narrative", 0)
+        save_checkpoint("running", "narrative", 0, None)
     try:
         with closing(_readonly_connection(database)) as connection:
             _validate_source(connection)
-            input_counts = _input_counts(connection)
             if phase == "narrative":
-                finished, _ = process_phase(
-                    connection,
+                def narrative_work() -> Iterator[tuple[
+                    tuple[str, ...],
+                    Iterable[Mapping[str, object]],
+                    Callable[[], Mapping[str, object]],
+                ]]:
+                    for group_key, tracked in _narrative_groups(
+                        connection,
+                        batch_size=config.batch_size,
+                        start_cursor=phase_cursor,
+                    ):
+                        yield (
+                            group_key,
+                            _narrative_records(
+                                tracked,
+                                config=config,
+                                config_sha256=chunk_identity_sha256,
+                            ),
+                            tracked.cursor,
+                        )
+
+                finished, _, _ = process_work(
                     active_phase="narrative",
-                    sql=_NARRATIVE_SQL,
-                    key_fields=("filing_id", "source_id", "section_path_json"),
+                    work=narrative_work(),
                 )
                 if not finished:
                     return ChunkBuildResult(
@@ -827,17 +1087,40 @@ def build_embedding_chunks(
                         output_directory=str(output_dir),
                         manifest_path=None,
                         checkpoint_path=str(paths["checkpoint"]),
-                        summary=_summary(stats, pdf_source_count=input_counts["pdf_source_count"]),
+                        summary=_summary(stats, pdf_source_count=None),
                     )
                 phase = "table"
-                phase_skip = 0
-                save_checkpoint("running", "table", 0)
+                phase_groups_completed = 0
+                phase_cursor = None
+                save_checkpoint("running", "table", 0, None)
             if phase == "table":
-                finished, _ = process_phase(
-                    connection,
+                start_table_id = str(phase_cursor["table_id"]) if phase_cursor else None
+
+                def table_work() -> Iterator[tuple[
+                    tuple[str, ...],
+                    Iterable[Mapping[str, object]],
+                    Callable[[], Mapping[str, object]],
+                ]]:
+                    for table in _table_pages(
+                        connection,
+                        batch_size=config.batch_size,
+                        start_table_id=start_table_id,
+                    ):
+                        table_id = str(table["table_id"])
+                        yield (
+                            (table_id,),
+                            _table_records(
+                                connection,
+                                table,
+                                config=config,
+                                config_sha256=chunk_identity_sha256,
+                            ),
+                            lambda table_id=table_id: {"table_id": table_id},
+                        )
+
+                finished, _, _ = process_work(
                     active_phase="table",
-                    sql=_TABLE_SQL,
-                    key_fields=("table_id",),
+                    work=table_work(),
                 )
                 if not finished:
                     return ChunkBuildResult(
@@ -845,10 +1128,13 @@ def build_embedding_chunks(
                         output_directory=str(output_dir),
                         manifest_path=None,
                         checkpoint_path=str(paths["checkpoint"]),
-                        summary=_summary(stats, pdf_source_count=input_counts["pdf_source_count"]),
+                        summary=_summary(stats, pdf_source_count=None),
                     )
                 phase = "finalize"
-                save_checkpoint("running", "finalize", 0)
+                phase_groups_completed = 0
+                phase_cursor = None
+                save_checkpoint("running", "finalize", 0, None)
+            input_counts = _input_counts(connection)
     finally:
         writer.close()
 
@@ -870,6 +1156,8 @@ def build_embedding_chunks(
         "input_counts": input_counts,
         "config": config_value,
         "config_sha256": config_sha256,
+        "chunk_identity_sha256": chunk_identity_sha256,
+        "query_strategy": _QUERY_STRATEGY,
         "outputs": outputs,
         "summary": summary,
         "embedding": {"status": "not_run", "model": None},
@@ -880,6 +1168,7 @@ def build_embedding_chunks(
         status="complete",
         phase="complete",
         phase_groups_completed=0,
+        phase_cursor=None,
         source_identity=source_identity,
         config_sha256=config_sha256,
         offsets={key: int(outputs[key]["size_bytes"]) for key in ("chunks", "links", "failures")},
@@ -904,5 +1193,6 @@ __all__ = [
     "ChunkConfig",
     "build_embedding_chunks",
     "count_tokens",
+    "explain_chunk_query_plans",
     "load_chunk_config",
 ]

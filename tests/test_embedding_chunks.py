@@ -1,19 +1,24 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 
+import disclosure_db.embedding_chunks as chunk_module
 from disclosure_db.embedding_chunks import (
     CHUNK_VERSION,
     ChunkConfig,
     build_embedding_chunks,
     count_tokens,
+    explain_chunk_query_plans,
     load_chunk_config,
 )
+from disclosure_db.schema import create_indexes, create_schema
 
 
 def _sha256(path: Path) -> str:
@@ -78,6 +83,9 @@ def _seed_database(path: Path) -> dict[str, tuple[str, str, tuple[str, ...], str
             text_normalized TEXT NOT NULL,
             parser_version TEXT NOT NULL
         );
+        CREATE INDEX idx_fragment_source ON fragment(source_id, sequence_no);
+        CREATE INDEX idx_fragment_table_row ON fragment(table_id) WHERE table_id IS NOT NULL;
+        CREATE INDEX idx_cell_table ON table_cell(table_id, row_index, column_index);
         """
     )
     connection.executemany(
@@ -159,6 +167,31 @@ def _seed_database(path: Path) -> dict[str, tuple[str, str, tuple[str, ...], str
     connection.commit()
     connection.close()
     return evidence
+
+
+def _add_large_narrative_corpus(path: Path, *, groups: int) -> None:
+    connection = sqlite3.connect(path)
+    connection.executemany(
+        "INSERT INTO source_document VALUES(?,?,?,?)",
+        [
+            (f"bulk_{index:06d}", f"bulk_filing_{index:06d}", "dart_xml", "success")
+            for index in range(groups)
+        ],
+    )
+    connection.executemany(
+        "INSERT INTO fragment VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        [
+            (
+                f"bulk_ev_{index:06d}", f"bulk_filing_{index:06d}", f"bulk_{index:06d}",
+                "paragraph", 0, '["bulk"]', None, None,
+                '{"kind":"element","ordinal":0}', f"대용량 회귀 {index}", f"대용량 회귀 {index}",
+                "fixture-v1",
+            )
+            for index in range(groups)
+        ],
+    )
+    connection.commit()
+    connection.close()
 
 
 class EmbeddingChunkTests(unittest.TestCase):
@@ -257,6 +290,73 @@ class EmbeddingChunkTests(unittest.TestCase):
         build_embedding_chunks(self.database, output, config=self.config)
         with self.assertRaises(FileExistsError):
             build_embedding_chunks(self.database, output, config=self.config)
+
+    def test_query_plans_use_existing_schema_indexes_without_temp_sort(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        create_schema(connection)
+        create_indexes(connection, build_fts=False)
+        plans = explain_chunk_query_plans(connection)
+        connection.close()
+
+        flattened = {name: " | ".join(details) for name, details in plans.items()}
+        self.assertIn("sqlite_autoindex_source_document_1", flattened["source_page"])
+        self.assertIn("idx_fragment_source", flattened["narrative_page"])
+        self.assertIn("sqlite_autoindex_table_record_1", flattened["table_page"])
+        self.assertIn("idx_cell_table", flattened["table_cell_page"])
+        self.assertIn("idx_fragment_table_row", flattened["table_row_page"])
+        self.assertTrue(all("TEMP B-TREE" not in detail for detail in flattened.values()))
+
+    def test_large_max_groups_stops_keyset_queries_before_full_corpus_scan(self) -> None:
+        _add_large_narrative_corpus(self.database, groups=5_000)
+        statements: list[str] = []
+        original_connection = chunk_module._readonly_connection
+
+        def monitored_connection(path: Path) -> sqlite3.Connection:
+            connection = original_connection(path)
+            connection.set_trace_callback(statements.append)
+            return connection
+
+        output = self.root / "bounded"
+        config = replace(self.config, batch_size=7, checkpoint_every_groups=50)
+        with patch.object(chunk_module, "_readonly_connection", side_effect=monitored_connection):
+            result = build_embedding_chunks(
+                self.database,
+                output,
+                config=config,
+                max_groups=3,
+            )
+
+        self.assertEqual(result.status, "checkpointed")
+        self.assertEqual(result.summary["total_chunk_count"], 3)
+        normalized = [" ".join(statement.split()).upper() for statement in statements]
+        self.assertFalse(any("UNION ALL" in statement for statement in normalized))
+        self.assertFalse(any("COUNT(" in statement for statement in normalized))
+        self.assertFalse(any("FROM TABLE_RECORD" in statement for statement in normalized))
+        narrative_pages = [
+            statement for statement in normalized
+            if "FROM FRAGMENT INDEXED BY IDX_FRAGMENT_SOURCE" in statement
+        ]
+        self.assertLessEqual(len(narrative_pages), 4)
+        self.assertTrue(all("LIMIT 7" in statement for statement in narrative_pages))
+        checkpoint = json.loads((output / "checkpoint.json").read_text(encoding="utf-8"))
+        self.assertEqual(checkpoint["query_strategy"], "chunk-keyset-v1")
+        self.assertEqual(checkpoint["phase_cursor"]["source_id"], "bulk_000002")
+
+    def test_batch_and_checkpoint_tuning_do_not_change_chunk_bytes(self) -> None:
+        small = self.root / "small-batch"
+        large = self.root / "large-batch"
+        build_embedding_chunks(
+            self.database,
+            small,
+            config=replace(self.config, batch_size=2, checkpoint_every_groups=1),
+        )
+        build_embedding_chunks(
+            self.database,
+            large,
+            config=replace(self.config, batch_size=11, checkpoint_every_groups=7),
+        )
+        for name in ("chunks.jsonl", "chunk_evidence.jsonl", "failures.jsonl"):
+            self.assertEqual((small / name).read_bytes(), (large / name).read_bytes())
 
 
 if __name__ == "__main__":
