@@ -42,6 +42,7 @@ data/public/official_dataset/source_archives/
 data/derived/*.sqlite
 data/derived/*.sqlite-*
 data/derived/*.sqlite.*
+data/derived/embedding_chunk_v1/
 
 # Downloaded source archives
 references/official/source_archives/
