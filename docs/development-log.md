@@ -671,3 +671,13 @@
 - 아직 구조화하지 않은 계정: 매출원가, 매출총이익, 판매비와관리비, 금융수익/비용, 세전이익, 귀속순이익, 유동/비유동 계정, 현금흐름표 계정, EPS/BPS와 다계정 파생지표는 새 fact seed 없이 지원 수준과 경로만 등록했다.
 - 다음 우선순위: 매출원가·매출총이익·판매비와관리비, 유동자산·유동부채, 영업활동현금흐름, 지배기업 소유주 귀속 순이익, 기본/희석 EPS와 검증 주식수 순으로 실제 DB inventory·raw label review·evidence-backed seed·coverage gate를 추가한다.
 - 범위 보존: embedding, vector DB, PostgreSQL, GraphRAG, HCX Function Calling, 배포, 대용량 데이터 생성을 하지 않았다. Git commit과 push도 하지 않았다.
+
+## 2026-08-23 — BGE-M3 Dense Smoke·Sparse·RRF Hybrid retrieval v1
+
+- 구현 범위: `src/disclosure_db/hybrid_retrieval.py`에 환경 기반 `DenseRetrieverConfig`, `DenseFaissRetriever`, `SparseRetriever`, `HybridRetriever`, 상태를 포함한 `RetrievalResult`를 추가했다. Tool Registry, HCX Function Calling, Agent serving 연결은 하지 않았다.
+- Dense 계약: 질문은 `BAAI/bge-m3` CPU encoder로 만들고 검색 직전 다시 L2 정규화한다. `IndexFlatIP` 로드 시 metadata 행/`vector_id` 순서, 차원, index 개수와 모든 저장 벡터의 L2 norm을 검증한다. 현재 기본 상태는 정확히 100개를 기대하는 `smoke_only`이며 전체 corpus 품질 근거로 사용하지 않는다.
+- Sparse와 필터: Sparse는 기존 `SafeSearchIndex.search()`에 전적으로 위임한다. `src/disclosure_db/search_index.py`에는 선택적 `filing_id` 조건만 기존 SQL filter에 추가했고 Unicode/trigram, 회사, `as_of`, `filed_at`, 정정·계보 정책과 내부 RRF는 유지했다. Dense metadata에 명시적 회사/공시/기간 필드가 없을 때는 값을 추정하지 않고 해당 Dense 후보를 제외한다.
+- Hybrid와 장애 격리: sparse/dense 순위를 고정 `k=60` RRF로 결합하고 `chunk_id`, 없으면 `evidence_id`로 중복 제거한다. Dense 파일 부재, index/metadata 검증 오류, 모델·질문 검색 오류, 필터 후 0건은 `dense_status`, `dense_corpus_size`, `fallback_used`, `retrieval_mode`, `smoke_only`와 함께 Sparse fallback을 반환하며 Dense 예외가 이미 얻은 Sparse 결과를 실패시키지 않는다.
+- 변경 파일: `src/disclosure_db/hybrid_retrieval.py`, `src/disclosure_db/search_index.py`, `tests/test_hybrid_retrieval.py`, `tests/test_search_index.py`, `docs/operations/contest-server.md`, `docs/development-log.md`.
+- 테스트: Hybrid/Dense/Sparse 단위 9개, SafeSearch 회귀 23개, BGE-M3 FAISS builder 10개, chunk-v1 회귀 7개가 통과해 총 49개가 통과했다. 실제 100개 Smoke 통합 테스트 1개는 기본/환경변수 경로에 `index.faiss`와 `chunk_metadata.jsonl`이 없어 명시적으로 skip했다. `py_compile`과 `git diff --check`도 통과했다.
+- 현재 제한과 다음 작업: 100개 Smoke 산출물 자체가 이 작업공간에 없으므로 실제 파일 통합 결과와 Dense 검색 품질을 측정하지 않았다. 다음 단계는 검증된 두 Smoke 파일을 읽기 전용으로 제공해 통합 테스트를 실행하는 것이다. 이후 전체 corpus index는 별도 생성·무결성 검증·retrieval/latency 평가를 통과한 뒤 두 경로와 `corpus_status`를 함께 교체해야 한다. 전체 embedding 실행과 PostgreSQL/pgvector 이전은 수행하지 않았다.

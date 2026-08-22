@@ -142,6 +142,20 @@ class SearchIndexTests(unittest.TestCase):
         )
         self.assertEqual({row["filed_at"] for row in rows}, {"2023-04-10"})
 
+    def test_search_index_filing_id_filter_is_applied_inside_safe_search(self) -> None:
+        build_search_index(self.base, self.index, self.attestation)
+        index = SafeSearchIndex(self.index, base_sha256=self.attestation.sha256)
+
+        matching = index.search(
+            "계약금액", company="테스트", filing_id="f_safe", as_of=None,
+        )
+        excluded = index.search(
+            "계약금액", company="테스트", filing_id="different-filing", as_of=None,
+        )
+
+        self.assertEqual([row["evidence_id"] for row in matching], ["ev_safe"])
+        self.assertEqual(excluded, [])
+
     def test_korean_substring_uses_limited_trigram_fallback(self) -> None:
         build_search_index(self.base, self.index, self.attestation)
         rows = SafeSearchIndex(self.index, base_sha256=self.attestation.sha256).search("발행주식수", company="테스트", as_of=None)
