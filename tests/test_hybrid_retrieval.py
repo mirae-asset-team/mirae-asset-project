@@ -213,11 +213,21 @@ class HybridRetrievalTests(unittest.TestCase):
                 filed_at="2024-03-01",
                 as_of="2024-03-15",
             )
+            range_matching = retriever.search(
+                "질문", start_date="2024-02-01", end_date="2024-03-31",
+                correction_policy="both",
+            )
+            range_excluded = retriever.search(
+                "질문", start_date="2024-04-02", end_date="2024-12-31",
+                correction_policy="both",
+            )
             wrong_company = retriever.search("질문", company="없는회사")
             wrong_filing = retriever.search("질문", filing_id="missing")
             wrong_period = retriever.search("질문", filed_at="2024-12-31")
 
             self.assertEqual([hit["chunk_id"] for hit in matching.hits], ["chunk-0"])
+            self.assertEqual([hit["chunk_id"] for hit in range_matching.hits], ["chunk-0"])
+            self.assertEqual(range_excluded.hits, ())
             self.assertEqual(wrong_company.hits, ())
             self.assertEqual(wrong_filing.hits, ())
             self.assertEqual(wrong_period.hits, ())
@@ -232,6 +242,8 @@ class HybridRetrievalTests(unittest.TestCase):
             filing_id="filing-1",
             as_of="2024-03-15",
             filed_at="2024-03-01",
+            start_date="2024-01-01",
+            end_date="2024-12-31",
             correction_policy="original",
             limit=7,
         )
@@ -243,6 +255,8 @@ class HybridRetrievalTests(unittest.TestCase):
             "filing_id": "filing-1",
             "as_of": "2024-03-15",
             "filed_at": "2024-03-01",
+            "start_date": "2024-01-01",
+            "end_date": "2024-12-31",
             "correction_policy": "original",
             "limit": 7,
         }])

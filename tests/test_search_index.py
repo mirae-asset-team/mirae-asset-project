@@ -142,6 +142,29 @@ class SearchIndexTests(unittest.TestCase):
         )
         self.assertEqual({row["filed_at"] for row in rows}, {"2023-04-10"})
 
+    def test_search_index_filing_date_range_is_applied_before_ranking(self) -> None:
+        base = Path(self.temp.name) / "filing_range_base.sqlite"
+        index = Path(self.temp.name) / "filing_range_search.sqlite"
+        _seed_filing_date_base(base)
+        digest = hashlib.sha256(base.read_bytes()).hexdigest()
+        attestation = CorpusAttestation(
+            digest, base.stat().st_size, base.stat().st_mtime_ns, "semantic-v1"
+        )
+        build_search_index(base, index, attestation)
+        search = SafeSearchIndex(index, base_sha256=attestation.sha256)
+
+        matching = search.search(
+            "계약금액", company="테스트", as_of=None,
+            start_date="2023-04-04", end_date="2023-04-30",
+        )
+        excluded = search.search(
+            "계약금액", company="테스트", as_of=None,
+            start_date="2022-01-01", end_date="2023-04-02",
+        )
+
+        self.assertEqual([row["evidence_id"] for row in matching], ["ev_safe"])
+        self.assertEqual(excluded, [])
+
     def test_search_index_filing_id_filter_is_applied_inside_safe_search(self) -> None:
         build_search_index(self.base, self.index, self.attestation)
         index = SafeSearchIndex(self.index, base_sha256=self.attestation.sha256)

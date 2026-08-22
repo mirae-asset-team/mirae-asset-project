@@ -259,6 +259,8 @@ class SafeSearchIndex:
         filing_id: str | None,
         as_of: str | None,
         filed_at: str | None,
+        start_date: str | None,
+        end_date: str | None,
         correction_policy: str,
     ) -> tuple[str, list[object]]:
         clauses: list[str] = []
@@ -272,6 +274,12 @@ class SafeSearchIndex:
         if filed_at is not None:
             clauses.append("d.filed_at=?")
             params.append(filed_at)
+        if start_date is not None:
+            clauses.append("d.filed_at>=?")
+            params.append(start_date)
+        if end_date is not None:
+            clauses.append("d.filed_at<=?")
+            params.append(end_date)
         if correction_policy == "original":
             clauses.append("d.lineage_status='root'")
             if as_of is not None:
@@ -288,8 +296,8 @@ class SafeSearchIndex:
                 params.extend([as_of, as_of])
         return (" AND ".join(clauses) or "1=1"), params
 
-    def _unicode_search(self, token: str, *, company: str | None, filing_id: str | None, as_of: str | None, filed_at: str | None, correction_policy: str, limit: int) -> list[dict[str, object]]:
-        where, params = self._filters(company, filing_id, as_of, filed_at, correction_policy)
+    def _unicode_search(self, token: str, *, company: str | None, filing_id: str | None, as_of: str | None, filed_at: str | None, start_date: str | None, end_date: str | None, correction_policy: str, limit: int) -> list[dict[str, object]]:
+        where, params = self._filters(company, filing_id, as_of, filed_at, start_date, end_date, correction_policy)
         with closing(sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro&immutable=1", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
@@ -303,8 +311,8 @@ class SafeSearchIndex:
             ).fetchall()
         return [{**dict(row), "matched_index": "unicode"} for row in rows]
 
-    def _trigram_search(self, token: str, *, company: str | None, filing_id: str | None, as_of: str | None, filed_at: str | None, correction_policy: str, limit: int) -> list[dict[str, object]]:
-        where, params = self._filters(company, filing_id, as_of, filed_at, correction_policy)
+    def _trigram_search(self, token: str, *, company: str | None, filing_id: str | None, as_of: str | None, filed_at: str | None, start_date: str | None, end_date: str | None, correction_policy: str, limit: int) -> list[dict[str, object]]:
+        where, params = self._filters(company, filing_id, as_of, filed_at, start_date, end_date, correction_policy)
         with closing(sqlite3.connect(f"file:{self.path.resolve().as_posix()}?mode=ro&immutable=1", uri=True)) as connection:
             connection.row_factory = sqlite3.Row
             rows = connection.execute(
@@ -326,6 +334,8 @@ class SafeSearchIndex:
         filing_id: str | None = None,
         as_of: str | None,
         filed_at: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         limit: int = 30,
         correction_policy: str = "current",
     ) -> list[dict[str, object]]:
@@ -341,13 +351,13 @@ class SafeSearchIndex:
         rankings: list[list[dict[str, object]]] = []
         unicode_ids: set[str] = set()
         for token in tokens[:32]:
-            ranking = self._unicode_search(token, company=company, filing_id=filing_id, as_of=as_of, filed_at=filed_at, correction_policy=correction_policy, limit=per_token_limit)
+            ranking = self._unicode_search(token, company=company, filing_id=filing_id, as_of=as_of, filed_at=filed_at, start_date=start_date, end_date=end_date, correction_policy=correction_policy, limit=per_token_limit)
             rankings.append(ranking)
             unicode_ids.update(str(row["evidence_id"]) for row in ranking)
         if len(unicode_ids) < limit:
             for token in tokens[:32]:
                 remaining = max(1, limit - len(unicode_ids))
-                ranking = self._trigram_search(token, company=company, filing_id=filing_id, as_of=as_of, filed_at=filed_at, correction_policy=correction_policy, limit=min(remaining, 100))
+                ranking = self._trigram_search(token, company=company, filing_id=filing_id, as_of=as_of, filed_at=filed_at, start_date=start_date, end_date=end_date, correction_policy=correction_policy, limit=min(remaining, 100))
                 rankings.append(ranking)
                 unicode_ids.update(str(row["evidence_id"]) for row in ranking)
                 if len(unicode_ids) >= limit:

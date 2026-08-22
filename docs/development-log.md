@@ -681,3 +681,13 @@
 - 변경 파일: `src/disclosure_db/hybrid_retrieval.py`, `src/disclosure_db/search_index.py`, `tests/test_hybrid_retrieval.py`, `tests/test_search_index.py`, `docs/operations/contest-server.md`, `docs/development-log.md`.
 - 테스트: Hybrid/Dense/Sparse 단위 9개, SafeSearch 회귀 23개, BGE-M3 FAISS builder 10개, chunk-v1 회귀 7개가 통과해 총 49개가 통과했다. 실제 100개 Smoke 통합 테스트 1개는 기본/환경변수 경로에 `index.faiss`와 `chunk_metadata.jsonl`이 없어 명시적으로 skip했다. `py_compile`과 `git diff --check`도 통과했다.
 - 현재 제한과 다음 작업: 100개 Smoke 산출물 자체가 이 작업공간에 없으므로 실제 파일 통합 결과와 Dense 검색 품질을 측정하지 않았다. 다음 단계는 검증된 두 Smoke 파일을 읽기 전용으로 제공해 통합 테스트를 실행하는 것이다. 이후 전체 corpus index는 별도 생성·무결성 검증·retrieval/latency 평가를 통과한 뒤 두 경로와 `corpus_status`를 함께 교체해야 한다. 전체 embedding 실행과 PostgreSQL/pgvector 이전은 수행하지 않았다.
+
+## 2026-08-23 — Tool Registry v1·Evidence 충분성 백엔드
+
+- 구현 범위: LLM 비종속 `ToolRegistry`, 고정 입력/출력 계약, 공통 Tool Evidence Bundle, 내부 `EvidenceSufficiencyChecker`와 `search_disclosures`, `get_financial_facts`, `analyze_disclosure_trend`, `get_correction_lineage`, `build_summary_context` 5개 Tool을 추가했다. 임의 Tool·SQL·함수·경로 입력은 허용하지 않는다.
+- 재사용 경계: 검색은 기존 `HybridRetriever`/`SafeSearchIndex`, 재무계정은 중앙 Catalog/`QueryPlanner`/`EvidenceService`, 정정은 기존 `filing_version` 결과와 correction policy를 재사용한다. Trend와 Correction의 SQLite 연결은 read-only·immutable·query-only이고 DB 스키마를 변경하지 않는다.
+- 검증과 fail-closed: Registry가 필수값, 자료형, 미등록 필드, ISO 날짜/역전 범위, Tool별 Top-k 상한을 실행 전에 차단한다. 실행 뒤 회사·기간·품질·정정·인용 범위와 Tool별 fact/집계/lineage 계약을 검사해 `sufficient|partial|insufficient`, 권장 동작과 답변 허용 여부를 기록한다. ambiguous/retrieval-only/unsupported/미구현 derived와 재무 grain 불일치는 수치 반환 전에 차단한다.
+- 검색 범위 보완: Tool의 날짜 필터를 위해 기존 검색 정책은 유지한 채 `start_date`/`end_date`를 Dense metadata와 SafeSearch SQL filter에 추가했다. 필터는 ranking 전에 적용되며 Dense 장애/0건 Sparse fallback과 100개 `smoke_only` warning은 유지된다.
+- 변경 파일: `src/disclosure_db/disclosure_tools.py`, `tool_registry.py`, `tool_contracts.py`, `evidence_sufficiency.py`, `hybrid_retrieval.py`, `search_index.py`, `tests/test_disclosure_tools.py`, `tests/test_hybrid_retrieval.py`, `tests/test_search_index.py`, `docs/tool-registry-v1.md`, `docs/development-log.md`.
+- 테스트: 신규 Tool fixture 11개, Hybrid 9개, SafeSearch 24개, Financial Account 13개, Evidence Service 26개로 총 83개가 통과했다. 작업공간에 100개 Smoke 파일이 없어 기존 통합 테스트 1개만 명시적으로 skip했다. `pytest`는 설치돼 있지 않아 실행하지 않았으며 테스트는 표준 `unittest`와 fake service/소형 SQLite만 사용했다.
+- 현재 제한과 다음 작업: Dense는 전체 corpus가 아닌 100개 Smoke 계약이며 실제 산출물도 이 작업공간에 없다. Tool은 자연어 답변, 요약, 해석을 생성하지 않는다. LangGraph/HCX Function Calling, Answer Verifier, GraphRAG, FastAPI/NCP, 전체 embedding, PostgreSQL/pgvector는 구현하지 않았다. 다음 단계는 Registry allowlist와 충분성 결과를 보존하는 LangGraph 기반 Function Calling 연결이다. 이번 작업에서는 Git commit·push를 하지 않았다.

@@ -200,6 +200,8 @@ def _dense_filter_matches(
     filing_id: str | None,
     as_of: str | None,
     filed_at: str | None,
+    start_date: str | None,
+    end_date: str | None,
     correction_policy: str,
 ) -> bool:
     if company is not None and not _company_matches(row, company):
@@ -207,6 +209,11 @@ def _dense_filter_matches(
     if filing_id is not None and str(row.get("filing_id") or "") != filing_id:
         return False
     if filed_at is not None and str(row.get("filed_at") or "") != filed_at:
+        return False
+    row_filed_at = str(row.get("filed_at") or "")
+    if start_date is not None and (not row_filed_at or row_filed_at < start_date):
+        return False
+    if end_date is not None and (not row_filed_at or row_filed_at > end_date):
         return False
     return _version_matches(row, as_of=as_of, correction_policy=correction_policy)
 
@@ -304,6 +311,8 @@ class DenseFaissRetriever:
         filing_id: str | None = None,
         as_of: str | None = None,
         filed_at: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         correction_policy: str = "current",
         limit: int = 20,
     ) -> RetrievalResult:
@@ -338,6 +347,8 @@ class DenseFaissRetriever:
                 filing_id=filing_id,
                 as_of=as_of,
                 filed_at=filed_at,
+                start_date=start_date,
+                end_date=end_date,
                 correction_policy=correction_policy,
             ):
                 continue
@@ -385,18 +396,26 @@ class SparseRetriever:
         filing_id: str | None = None,
         as_of: str | None = None,
         filed_at: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         correction_policy: str = "current",
         limit: int = 20,
     ) -> list[dict[str, object]]:
-        return self.search_index.search(
-            question,
-            company=company,
-            filing_id=filing_id,
-            as_of=as_of,
-            filed_at=filed_at,
-            correction_policy=correction_policy,
-            limit=limit,
-        )
+        kwargs: dict[str, object] = {
+            "company": company,
+            "filing_id": filing_id,
+            "as_of": as_of,
+            "filed_at": filed_at,
+            "correction_policy": correction_policy,
+            "limit": limit,
+        }
+        # Keep compatibility with existing SafeSearchIndex-compatible adapters
+        # while forwarding the new bounded range only when the caller supplies it.
+        if start_date is not None:
+            kwargs["start_date"] = start_date
+        if end_date is not None:
+            kwargs["end_date"] = end_date
+        return self.search_index.search(question, **kwargs)  # type: ignore[arg-type]
 
 
 def _result_identity(row: Mapping[str, object]) -> str | None:
@@ -461,6 +480,8 @@ class HybridRetriever:
         filing_id: str | None = None,
         as_of: str | None = None,
         filed_at: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
         correction_policy: str = "current",
         limit: int = 20,
     ) -> RetrievalResult:
@@ -470,6 +491,8 @@ class HybridRetriever:
             filing_id=filing_id,
             as_of=as_of,
             filed_at=filed_at,
+            start_date=start_date,
+            end_date=end_date,
             correction_policy=correction_policy,
             limit=limit,
         )
@@ -482,6 +505,8 @@ class HybridRetriever:
                 filing_id=filing_id,
                 as_of=as_of,
                 filed_at=filed_at,
+                start_date=start_date,
+                end_date=end_date,
                 correction_policy=correction_policy,
                 limit=limit,
             )
