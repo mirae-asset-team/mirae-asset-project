@@ -2,7 +2,7 @@
 
 > 대상 브랜치: `agent/financial-account-catalog-v1`<br>
 > 최종 갱신: 2026-08-25<br>
-> 목적: 처음 프로젝트를 보는 팀원도 현재 구조, 완료 범위, 테스트 방법, 남은 embedding 작업을 한 번에 이해할 수 있게 설명합니다.
+> 목적: 현재 구조, 완료 범위, 테스트 방법, 남은 embedding 작업을 한 번에 설명합니다.
 
 ## 1. 이 프로젝트를 한 문장으로 설명하면
 
@@ -27,7 +27,7 @@
 
 ```mermaid
 flowchart TD
-    U[팀원 브라우저] -->|질문| W[FastAPI Web<br/>GET /]
+    U[브라우저] -->|질문| W[FastAPI Web<br/>GET /]
     W -->|POST /v1/hcx/function-answer| F[HcxFunctionCallingService]
     F -->|5개 schema 중 Tool 선택 요청| H1[HyperCLOVA X]
     H1 -->|Tool 이름과 argument| R[ToolRegistry]
