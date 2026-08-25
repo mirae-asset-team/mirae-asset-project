@@ -122,6 +122,10 @@ def _evidence_item(row: Mapping[str, object]) -> dict[str, object]:
         "evidence_ids": evidence_ids,
         "chunk_id": row.get("chunk_id"),
         "filing_id": row.get("filing_id"),
+        # DART filing_id is the receipt number in the serving corpus. Keep the
+        # provider-facing name explicit so HCX never has to infer or reformat it.
+        "rcept_no": row.get("rcept_no") or row.get("filing_id"),
+        "report_name": row.get("report_name") or row.get("report_name_raw"),
         "source_id": row.get("source_id"),
         "company_identifiers": {
             "company": row.get("company"),
@@ -326,6 +330,7 @@ class DisclosureToolBackend:
             facts.append({
                 "financial_fact_id": fact.get("financial_fact_id"),
                 "filing_id": fact.get("filing_id"),
+                "rcept_no": fact.get("filing_id"),
                 "account_id": resolution.canonical_id,
                 "account_name": resolution.label_ko,
                 "value_numeric": fact.get("value_numeric"),

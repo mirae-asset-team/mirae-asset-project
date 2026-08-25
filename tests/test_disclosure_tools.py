@@ -179,6 +179,7 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(response["data"]["retrieval_mode"], "sparse_fallback")
         self.assertEqual(response["evidence_bundle"]["evidence_ids"], ["ev-1"])
         self.assertEqual(response["evidence_bundle"]["items"][0]["chunk_id"], "chunk-1")
+        self.assertEqual(response["evidence_bundle"]["items"][0]["rcept_no"], "f-1")
         self.assertEqual(self.hybrid.calls[0][1]["start_date"], "2024-01-01")
         self.assertEqual(self.hybrid.calls[0][1]["end_date"], "2024-12-31")
 

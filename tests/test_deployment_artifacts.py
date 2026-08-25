@@ -22,6 +22,27 @@ class DeploymentArtifactTests(unittest.TestCase):
             self.assertIn(f"{name}: ${{{name}:-{value}}}", compose)
             self.assertIn(f"{name}={value}", example)
 
+    def test_hcx_function_calling_environment_is_forwarded_without_tracking_local_env(self):
+        compose = Path("compose.yaml").read_text(encoding="utf-8")
+        example = Path(".env.example").read_text(encoding="utf-8")
+        gitignore = Path(".gitignore").read_text(encoding="utf-8")
+        for name in ("CLOVASTUDIO_API_KEY", "CLOVASTUDIO_BASE_URL", "CLOVASTUDIO_MODEL"):
+            self.assertIn(name, compose)
+            self.assertIn(name, example)
+        self.assertIn(".env\n", gitignore.replace("\r\n", "\n"))
+        self.assertNotIn("in-memory-test-key", compose)
+
+    def test_container_entrypoint_composes_sparse_only_hcx_function_calling_runtime(self):
+        dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+        cli = Path("src/disclosure_db/cli.py").read_text(encoding="utf-8")
+        runtime = Path("src/disclosure_db/runtime.py").read_text(encoding="utf-8")
+        api = Path("src/disclosure_db/api.py").read_text(encoding="utf-8")
+        self.assertIn('CMD ["disclosure-agent", "serve"]', dockerfile)
+        self.assertIn("build_runtime_services(settings)", cli)
+        self.assertIn("function_calling_service=services.function_calling", cli)
+        self.assertIn("HybridRetriever(sparse, None)", runtime)
+        self.assertIn('app.post("/v1/hcx/function-answer")', api)
+
     def test_dockerfile_does_not_copy_local_data(self):
         self.assertIn("data/", Path(".dockerignore").read_text(encoding="utf-8"))
         self.assertNotIn("D:\\", Path("Dockerfile").read_text(encoding="utf-8"))

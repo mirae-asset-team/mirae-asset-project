@@ -144,6 +144,7 @@ def _health_status(service: Any) -> dict[str, Any]:
 def create_app(
     agent: DisclosureAgent,
     *,
+    function_calling_service: Any | None = None,
     public_limits: PublicLimitSettings | None = None,
 ):
     try:
@@ -159,6 +160,9 @@ def create_app(
         company: str | None = None
         as_of: str | None = None
         limit: int = Field(default=20, ge=1, le=100)
+
+    class HcxFunctionCallingRequest(BaseModel):
+        question: str = Field(min_length=1, max_length=2000)
 
     class ContestQueryRequest(BaseModel):
         question_id: str | None = Field(default=None, max_length=200)
@@ -190,7 +194,9 @@ def create_app(
 
     @app.middleware("http")
     async def limit_public_queries(request, call_next):
-        is_post_query = request.method == "POST" and request.url.path in {"/query", "/v1/answer"}
+        is_post_query = request.method == "POST" and request.url.path in {
+            "/query", "/v1/answer", "/v1/hcx/function-answer",
+        }
         is_official_get = request.method == "GET" and request.url.path == "/answer"
         if not (is_post_query or is_official_get):
             return await call_next(request)
@@ -262,6 +268,10 @@ def create_app(
         started = perf_counter()
         health_payload = runtime_health()
         health_payload["provider_configured"] = bool(getattr(agent, "provider_configured", False))
+        function_client = getattr(function_calling_service, "client", None)
+        health_payload["function_calling_configured"] = bool(
+            function_calling_service is not None and getattr(function_client, "configured", False)
+        )
         return envelope(health_payload, started)
 
     def verified_answer(
@@ -415,5 +425,18 @@ def create_app(
 
     answer.__annotations__["request"] = QueryRequest
     app.post("/v1/answer")(answer)
+
+    def hcx_function_answer(request: HcxFunctionCallingRequest) -> dict[str, Any]:
+        started = perf_counter()
+        health_status = runtime_health()
+        if not health_status["ready"]:
+            raise HTTPException(status_code=503, detail="runtime_not_ready")
+        if function_calling_service is None:
+            raise HTTPException(status_code=503, detail="hcx_function_calling_not_configured")
+        result = function_calling_service.answer(request.question)
+        return envelope(result.to_dict(), started)
+
+    hcx_function_answer.__annotations__["request"] = HcxFunctionCallingRequest
+    app.post("/v1/hcx/function-answer")(hcx_function_answer)
 
     return app

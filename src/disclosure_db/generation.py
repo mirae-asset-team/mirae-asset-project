@@ -50,7 +50,7 @@ def _claim_citation_ids(bundle: EvidenceBundle) -> list[str]:
     return [bundle.evidence[0].evidence_id] if bundle.evidence else []
 
 
-def _parse_hcx_content(content: Any) -> Any:
+def parse_hcx_json_content(content: Any) -> Any:
     """Parse one JSON object from an HCX response without accepting ambiguity."""
     if isinstance(content, dict):
         return content
@@ -99,6 +99,10 @@ def _parse_hcx_content(content: Any) -> Any:
     if len(candidates) != 1:
         raise ValueError("hcx_output_json_ambiguous")
     return json.loads(candidates[0])
+
+
+# Retain the former private name for callers on the existing generator path.
+_parse_hcx_content = parse_hcx_json_content
 
 
 class DeterministicGenerator:
@@ -205,7 +209,7 @@ class HyperClovaGenerator:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
             content = data["choices"][0]["message"]["content"]
-            parsed: dict[str, Any] = _parse_hcx_content(content)
+            parsed: dict[str, Any] = parse_hcx_json_content(content)
             required_keys = {"answer", "citation_ids", "numeric_values", "answerable"}
             if not isinstance(parsed, dict) or set(parsed) != required_keys:
                 raise ValueError("hcx_output_schema_mismatch")

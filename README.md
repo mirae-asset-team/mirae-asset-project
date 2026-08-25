@@ -140,6 +140,18 @@ overlay가 비어 있으면 에이전트는 일반 공시 fragment 검색만 수
 허용하고, 최종 답변은 evidence ID가
 실제로 검색 결과에 포함되는지 검증한 뒤 반환합니다.
 
+Registry 기반 HCX Function Calling은 기존 runtime에서 `DisclosureAgent`의 attested `EvidenceService`와
+read-only SafeSearch를 재사용해 5개 Tool Registry를 조립합니다. 기존 `/v1/answer`는 유지하며 별도
+`POST /v1/hcx/function-answer`가 `HCX Tool 선택 → Registry → Evidence 충분성 → 조건부 최종 생성`을
+실행합니다. `answer_allowed=False`이거나 유효한 DART 접수번호가 없으면 두 번째 HCX 호출을 backend에서
+차단합니다. 최종 접수번호 목록은 HCX가 만들지 않고 Evidence의 구조화된 `rcept_no`에서 렌더링합니다.
+실제 local credential로 5개 Function schema, HCX Tool Call, Registry argument schema 호환 smoke는
+통과했습니다. 로컬 NCP corpus가 없어 DB dispatch를 포함한 live E2E와 NCP 배포는 수행하지 않았습니다.
+Dense도 여전히 100개 `smoke_only`이고
+전체 embedding artifact는 준비되지 않았습니다. 상세 계약은
+[Tool Registry v1](docs/tool-registry-v1.md)과
+[HCX Function Calling 설계](docs/superpowers/specs/2026-08-23-hcx-function-calling-design.md)를 따릅니다.
+
 ```powershell
 $env:PYTHONPATH=(Resolve-Path 'src').Path
 $py = 'C:\Users\lark0\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe'
