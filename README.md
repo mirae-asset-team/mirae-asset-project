@@ -2,6 +2,8 @@
 
 주최 측이 제공한 공시 코퍼스를 검색·해석하고, 사용자의 주식 관련 질문에 근거 공시를 붙여 답하는 HyperCLOVA X 기반 질의응답 시스템 프로젝트입니다.
 
+처음 프로젝트를 보는 팀원은 [초보자용 프로젝트 구조·테스트·잔여 작업 안내](docs/README-beginner-project-guide.md)부터 읽어 주세요. 지금까지 구현한 흐름, 구조도, 테스트 방법, NCP 실행과 남은 전체 embedding 작업을 한 문서에 정리했습니다.
+
 팀 저장소: [ksm12030-sudo/mirae-asset-project](https://github.com/ksm12030-sudo/mirae-asset-project)
 
 ## 현재 개발 상태와 인수인계
@@ -146,11 +148,18 @@ read-only SafeSearch를 재사용해 5개 Tool Registry를 조립합니다. 기�
 실행합니다. `answer_allowed=False`이거나 유효한 DART 접수번호가 없으면 두 번째 HCX 호출을 backend에서
 차단합니다. 최종 접수번호 목록은 HCX가 만들지 않고 Evidence의 구조화된 `rcept_no`에서 렌더링합니다.
 실제 local credential로 5개 Function schema, HCX Tool Call, Registry argument schema 호환 smoke는
-통과했습니다. 로컬 NCP corpus가 없어 DB dispatch를 포함한 live E2E와 NCP 배포는 수행하지 않았습니다.
+통과했습니다. NCP의 Sparse/Structured 실제 smoke에서도 `answered`, `answer_allowed=true`, 구조화된
+`citations[].rcept_no` 보존을 확인했습니다.
 Dense도 여전히 100개 `smoke_only`이고
 전체 embedding artifact는 준비되지 않았습니다. 상세 계약은
 [Tool Registry v1](docs/tool-registry-v1.md)과
 [HCX Function Calling 설계](docs/superpowers/specs/2026-08-23-hcx-function-calling-design.md)를 따릅니다.
+
+FastAPI의 `GET /`는 별도 build가 없는 팀용 공시 Q&A Web을 제공합니다. 이 화면의 질문 요청은
+same-origin `POST /v1/hcx/function-answer`만 사용하며 HCX key와 SQLite는 server 내부에 유지됩니다.
+NCP image를 갱신한 뒤 브라우저에서 `http://<NCP-IP>:8000/`로 접속할 수 있습니다. 화면은
+`answer_allowed`, Evidence 상태, 실제 citation과 접수번호, selected Tool과 latency를 표시하고,
+근거 부족이나 유효 접수번호 누락 시 답변 UI를 차단합니다.
 
 ```powershell
 $env:PYTHONPATH=(Resolve-Path 'src').Path

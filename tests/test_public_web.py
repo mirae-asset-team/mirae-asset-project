@@ -56,16 +56,12 @@ def test_root_serves_accessible_web_shell(ready_agent) -> None:
         "question-input",
         "send-question",
         "service-status",
-        "service-info",
-        "provider-mode",
-        "corpus-revision",
-        "corpus-facts",
-        "company-count-fact",
-        "legal-company-count",
-        "financial-coverage-list",
+        "example-title",
+        "question-form",
     ):
         assert f'id="{element_id}"' in response.text
-    assert "공시를 근거로 기업 정보를 검색하고 설명합니다." not in response.text
+    assert "HCX FUNCTION CALLING V1.1" in response.text
+    assert "근거가 충분하지 않으면 답변을 만들지 않습니다." in response.text
     assert '<script type="module" src="/static/app.js"></script>' in response.text
 
 
@@ -86,18 +82,30 @@ def test_public_assets_have_security_headers_and_local_sources(ready_agent) -> N
     assert "javascript" in client.get("/static/api.js").headers["content-type"]
     assert "javascript" in client.get("/static/history.js").headers["content-type"]
 
-    for font_name in (
-        "KoPubWorld-Dotum-Bold.woff2",
-        "KoPubWorld-Batang-Medium.woff2",
-        "KoPubWorld-Batang-Bold.woff2",
-    ):
+    for font_name in ("KoPubWorld-Dotum-Bold.woff2",):
         font = client.get(f"/static/fonts/{font_name}")
         assert font.status_code == 200
         assert len(font.content) > 1_000
 
     css = client.get("/static/app.css").text
     assert "KoPubWorld Dotum" in css
-    assert "KoPubWorld Batang" in css
     assert "url(\"/static/fonts/" in css
     assert "https://" not in css
     assert "http://" not in css
+
+
+def test_public_web_calls_only_hcx_function_answer_for_questions(ready_agent) -> None:
+    from fastapi.testclient import TestClient
+
+    client = TestClient(create_app(ready_agent))
+    api_js = client.get("/static/api.js").text
+    app_js = client.get("/static/app.js").text
+
+    assert '"/v1/hcx/function-answer"' in api_js
+    for legacy_endpoint in ('"/query"', '"/health"', '"/financial-coverage"'):
+        assert legacy_endpoint not in api_js
+        assert legacy_endpoint not in app_js
+    assert "HCX_API_KEY" not in api_js
+    assert "HCX_API_KEY" not in app_js
+    assert "SQLITE" not in api_js.upper()
+    assert "SQLITE" not in app_js.upper()

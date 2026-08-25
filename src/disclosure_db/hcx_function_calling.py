@@ -10,13 +10,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
+import logging
 import os
 import re
 from typing import Mapping, Protocol, Sequence
+import urllib.error
 import urllib.request
 import uuid
 
-from .generation import UNANSWERABLE_TEXT, parse_hcx_json_content
+from .generation import UNANSWERABLE_TEXT
 from .hcx_prompts import (
     HCX_FINAL_ANSWER_SYSTEM_PROMPT,
     HCX_FUNCTION_PROMPT_VERSION,
@@ -28,13 +30,34 @@ from .tool_registry import ToolRegistry
 DEFAULT_HCX_BASE_URL = "https://clovastudio.stream.ntruss.com/v1/openai"
 DEFAULT_HCX_MODEL = "HCX-005"
 FUNCTION_CALLING_MAX_TOKENS = 1024
+FINAL_ANSWER_TOOL_NAME = "submit_grounded_answer"
 FUNCTION_FLOW_STATUSES = frozenset({"answered", "abstained", "invalid_request", "provider_unavailable", "error"})
 _DART_RCEPT_NO = re.compile(r"\d{14}\Z")
 _DART_RCEPT_NO_IN_TEXT = re.compile(r"접수번호\s*[:：]?\s*\d{14}")
+_SAFE_DIAGNOSTIC_TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
+_LOGGER = logging.getLogger(__name__)
 
 
 class HcxFunctionCallingError(RuntimeError):
     """Base error whose message is safe and contains no provider response."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        stage: str | None = None,
+        http_status: int | None = None,
+        provider_error_code: str | None = None,
+    ) -> None:
+        super().__init__(code)
+        self.code = code if _SAFE_DIAGNOSTIC_TOKEN.fullmatch(code) else "hcx_error"
+        self.stage = stage if stage and _SAFE_DIAGNOSTIC_TOKEN.fullmatch(stage) else None
+        self.http_status = http_status
+        self.provider_error_code = (
+            provider_error_code
+            if provider_error_code and _SAFE_DIAGNOSTIC_TOKEN.fullmatch(provider_error_code)
+            else None
+        )
 
 
 class HcxNotConfiguredError(HcxFunctionCallingError):
@@ -179,6 +202,41 @@ def hcx_tool_schemas(registry: ToolRegistry) -> list[dict[str, object]]:
     return json.loads(json.dumps(tools, ensure_ascii=False))
 
 
+def _final_answer_tool(evidence_ids: Sequence[str]) -> dict[str, object]:
+    """Build the private HCX output contract from admitted Evidence IDs."""
+
+    allowed_ids = list(dict.fromkeys(str(item) for item in evidence_ids if item))
+    if not allowed_ids:
+        raise HcxProtocolError(
+            "hcx_final_evidence_ids_empty", stage="final_generation_preflight"
+        )
+    return {
+        "type": "function",
+        "function": {
+            "name": FINAL_ANSWER_TOOL_NAME,
+            "description": (
+                "Tool Evidence만 사용한 최종 답변과 실제 사용한 evidence ID를 제출한다."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "answer": {
+                        "type": "string",
+                        "description": "DART Tool Evidence에만 근거한 한국어 최종 답변",
+                    },
+                    "citation_ids": {
+                        "type": "array",
+                        "description": "답변에 실제 사용한 evidence ID",
+                        "items": {"type": "string", "enum": allowed_ids},
+                        "minItems": 1,
+                    },
+                },
+                "required": ["answer", "citation_ids"],
+            },
+        },
+    }
+
+
 class HyperClovaFunctionClient:
     """Standard-library adapter for documented HCX OpenAI-compatible tools."""
 
@@ -213,7 +271,7 @@ class HyperClovaFunctionClient:
         self, question: str, tools: Sequence[Mapping[str, object]],
     ) -> HcxToolCall:
         if not tools:
-            raise HcxProtocolError("hcx_tools_empty")
+            raise HcxProtocolError("hcx_tools_empty", stage="tool_selection_preflight")
         data = self._chat({
             "model": self.model,
             "messages": [
@@ -227,35 +285,55 @@ class HyperClovaFunctionClient:
             "tool_choice": "auto",
             "temperature": 0,
             "max_tokens": FUNCTION_CALLING_MAX_TOKENS,
-        })
-        message = self._message(data)
+        }, stage="tool_selection_request")
+        message = self._message(data, stage="tool_selection_response")
+        return self._tool_call(message, stage="tool_selection_response")
+
+    @staticmethod
+    def _tool_call(
+        message: Mapping[str, object],
+        *,
+        stage: str,
+        expected_name: str | None = None,
+    ) -> HcxToolCall:
         raw_calls = message.get("tool_calls")
         if not isinstance(raw_calls, list) or len(raw_calls) != 1:
-            raise HcxProtocolError("hcx_requires_exactly_one_tool_call")
+            raise HcxProtocolError("hcx_requires_exactly_one_tool_call", stage=stage)
         raw_call = raw_calls[0]
         if not isinstance(raw_call, Mapping) or raw_call.get("type") != "function":
-            raise HcxProtocolError("hcx_tool_call_shape_invalid")
+            raise HcxProtocolError("hcx_tool_call_shape_invalid", stage=stage)
         function = raw_call.get("function")
         if not isinstance(function, Mapping):
-            raise HcxProtocolError("hcx_tool_function_missing")
+            raise HcxProtocolError("hcx_tool_function_missing", stage=stage)
+        name = str(function.get("name") or "")
+        if expected_name is not None and name != expected_name:
+            raise HcxProtocolError("hcx_unexpected_tool_call", stage=stage)
         arguments = function.get("arguments")
         if isinstance(arguments, str):
             try:
                 arguments = json.loads(arguments)
             except json.JSONDecodeError as exc:
-                raise HcxProtocolError("hcx_tool_arguments_invalid_json") from exc
+                raise HcxProtocolError("hcx_tool_arguments_invalid_json", stage=stage) from exc
         if not isinstance(arguments, Mapping):
-            raise HcxProtocolError("hcx_tool_arguments_not_object")
+            raise HcxProtocolError("hcx_tool_arguments_not_object", stage=stage)
         try:
             return HcxToolCall(
-                str(raw_call.get("id") or ""), str(function.get("name") or ""), dict(arguments)
+                str(raw_call.get("id") or ""), name, dict(arguments)
             )
         except ValueError as exc:
-            raise HcxProtocolError(str(exc)) from exc
+            raise HcxProtocolError(str(exc), stage=stage) from exc
 
     def generate_answer(
         self, question: str, tool_call: HcxToolCall, tool_response: Mapping[str, object],
     ) -> HcxGeneratedAnswer:
+        bundle = tool_response.get("evidence_bundle")
+        raw_evidence_ids = bundle.get("evidence_ids") if isinstance(bundle, Mapping) else None
+        evidence_ids = (
+            [str(item) for item in raw_evidence_ids if item]
+            if isinstance(raw_evidence_ids, (list, tuple))
+            else []
+        )
+        final_tool = _final_answer_tool(evidence_ids)
         tool_content = json.dumps(tool_response, ensure_ascii=False, separators=(",", ":"))
         data = self._chat({
             "model": self.model,
@@ -268,53 +346,96 @@ class HyperClovaFunctionClient:
                 tool_call.assistant_message(),
                 {"role": "tool", "tool_call_id": tool_call.call_id, "content": tool_content},
             ],
+            "tools": [final_tool],
+            "tool_choice": {
+                "type": "function",
+                "function": {"name": FINAL_ANSWER_TOOL_NAME},
+            },
             "temperature": 0,
             "max_tokens": FUNCTION_CALLING_MAX_TOKENS,
-        })
-        parsed = parse_hcx_json_content(self._message(data).get("content"))
-        if not isinstance(parsed, Mapping) or set(parsed) != {"answer", "citation_ids"}:
-            raise HcxProtocolError("hcx_final_output_schema_mismatch")
-        answer = parsed.get("answer")
-        citations = parsed.get("citation_ids")
+        }, stage="final_generation_request")
+        final_call = self._tool_call(
+            self._message(data, stage="final_generation_response"),
+            stage="final_generation_response",
+            expected_name=FINAL_ANSWER_TOOL_NAME,
+        )
+        if set(final_call.arguments) != {"answer", "citation_ids"}:
+            raise HcxProtocolError(
+                "hcx_final_output_schema_mismatch", stage="final_generation_response"
+            )
+        answer = final_call.arguments.get("answer")
+        citations = final_call.arguments.get("citation_ids")
         if not isinstance(answer, str) or not isinstance(citations, list) or not all(
             isinstance(item, str) for item in citations
         ):
-            raise HcxProtocolError("hcx_final_output_schema_mismatch")
+            raise HcxProtocolError(
+                "hcx_final_output_schema_mismatch", stage="final_generation_response"
+            )
         try:
             return HcxGeneratedAnswer(answer, tuple(citations))
         except ValueError as exc:
-            raise HcxProtocolError(str(exc)) from exc
+            raise HcxProtocolError(str(exc), stage="final_generation_response") from exc
 
-    def _chat(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+    def _chat(
+        self, payload: Mapping[str, object], *, stage: str = "provider_request",
+    ) -> Mapping[str, object]:
         if not self.api_key:
-            raise HcxNotConfiguredError("hcx_api_key_not_configured")
+            raise HcxNotConfiguredError("hcx_api_key_not_configured", stage=stage)
+        provider_request_id = str(uuid.uuid4())
         request = urllib.request.Request(
             f"{self.base_url}/chat/completions",
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
-                "X-NCP-CLOVASTUDIO-REQUEST-ID": str(uuid.uuid4()),
+                "X-NCP-CLOVASTUDIO-REQUEST-ID": provider_request_id,
             },
             method="POST",
         )
         try:
             with self._urlopen(request, timeout=self.timeout) as response:  # type: ignore[operator]
-                data = json.loads(response.read().decode("utf-8"))
+                raw_response = response.read()
+        except urllib.error.HTTPError as exc:
+            raise HcxFunctionCallingError(
+                "hcx_http_error",
+                stage=stage,
+                http_status=exc.code,
+                provider_error_code=self._provider_error_code(exc),
+            ) from exc
         except Exception as exc:
-            raise HcxFunctionCallingError("hcx_request_failed") from exc
+            raise HcxFunctionCallingError("hcx_request_failed", stage=stage) from exc
+        try:
+            data = json.loads(raw_response.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise HcxProtocolError("hcx_response_invalid_json", stage=stage) from exc
         if not isinstance(data, Mapping):
-            raise HcxProtocolError("hcx_response_not_object")
+            raise HcxProtocolError("hcx_response_not_object", stage=stage)
         return data
 
     @staticmethod
-    def _message(data: Mapping[str, object]) -> Mapping[str, object]:
+    def _provider_error_code(error: urllib.error.HTTPError) -> str | None:
+        """Extract only a bounded provider code; discard the raw error body."""
+
+        try:
+            raw = error.read(65_536)
+            payload = json.loads(raw.decode("utf-8"))
+        except Exception:
+            return None
+        provider_error = payload.get("error") if isinstance(payload, Mapping) else None
+        code = provider_error.get("code") if isinstance(provider_error, Mapping) else None
+        token = str(code) if code is not None else ""
+        return token if _SAFE_DIAGNOSTIC_TOKEN.fullmatch(token) else None
+
+    @staticmethod
+    def _message(
+        data: Mapping[str, object], *, stage: str = "provider_response",
+    ) -> Mapping[str, object]:
         choices = data.get("choices")
         if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], Mapping):
-            raise HcxProtocolError("hcx_choices_shape_invalid")
+            raise HcxProtocolError("hcx_choices_shape_invalid", stage=stage)
         message = choices[0].get("message")
         if not isinstance(message, Mapping):
-            raise HcxProtocolError("hcx_message_missing")
+            raise HcxProtocolError("hcx_message_missing", stage=stage)
         return message
 
 
@@ -352,9 +473,10 @@ class HcxFunctionCallingService:
         try:
             tool_call = self.client.select_tool(question, tools)
         except Exception as exc:
+            diagnostics = self._record_failure("tool_selection", exc)
             return self._result(
                 "error", UNANSWERABLE_TEXT, warnings=["hcx_tool_selection_failed"],
-                metadata={"provider_configured": True, "error_type": type(exc).__name__},
+                metadata={"provider_configured": True, **diagnostics},
             )
 
         # Search/context Tools must execute the original user question.  A
@@ -402,6 +524,10 @@ class HcxFunctionCallingService:
             )
 
         available_citations = self._available_citations(tool_call.name, tool_response)
+        common["metadata"]["available_citation_count"] = len(available_citations)  # type: ignore[index]
+        common["metadata"]["valid_rcept_no_count"] = len({  # type: ignore[index]
+            item.rcept_no for item in available_citations.values()
+        })
         if not available_citations:
             common["recommended_action"] = "abstain"
             return self._result(
@@ -420,8 +546,10 @@ class HcxFunctionCallingService:
             )
 
         common["metadata"]["final_generation_called"] = True  # type: ignore[index]
+        failure_stage = "final_generation"
         try:
             generated = self.client.generate_answer(question, tool_call, tool_response)
+            failure_stage = "final_citation_validation"
             known_ids = {
                 str(item) for item in (
                     tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
@@ -437,7 +565,9 @@ class HcxFunctionCallingService:
             if not citations:
                 raise HcxProtocolError("hcx_final_citations_missing_valid_rcept_no")
         except Exception as exc:
-            common["metadata"]["error_type"] = type(exc).__name__  # type: ignore[index]
+            common["metadata"].update(  # type: ignore[union-attr]
+                self._record_failure(failure_stage, exc, tool_name=tool_call.name)
+            )
             common["recommended_action"] = "abstain"
             return self._result(
                 "error", UNANSWERABLE_TEXT, warnings=["hcx_final_generation_failed"], **common,
@@ -549,6 +679,48 @@ class HcxFunctionCallingService:
             return "근거 범위를 확정할 수 있도록 회사, 계정 또는 기간을 더 구체적으로 알려주세요."
         return UNANSWERABLE_TEXT
 
+    def _record_failure(
+        self,
+        fallback_stage: str,
+        error: Exception,
+        *,
+        tool_name: str | None = None,
+    ) -> dict[str, object]:
+        """Log content-free diagnostics and return the same safe trace fields."""
+
+        stage = fallback_stage
+        error_code = "hcx_unexpected_error"
+        http_status: int | None = None
+        provider_error_code: str | None = None
+        if isinstance(error, HcxFunctionCallingError):
+            stage = error.stage or fallback_stage
+            error_code = error.code
+            http_status = error.http_status
+            provider_error_code = error.provider_error_code
+        elif _SAFE_DIAGNOSTIC_TOKEN.fullmatch(str(error)):
+            error_code = str(error)
+        diagnostics: dict[str, object] = {
+            "error_stage": stage,
+            "error_type": type(error).__name__,
+            "error_code": error_code,
+        }
+        if http_status is not None:
+            diagnostics["http_status"] = http_status
+        if provider_error_code is not None:
+            diagnostics["provider_error_code"] = provider_error_code
+        event = {
+            "event": "hcx_function_calling_failure",
+            "prompt_version": HCX_FUNCTION_PROMPT_VERSION,
+            **diagnostics,
+        }
+        if tool_name and _SAFE_DIAGNOSTIC_TOKEN.fullmatch(tool_name):
+            event["tool_name"] = tool_name
+        _LOGGER.warning(
+            "hcx_function_calling_failure %s",
+            json.dumps(event, ensure_ascii=True, sort_keys=True, separators=(",", ":")),
+        )
+        return diagnostics
+
     def _result(
         self,
         status: str,
@@ -584,6 +756,7 @@ class HcxFunctionCallingService:
 __all__ = [
     "DEFAULT_HCX_BASE_URL",
     "DEFAULT_HCX_MODEL",
+    "FINAL_ANSWER_TOOL_NAME",
     "FUNCTION_CALLING_MAX_TOKENS",
     "FunctionCallingResult",
     "HcxFunctionCallingError",

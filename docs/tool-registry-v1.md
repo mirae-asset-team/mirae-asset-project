@@ -66,7 +66,7 @@ result = service.answer("테스트회사 사업 내용은?")
 
 흐름은 `FastAPI → HCX Tool 선택 → Registry dispatch → EvidenceService/HybridRetriever/SQLite → sufficiency hard gate → 조건부 HCX 최종 생성`이다. `runtime.build_runtime_services()`가 기존 `DisclosureAgent`의 attested base/overlay/search 경로를 재사용하고 Dense 없이 SafeSearch 기반 `HybridRetriever`를 구성한다. 미등록 Tool과 잘못된 arguments는 Registry에서 거부한다. `answer_allowed=False`이거나 권장 동작이 `ask_clarification|abstain`이면 backend가 `generate_answer()`를 호출하지 않는다.
 
-최종 생성 전 backend는 Evidence item에 실제 14자리 `rcept_no`가 최소 하나 있는지 확인한다. 없으면 `answer_generation_blocked_by_missing_rcept_no`로 생성 호출 전에 중단한다. HCX는 답변 본문과 `citation_ids`만 만들고 접수번호를 작성하지 않는다. backend가 citation ID와 Evidence의 `rcept_no`를 결합해 `citations[]`와 `근거 공시` 영역을 결정적으로 붙인다. provider가 답변 본문에 접수번호를 직접 출력하거나 unknown citation을 반환하면 결과를 폐기한다. 정정 계보는 최초공시와 정정공시 접수번호가 모두 검증돼야 하며 두 역할을 구분해 표시한다.
+최종 생성 전 backend는 Evidence item에 실제 14자리 `rcept_no`가 최소 하나 있는지 확인한다. 없으면 `answer_generation_blocked_by_missing_rcept_no`로 생성 호출 전에 중단한다. HCX 최종 출력은 일반 `content`가 아니라 private `submit_grounded_answer(answer, citation_ids)` Function Call로 강제하며, `citation_ids` schema의 enum도 현재 Evidence ID로 제한한다. HCX는 접수번호를 작성하지 않고 backend가 citation ID와 Evidence의 `rcept_no`를 결합해 `citations[]`와 `근거 공시` 영역을 결정적으로 붙인다. provider가 답변 본문에 접수번호를 직접 출력하거나 unknown citation을 반환하면 결과를 폐기한다. 정정 계보는 최초공시와 정정공시 접수번호가 모두 검증돼야 하며 두 역할을 구분해 표시한다.
 
 기존 `POST /v1/answer`는 변경하지 않았다. Function Calling 검증 경로는 다음 별도 endpoint다.
 
@@ -77,9 +77,9 @@ Content-Type: application/json
 {"question":"삼성전자 2025년 매출액은?"}
 ```
 
-응답에는 `status`, `answer`, `tool_name`, `tool_response`, `answer_allowed`, `recommended_action`, `citation_ids`, 구조화된 `citations`, `warnings`, `metadata`가 포함된다. `metadata.prompt_version`은 현재 `hcx-function-v1`이다. prompt 원문은 `src/disclosure_db/hcx_prompts.py`에서 버전 관리한다.
+응답에는 `status`, `answer`, `tool_name`, `tool_response`, `answer_allowed`, `recommended_action`, `citation_ids`, 구조화된 `citations`, `warnings`, `metadata`가 포함된다. `metadata.prompt_version`은 현재 `hcx-function-v1.1`이다. prompt 원문은 `src/disclosure_db/hcx_prompts.py`에서 버전 관리한다. Provider/최종 검증 실패 시에는 질문, Tool Result, raw response 없이 `error_stage`, `error_type`, `error_code`, 선택적 `http_status`와 `provider_error_code`만 API metadata와 structured warning log에 남긴다.
 
-concrete adapter는 공식 [Function calling](https://api.ncloud-docs.com/docs/en/clovastudio-chatcompletionsv3-fc) 및 [OpenAI compatibility](https://api.ncloud-docs.com/docs/en/clovastudio-openaicompatibility) 계약에 따라 기존 `CLOVASTUDIO_API_KEY`, `CLOVASTUDIO_BASE_URL`, `CLOVASTUDIO_MODEL` 환경변수를 사용한다. key가 없으면 네트워크와 Tool 실행을 모두 생략하고 `provider_unavailable`을 반환한다. 2026-08-25 실제 local credential smoke에서 5개 schema 전달, `choices[].message.tool_calls` 파싱, `search_disclosures` 선택, `company|question|top_k` arguments와 Registry schema 검증이 통과했다. 측정 왕복은 약 3.64초였다. credential과 provider 본문은 기록하지 않았고 corpus 부재로 실제 Tool dispatch는 실행하지 않았다.
+concrete adapter는 공식 [Function calling](https://api.ncloud-docs.com/docs/en/clovastudio-chatcompletionsv3-fc) 및 [OpenAI compatibility](https://api.ncloud-docs.com/docs/en/clovastudio-openaicompatibility) 계약에 따라 기존 `CLOVASTUDIO_API_KEY`, `CLOVASTUDIO_BASE_URL`, `CLOVASTUDIO_MODEL` 환경변수를 사용한다. key가 없으면 네트워크와 Tool 실행을 모두 생략하고 `provider_unavailable`을 반환한다. 2026-08-25 최초 local credential smoke에서 5개 schema 전달과 Tool 선택이 통과했다. NCP E2E에서 발견한 최종 일반문장 출력 문제를 수정한 뒤에는 실제 local credential로 Tool 선택과 private final Function Call 두 요청, backend citation/receipt 렌더링까지 통과했다. credential, final answer와 provider 본문은 기록하지 않았다.
 
 로컬 또는 NCP 서버에서는 Git에 포함되지 않는 `.env`에 아래 이름만 설정한다. 값 자체를 명령행, 로그, 문서에 남기지 않는다. `.gitignore`는 `.env`와 `.env.*`를 제외하고 `.env.example`만 허용한다.
 

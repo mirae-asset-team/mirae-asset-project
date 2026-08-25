@@ -149,3 +149,53 @@ Function Calling service와 fake client 테스트는 있었지만 실제 `serve`
 - Sparse/Structured HCX Function Calling V1은 실제 provider schema와 로컬 FastAPI control flow 기준 배포 후보 상태다. Dense는 명시적으로 `None`; embedding 코드는 변경하지 않았다.
 - NCP에서 사용자가 직접 `.env`를 갱신하고 mode `0600`을 확인한 뒤 `docker compose config --quiet`, build, up/restart, `/health` 검증 순으로 진행한다. 이후 실제 corpus 값으로 재무·검색·트렌드·정정·근거 부족 5종 helper를 실행한다.
 - 모든 답변의 Tool 선택, Evidence sufficiency, `answer_allowed`, 실제 corpus 접수번호와 최종 답변을 대조하고 provider/DB 실패율을 확인하기 전에는 운영 완료로 판정하지 않는다.
+
+## 2026-08-25 NCP final-generation 장애 분석과 V1.1 보정
+
+### 서버 관측 상태와 정확한 실패 경로
+
+- 사용자 실행 NCP smoke는 health/Docker/search readiness가 모두 정상이고 `get_financial_facts → Evidence sufficient`까지 성공했지만 최종 결과가 `hcx_final_generation_failed`, `answer_allowed=false`, `citations=[]`였다. 이 서버 상태는 사용자가 제공한 관측값이며 이번 로컬 작업에서 NCP에 접속하거나 재배포하지 않았다.
+- `HcxFunctionCallingService.answer()`의 최종 `try`는 `client.generate_answer()` 요청, provider 출력 파싱, citation membership, 접수번호 연결 검증을 한 `except`로 축약했다. 어느 단계든 실패하면 검증된 citation을 결과에 복사하기 전에 `error` envelope를 만들기 때문에 `citations=[]`가 된다.
+- 로컬 실제 credential로 동일 final adapter를 재현한 결과 HTTP 요청은 성공했지만 HCX `message.content`는 93자의 일반 문장이었고 JSON 중괄호와 `answer|citation_ids` 키가 모두 0개였다. 기존 `parse_hcx_json_content()`가 `hcx_output_json_ambiguous`를 발생시킨 것이 이번 장애의 직접 원인이다. 접수번호는 이미 `_available_citations()`를 통과한 상태였으며 citation 빈 배열은 `rcept_no` 유실이 아니라 final 출력 계약 실패 후 fail-closed 결과다.
+
+### 요청 schema 대조와 수정 결정
+
+- 첫 요청은 `system,user + tools + tool_choice=auto + max_tokens=1024`이고 단일 Tool Call을 받는다. 최종 요청은 공식 follow-up 순서인 `system,user,assistant(tool_calls),tool(tool_call_id, JSON content)`를 사용한다. OpenAI 호환 규격에 맞게 assistant의 `function.arguments`와 tool의 `content`는 JSON string이고 message role, call ID 연결과 `max_tokens=1024`도 실제 API에서 수용됐다.
+- 문제는 request message 형식이 아니라 최종 응답을 prompt만으로 JSON으로 만들려 한 점이다. 공식 OpenAI 호환 `response_format=json_schema`도 시험했지만 현재 credential/model 조합은 HTTP 400, provider code `40001`로 거부해 운영 해결책으로 사용하지 않았다.
+- HCX-005에서 이미 동작하는 Function Calling을 최종 출력 계약에도 재사용했다. private `submit_grounded_answer` Tool을 한 개만 노출하고 `tool_choice`로 강제한다. arguments는 `answer`, `citation_ids` 두 필드이며 citation item enum은 Tool Result의 Evidence ID로 제한한다. 이 Tool은 Registry에 등록하거나 사용자에게 노출하는 업무 Tool이 아니라 provider 출력 transport다.
+- Prompt trace는 `hcx-function-v1.1`로 올렸다. Evidence Sufficiency, `answer_allowed`, 유효 14자리 `rcept_no`, correction pair, provider receipt 렌더링 금지와 citation membership gate는 완화하거나 우회하지 않았다.
+
+### 안전한 structured error logging
+
+- provider/검증 실패 시 `hcx_function_calling_failure` warning을 JSON으로 기록한다. 필드는 `prompt_version`, `error_stage`, `error_type`, 안전한 `error_code`, 선택적 `http_status`, allowlist 형식의 `provider_error_code`, 등록 Tool 이름뿐이다.
+- API metadata에도 같은 content-free 진단값과 `available_citation_count`, `valid_rcept_no_count`를 남겨 HTTP 요청 실패와 provider response/citation 검증 실패를 구분한다. 질문, Tool arguments/result, Evidence 본문, `rcept_no` 값, credential, provider error message와 raw response는 로그에 넣지 않는다.
+
+### 검증 결과와 현재 경계
+
+- HCX/endpoint focused suite는 `22 passed`였다. 최종 강제 Tool schema와 enum, message role/call ID/JSON string, 일반문장 거부 stage, safe HTTP code 추출, 로그 비노출, insufficient/missing-receipt backend 차단을 검증했다.
+- 실제 local credential로 고정된 sufficient Tool Result를 사용한 전체 service smoke가 성공했다. 질문 유형은 NCP와 같은 삼성전자 2024 연결 매출액이었고 HCX는 `get_financial_facts`를 선택한 뒤 `submit_grounded_answer`를 호출했다. 결과는 `answered`, `answer_allowed=true`, citation 1개, 기대한 `rcept_no` 보존, backend 근거 공시 영역 포함, warning 없음, `hcx-function-v1.1`이었으며 약 7.74초였다. 답변/provider 원문과 credential은 출력·저장하지 않았다.
+- 전체 회귀는 `485 passed, 2 skipped, 46 warnings, 45 subtests`로 통과했다. compileall과 diff check도 통과했다. 경고는 기존 FastAPI lifecycle/TestClient와 Windows subprocess encoding 경고다.
+- 로컬에는 NCP corpus가 없어 SQLite Tool Result만 최소 고정 응답으로 대체했다. NCP 재배포 뒤 같은 실제 corpus 질문으로 Tool Result의 structured value, `evidence_bundle.items[].rcept_no`, 최종 `citations[].rcept_no`를 다시 대조해야 한다. Dense는 계속 `None`이며 embedding 코드는 변경하지 않았다.
+
+## 2026-08-25 팀 공시 Q&A Web
+
+### 작업 전 상태와 목표
+
+- FastAPI는 이미 package 안의 `src/disclosure_db/web/`을 `/static`에 mount하고 `GET /`에서 `index.html`을 반환했지만, 기존 화면은 `/query`, `/health`, `/financial-coverage`를 호출하고 HCX Function Calling V1.1 응답 계약을 표시하지 못했다.
+- 새 프런트 framework나 build step을 추가하지 않고 기존 HTML/CSS/ES module/localStorage 구조를 유지하면서, 팀원이 NCP의 `http://<NCP-IP>:8000/`만 열어 HCX 공시 Q&A를 사용할 수 있게 하는 것이 목표다.
+
+### 구현 결정
+
+- 브라우저의 유일한 질문 요청은 same-origin `POST /v1/hcx/function-answer`이며 body는 `{"question":"..."}`뿐이다. 브라우저는 HCX credential, SQLite 경로, Tool Registry에 접근하지 않고 FastAPI backend control flow만 통과한다.
+- 응답은 backend 계약을 그대로 읽는다. 답변 허용은 `status=answered && answer_allowed=true`, Evidence 상태는 `tool_response.metadata.sufficiency_check.status`, 근거는 `citations[]`, 보조정보는 `tool_name`, `latency_ms`, `metadata.prompt_version`이다.
+- 허용된 응답은 citation이 한 건 이상이고 각 citation이 `evidence_id`와 유효한 14자리 `rcept_no`를 가질 때만 렌더링한다. 접수번호·공시명·일자·정정 역할은 backend가 준 값만 표시하며 누락 값을 추측하지 않는다. DART 링크도 실제 14자리 접수번호에만 만든다.
+- `answer_allowed=false`는 차단 카드와 `recommended_action` 안내로 표시한다. 최종 답변 영역을 만들지 않고, citation이 없으면 접수번호도 표시하지 않는다. timeout/network/API/invalid schema는 안전한 오류 카드와 선택적 재시도로 수렴한다.
+- 밝은 배경, Navy/Blue 카드, 공시 근거 목록, 접수번호 code 표시, 작은 Tool/latency 보조영역으로 구성했다. 첫 화면은 서비스 원칙과 재무·검색·트렌드·정정 예시를 제공한다. 별도 외부 font/CDN/script는 없다.
+
+### 검증과 현재 경계
+
+- ES module 단위 테스트 `12 passed`: 정상/차단 분류, nested Evidence 상태, citation/rcept_no 보존, 유효 접수번호 gate, endpoint/body, loading, timeout/network/API/malformed 응답과 localStorage 구조를 검증했다.
+- FastAPI Web/runtime focused `21 passed`: `/` serve, CSP/local asset, HCX endpoint 단독 사용, secret/SQLite 식별자 부재와 기존 runtime/limit 계약을 확인했다.
+- 실제 로컬 FastAPI + fake Function Calling service를 브라우저에서 확인했다. 데스크톱과 390px 모바일, 첫 화면, loading 및 전송 버튼 비활성화, answered/Evidence sufficient/citation/receipt/Tool/latency, insufficient abstain, HTTP 500과 연결 실패 오류 UI가 동작했다. fake service는 credential과 DB를 읽지 않았다.
+- 전체 Python 회귀는 `486 passed, 2 skipped, 48 warnings, 45 subtests`, compileall과 `git diff --check`는 통과했다. 경고는 기존 FastAPI lifecycle/TestClient 및 Windows subprocess encoding 계열이다.
+- Dense/embedding, GraphRAG, Agent framework, backend Evidence gate와 HCX adapter는 이 Web 작업에서 변경하지 않았다. 실제 NCP 반영은 새 image build/recreate 뒤 사용자가 수행하고, `/health`와 실제 재무·검색·트렌드·정정·근거 부족 질문을 다시 확인해야 한다.

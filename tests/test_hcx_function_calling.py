@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import io
 import json
 import unittest
+import urllib.error
 
 from disclosure_db.disclosure_tools import build_tool_registry
 from disclosure_db.hcx_function_calling import (
+    FINAL_ANSWER_TOOL_NAME,
     FUNCTION_CALLING_MAX_TOKENS,
+    HcxFunctionCallingError,
     HcxFunctionCallingService,
     HcxGeneratedAnswer,
+    HcxProtocolError,
     HcxToolCall,
     HyperClovaFunctionClient,
 )
@@ -56,9 +61,11 @@ class FakeHcxClient:
         *,
         generated: HcxGeneratedAnswer | None = None,
         configured: bool = True,
+        generation_error: Exception | None = None,
     ) -> None:
         self.tool_call = tool_call
         self.generated = generated or HcxGeneratedAnswer("근거 기반 답변입니다.", ("ev-1",))
+        self.generation_error = generation_error
         self._configured = configured
         self.selection_calls: list[tuple[str, list[dict[str, object]]]] = []
         self.generation_calls: list[tuple[str, HcxToolCall, dict[str, object]]] = []
@@ -75,6 +82,8 @@ class FakeHcxClient:
         self, question: str, tool_call: HcxToolCall, tool_response: object,
     ) -> HcxGeneratedAnswer:
         self.generation_calls.append((question, tool_call, dict(tool_response)))  # type: ignore[arg-type]
+        if self.generation_error is not None:
+            raise self.generation_error
         return self.generated
 
 
@@ -315,8 +324,13 @@ class HcxFunctionCallingTests(unittest.TestCase):
             },
             {
                 "choices": [{"message": {
-                    "role": "assistant",
-                    "content": '{"answer":"근거 기반 답변","citation_ids":["ev-1"]}',
+                    "role": "assistant", "content": "", "tool_calls": [{
+                        "id": "call-final", "type": "function",
+                        "function": {
+                            "name": FINAL_ANSWER_TOOL_NAME,
+                            "arguments": '{"answer":"근거 기반 답변","citation_ids":["ev-1"]}',
+                        },
+                    }],
                 }}],
             },
         ])
@@ -339,8 +353,91 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(len(selection_payload["tools"]), 5)
         self.assertIn("DART", selection_payload["messages"][0]["content"])
         self.assertIn("접수번호", final_payload["messages"][0]["content"])
+        self.assertEqual(
+            final_payload["tool_choice"],
+            {"type": "function", "function": {"name": FINAL_ANSWER_TOOL_NAME}},
+        )
+        self.assertEqual(final_payload["tools"][0]["function"]["name"], FINAL_ANSWER_TOOL_NAME)
+        citation_schema = final_payload["tools"][0]["function"]["parameters"]["properties"]["citation_ids"]
+        self.assertEqual(citation_schema["items"]["enum"], ["ev-1"])
+        self.assertEqual(
+            [message["role"] for message in final_payload["messages"]],
+            ["system", "user", "assistant", "tool"],
+        )
+        self.assertIsInstance(final_payload["messages"][-2]["tool_calls"][0]["function"]["arguments"], str)
         self.assertEqual(final_payload["messages"][-1]["role"], "tool")
         self.assertEqual(final_payload["messages"][-1]["tool_call_id"], "call-1")
+        self.assertIsInstance(final_payload["messages"][-1]["content"], str)
+
+    def test_plain_text_final_response_is_rejected_at_named_response_stage(self) -> None:
+        opener = FakeUrlOpen([{
+            "choices": [{"message": {
+                "role": "assistant", "content": "JSON이 아닌 일반 최종 답변",
+            }}],
+        }])
+        client = HyperClovaFunctionClient(api_key="in-memory-test-key", urlopen=opener)
+
+        with self.assertRaises(HcxProtocolError) as raised:
+            client.generate_answer(
+                "사업 내용은?", self._search_call(),
+                {"evidence_bundle": {"evidence_ids": ["ev-1"]}, "data": {"results": []}},
+            )
+
+        self.assertEqual(raised.exception.code, "hcx_requires_exactly_one_tool_call")
+        self.assertEqual(raised.exception.stage, "final_generation_response")
+
+    def test_final_failure_logs_only_structured_diagnostics_and_keeps_receipt_gate(self) -> None:
+        registry, _ = self._registry([_search_row()])
+        client = FakeHcxClient(
+            self._search_call(),
+            generation_error=HcxFunctionCallingError(
+                "hcx_http_error", stage="final_generation_request",
+                http_status=400, provider_error_code="40001",
+            ),
+        )
+
+        with self.assertLogs("disclosure_db.hcx_function_calling", level="WARNING") as captured:
+            result = HcxFunctionCallingService(registry, client).answer(
+                "로그에 포함되면 안 되는 질문"
+            )
+
+        self.assertEqual(result.status, "error")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual(result.citations, [])
+        self.assertEqual(result.metadata["available_citation_count"], 1)
+        self.assertEqual(result.metadata["valid_rcept_no_count"], 1)
+        self.assertEqual(result.metadata["error_stage"], "final_generation_request")
+        self.assertEqual(result.metadata["error_code"], "hcx_http_error")
+        self.assertEqual(result.metadata["http_status"], 400)
+        self.assertEqual(result.metadata["provider_error_code"], "40001")
+        log_output = "\n".join(captured.output)
+        self.assertIn('"error_stage":"final_generation_request"', log_output)
+        self.assertNotIn("로그에 포함되면 안 되는 질문", log_output)
+        self.assertNotIn("테스트회사 공시 근거 문장", log_output)
+
+    def test_http_error_keeps_only_safe_provider_code(self) -> None:
+        def http_error_urlopen(*_args: object, **_kwargs: object) -> object:
+            payload = json.dumps({
+                "error": {"code": "40001", "message": "raw provider detail must not escape"},
+            }).encode("utf-8")
+            raise urllib.error.HTTPError(
+                "https://provider.invalid", 400, "Bad Request", {}, io.BytesIO(payload)
+            )
+
+        client = HyperClovaFunctionClient(
+            api_key="in-memory-test-key", urlopen=http_error_urlopen
+        )
+        with self.assertRaises(HcxFunctionCallingError) as raised:
+            client.generate_answer(
+                "사업 내용은?", self._search_call(),
+                {"evidence_bundle": {"evidence_ids": ["ev-1"]}, "data": {"results": []}},
+            )
+
+        self.assertEqual(raised.exception.code, "hcx_http_error")
+        self.assertEqual(raised.exception.stage, "final_generation_request")
+        self.assertEqual(raised.exception.http_status, 400)
+        self.assertEqual(raised.exception.provider_error_code, "40001")
+        self.assertNotIn("raw provider detail", str(raised.exception))
 
 
 if __name__ == "__main__":
