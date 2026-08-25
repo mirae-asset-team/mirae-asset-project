@@ -2,42 +2,72 @@
 
 주최 측이 제공한 공시 코퍼스를 검색·해석하고, 사용자의 주식 관련 질문에 근거 공시를 붙여 답하는 HyperCLOVA X 기반 질의응답 시스템 프로젝트입니다.
 
-처음 프로젝트를 보는 팀원은 [초보자용 프로젝트 구조·테스트·잔여 작업 안내](docs/README-beginner-project-guide.md)부터 읽어 주세요. 지금까지 구현한 흐름, 구조도, 테스트 방법, NCP 실행과 남은 전체 embedding 작업을 한 문서에 정리했습니다.
+처음 프로젝트를 보는 팀원은 [초보자용 프로젝트 구조·테스트·잔여 작업 안내](docs/README-project-guide.md)부터 읽어 주세요. 지금까지 구현한 흐름, 구조도, 테스트 방법, NCP 실행과 남은 전체 embedding 작업을 한 문서에 정리했습니다.
 
 팀 저장소: [ksm12030-sudo/mirae-asset-project](https://github.com/ksm12030-sudo/mirae-asset-project)
 
 ## 현재 개발 상태와 인수인계
 
-> **2026-08-22 기준:** Loop 1 구현·평가는 완료됐지만 품질 판정은 `NO-GO / BLOCKED_EXTERNAL`입니다. top-20 결과와 독립적으로 overlay/search 원장에서 만든 120개 질문·234개 target occurrence(19 source records, 36 unique evidence IDs)에서 Recall@20 `0.487179...`를 두 번 재현했습니다. text residual의 최대 개선 가능폭이 5%p를 넘어 embedding pilot은 적격이지만, 외부 provider 비용 실행 전이므로 채택하지 않았습니다. 이번 변경은 운영 서버에 배포하지 않았습니다.
+> **2026-08-25 기준:** 재무계정 카탈로그, chunk-v1, BGE-M3/FAISS pilot 코드, Sparse/Dense/Hybrid retrieval, 5개 Tool Registry, Evidence Gate, HCX Function Calling V1.1, FastAPI runtime 연결과 팀용 Web까지 구현했습니다. 실제 NCP HCX smoke에서 `answered`, `answer_allowed=true`, citation과 DART `rcept_no` 보존을 확인했습니다. 현재 운영 검색은 안전한 Sparse/Structured 경로이며, 전체 corpus Dense embedding과 운영 runtime 연결은 아직 남아 있습니다.
 
-| 항목 | 현재 상태 | 다음 판단 |
+### 현재 한눈에 보기
+
+```text
+사용자 Web 질문
+→ POST /v1/hcx/function-answer
+→ HCX가 등록된 Tool 선택
+→ ToolRegistry가 argument 검증 후 Tool 실행
+→ EvidenceService / Sparse retrieval / read-only SQLite 조회
+→ Evidence 충분성과 실제 rcept_no 검증
+→ answer_allowed=true인 경우에만 HCX 최종 답변 생성
+→ backend가 검증된 citation과 접수번호를 Web에 반환
+```
+
+| 영역 | 2026-08-25 상태 | 다음 작업 |
 |---|---|---|
-| 작업 브랜치 | `agent/disclosure-db-foundation` | 이 브랜치에서 계속 작업 |
-| Task 1 정책·AnalysisPlan | 구현 및 검증 완료 | 보수적 정책 경계 유지 |
-| Task 2 슬롯 검색·RRF | 구현 및 독립 재검토 PASS | 회귀 테스트 유지 |
-| Task 3 자유형 Gold·검색 평가 | `NO-GO` | Recall@20 `0.487179...` < `0.95` |
-| 임베딩·vector index | `BLOCKED_EXTERNAL` | pilot 적격, 실제 gain·p95 미측정 |
-| 운영 배포 | 이번 Loop 1 변경 미배포 | dense 측정과 GO 판정 전 금지 |
+| 작업 브랜치 | `agent/financial-account-catalog-v1` | 이 브랜치에서 계속 작업 |
+| 최신 공유 커밋 | `84cbb22` | HCX V1.1·Web·문서 기준점으로 유지 |
+| 재무계정 카탈로그 | 구현·테스트 완료 | 신규 계정 추가 시 중앙 카탈로그만 확장 |
+| Embedding Chunk v1 | XML/HTML/PDF, streaming, checkpoint/resume 구현 완료 | 전체 corpus 산출물의 manifest와 count 확인 |
+| Sparse 검색 | 운영 기본 경로, 기존 품질·metadata 정책 유지 | Dense 도입 후에도 fallback으로 유지 |
+| BGE-M3/FAISS | 실제 모델 builder와 10/100개 smoke 계약 구현 | 전체 corpus vector artifact 생성·검증 |
+| Hybrid retrieval | RRF, 중복 제거, filter, Sparse fallback 구현 | 전체 Dense 품질 gate 통과 후 runtime 주입 |
+| Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
+| HCX Function Calling | V1.1 실제 smoke 성공 | 운영 5종 질문 반복 smoke와 장애율 측정 |
+| FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
+| 테스트 | Python `486 passed, 2 skipped`; Web JS `12 passed` | Dense artifact 준비 후 skip된 통합 테스트 실행 |
+| PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
-차단 원인은 두 단계로 해결했습니다. 첫째, 수익성·재무건전성 슬롯 계약의 `min_periods=2`를 구조화 하위 질의에 전달했습니다. 둘째, 질문 전체에서 추론된 손익계산서 `statement_type=IS`가 재무상태표 슬롯까지 전파되어 자산·부채를 차단하던 교차 슬롯 간섭을 제거했습니다. 일반 최신값 lookup은 1개 기간, 명시적 3개년 질문은 3개 기간을 그대로 유지합니다.
+### 현재 품질 경계
 
-다음 작업자는 아래 순서로 시작합니다.
+- 독립 free-form 기준선의 Sparse Recall@20은 `0.487179...`이며 목표 `0.95`보다 낮습니다.
+- residual text가 있어 Dense pilot 실행 자격은 있지만, 전체 Dense gain과 latency를 아직 측정하지 않았습니다.
+- 현재 Dense 상태는 `smoke_only`이고 Function Calling runtime에는 `HybridRetriever(sparse, None)`으로 주입됩니다.
+- 따라서 지금 서비스가 전체 corpus 의미 검색 성능을 확보했다고 주장하면 안 됩니다.
+- 원본 base DB, overlay, search SQLite는 계속 read-only로 유지합니다.
+- HCX credential, `.env`, SQLite, chunk JSONL, FAISS index와 모델 파일은 Git에 올리지 않습니다.
+
+### 다음 작업자가 시작하는 순서
 
 ```powershell
 git fetch origin
-git switch agent/disclosure-db-foundation
+git switch agent/financial-account-catalog-v1
 git pull --ff-only
 $env:PYTHONPATH = 'src'
-python -m pytest tests/test_freeform_evaluation.py tests/test_dense_retrieval.py tests/test_search_index.py tests/test_analysis_planner.py -q
+.\.venv\Scripts\python.exe -m pytest -q
+node --test tests\web_api.test.mjs tests\web_history.test.mjs
 ```
 
-1. [Loop 1 핸드오프](docs/handoffs/2026-08-21-loop1-freeform-retrieval-handoff.md)를 전부 읽습니다.
-2. [설계 문서](docs/superpowers/specs/2026-08-21-freeform-judgment-agent-design.md)와 [구현 계획](docs/superpowers/plans/2026-08-21-freeform-judgment-agent.md)을 확인합니다.
-3. Loop 1의 독립 Gold와 `data/derived/freeform_retrieval_summary.json`을 고정 기준선으로 유지합니다.
-4. 잔여 text case 36건에 대해 승인된 provider 비용 실행으로 dense pilot을 측정합니다.
-5. dense가 전체 동일 분모에서 +5%p 이상, wrong issuer/version 0, p95 2초 이하일 때만 채택합니다. 그 전에는 Task 4와 NCP 재배포를 시작하지 않습니다.
+1. [8/23~8/25 작업 전체 요약](docs/README-project-guide.md)와 [개발 로그](docs/development-log.md)의 2026-08-23~25 기록을 읽습니다.
+2. NCP에서 최신 Web image를 rebuild/recreate하고 `/health`, `/`, 재무·일반 검색·트렌드·정정·근거 부족 5종 smoke를 확인합니다.
+3. Git 밖의 전용 디스크에 전체 chunk-v1을 생성하고 manifest의 전체 수·형식별 수·token 통계·실패 수를 검증합니다.
+4. BGE-M3 10개 smoke를 batch-size 2로 먼저 실행하고 vector/metadata 순서, 1024차원, L2 norm, 실패·truncation을 확인합니다.
+5. 같은 계약으로 전체 corpus FAISS artifact를 checkpoint/resume 방식으로 생성합니다.
+6. 독립 Gold에서 Sparse 대비 Recall@20 개선폭 `+5%p` 이상, wrong issuer/version `0`, p95 `2초` 이하를 모두 통과할 때만 Dense를 채택합니다.
+7. 통과한 artifact만 NCP read-only 경로로 옮기고 `DISCLOSURE_DENSE_*` 설정과 runtime composition을 연결합니다. Dense 장애 시 Sparse fallback과 Evidence/접수번호 hard gate는 유지합니다.
+8. 전체 corpus HCX E2E와 Web 5종 질문을 다시 실행하고 결과를 [개발 로그](docs/development-log.md)에 기록합니다.
 
-작업 판단과 검증 결과는 [개발 로그](docs/development-log.md)에 기록합니다. D드라이브의 base DB, live overlay, live search index는 읽기 전용이며 staging 산출물만 새로 만듭니다. credential, 서버 `.env`, provider 원문 응답, 대용량 DB는 Git에 올리지 않습니다. Dense pilot과 Task 4 이후, NCP 재배포는 별도 검증·승인 범위입니다.
+세부 embedding 명령, 환경변수, NCP 재배포 순서는 [초보자용 프로젝트 안내](docs/README-project-guide.md)의 “남은 핵심 작업: 전체 embedding” 절을 따릅니다.
 
 ## 공식 제약
 
