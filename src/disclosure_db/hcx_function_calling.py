@@ -1422,10 +1422,16 @@ class HcxFunctionCallingService:
                 for fact in facts
             )
             if has_validated_actual and _FORECAST_CLAIM.search(generated.answer):
-                grounded = self._deterministic_financial_answer(
-                    tool_response,
-                    list(tool_response.get("evidence_bundle", {}).get("evidence_ids", [])),  # type: ignore[union-attr]
-                ) if route is not None and route.workflow == "single" else None
+                available_ids = list(
+                    tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
+                )
+                grounded = (
+                    self._deterministic_financial_answer(tool_response, available_ids)
+                    if route is not None and route.workflow == "single"
+                    else self._deterministic_financial_comparison_answer(tool_response, available_ids)
+                    if route is not None and route.workflow == "financial_comparison"
+                    else None
+                )
                 if grounded is None:
                     raise HcxProtocolError("hcx_final_forecast_conflicts_with_validated_actual")
                 generated = grounded
@@ -1495,6 +1501,50 @@ class HcxFunctionCallingService:
             return None
         answer = sentences[0] if len(sentences) == 1 else "\n".join(f"- {item}" for item in sentences)
         return HcxGeneratedAnswer(answer, tuple(available_evidence_ids[:5]))
+
+    @staticmethod
+    def _deterministic_financial_comparison_answer(
+        tool_response: Mapping[str, object],
+        available_evidence_ids: Sequence[str],
+    ) -> HcxGeneratedAnswer | None:
+        data = tool_response.get("data")
+        comparison = data.get("comparison") if isinstance(data, Mapping) else None
+        if not isinstance(comparison, Mapping) or comparison.get("status") != "complete" or not available_evidence_ids:
+            return None
+        values = comparison.get("values")
+        rows = [item for item in values if isinstance(item, Mapping)] if isinstance(values, list) else []
+        if len(rows) < 2:
+            return None
+        metric = str(comparison.get("metric") or "재무 수치")
+        lines = [
+            f"{row.get('company')} {row.get('period')}년 {metric}은 {row.get('display_value')}입니다."
+            for row in rows
+            if row.get("company") and row.get("period") and row.get("display_value")
+        ]
+        if len(lines) != len(rows):
+            return None
+        largest_period = comparison.get("largest_period")
+        winner = comparison.get("winner")
+        if largest_period:
+            lines.append(f"따라서 {largest_period}년 {metric}이 더 큽니다.")
+        elif winner:
+            lines.append(f"따라서 {winner}의 {metric}이 더 큽니다.")
+        calculations = comparison.get("calculations")
+        calculation_rows = [item for item in calculations if isinstance(item, Mapping)] if isinstance(calculations, list) else []
+        difference = next((item for item in calculation_rows if item.get("operation") == "difference"), None)
+        growth = next((item for item in calculation_rows if item.get("operation") == "growth_rate"), None)
+        if difference is not None and difference.get("value") is not None:
+            display_difference = format_financial_value(str(difference["value"]), 1, str(difference.get("unit") or "KRW"))
+            if display_difference:
+                lines.append(f"기간 차이는 {display_difference}입니다.")
+        if growth is not None and growth.get("value") is not None:
+            try:
+                growth_value = Decimal(str(growth["value"]))
+            except (InvalidOperation, ValueError):
+                pass
+            else:
+                lines.append(f"증가율은 약 {growth_value:.2f}%입니다.")
+        return HcxGeneratedAnswer("\n".join(lines), tuple(available_evidence_ids[:5]))
 
     @staticmethod
     def _deterministic_trend_answer(

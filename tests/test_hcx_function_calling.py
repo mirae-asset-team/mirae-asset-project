@@ -575,7 +575,7 @@ class HcxFunctionCallingTests(unittest.TestCase):
         })
         client = FakeHcxClient(
             self._search_call(),
-            generated=HcxGeneratedAnswer("2025년 실제 매출액이 더 큽니다.", ("ev-2024", "ev-2025")),
+            generated=HcxGeneratedAnswer("2025년 매출액이 더 커질 것으로 예상됩니다.", ("ev-2024", "ev-2025")),
         )
         service = HcxFunctionCallingService(
             registry, client, router=DeterministicQuestionRouter(["SK하이닉스"]),  # type: ignore[arg-type]
@@ -592,6 +592,9 @@ class HcxFunctionCallingTests(unittest.TestCase):
             ["difference", "growth_rate"],
         )
         self.assertEqual(result.tool_response["data"]["comparison"]["largest_period"], "2025")
+        self.assertIn("2025년 매출이 더 큽니다", result.answer)
+        self.assertIn("50.00%", result.answer)
+        self.assertNotIn("예상", result.answer)
         self.assertFalse(result.metadata["tool_selection_called"])
 
     def test_multi_period_comparison_blocks_when_one_required_period_is_missing(self) -> None:
