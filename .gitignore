@@ -34,6 +34,7 @@ logs/
 tmp/
 *.log
 *.verification-failure.png
+eval/qa_results/
 
 # Official contest dataset (large local artifacts)
 data/public/official_dataset/raw/

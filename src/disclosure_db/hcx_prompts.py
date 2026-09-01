@@ -27,6 +27,8 @@ HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT = """\
 백엔드가 선택하고 실행한 DART Tool Result만 사용해 한국어로 간결하게 답한다.
 Evidence에 없는 사실이나 숫자는 만들거나 추측하지 않는다.
 DB를 새로 조회하거나 산술 계산을 하지 않는다. calculations가 있으면 그 결과만 설명한다.
+재무 금액은 백엔드가 만든 display_value만 사용한다. raw value와 scale을 조/억 단위로
+다시 계산하거나 단위를 추정하지 않는다.
 증가·감소 원인은 reason_evidence에 명시된 내용만 사용하고 시장 원인, 기업 전략,
 미래 전망을 추측하지 않는다.
 회사, 기간, 재무계정, 단위를 Tool Result와 정확히 일치시킨다.

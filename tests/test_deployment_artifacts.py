@@ -96,6 +96,20 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn("smoke-answerable", smoke)
         self.assertIn("smoke-injection", smoke)
 
+    def test_staging_reuses_dense_and_enables_eval_only_on_port_8001(self):
+        compose = Path("compose.yaml").read_text(encoding="utf-8")
+        deploy = Path("scripts/deploy_staging.ps1").read_text(encoding="utf-8")
+        self.assertEqual(compose.splitlines().count("  dense-retriever:"), 1)
+        self.assertIn("disclosure-agent-staging:", compose)
+        self.assertIn('ports: ["8001:8000"]', compose)
+        self.assertIn('EVAL_ENABLED: "1"', compose)
+        self.assertIn("DISCLOSURE_DENSE_URL: http://dense-retriever:8080", compose)
+        self.assertIn("qa-eval-data:/app/eval", compose)
+        self.assertIn("docker compose build disclosure-agent-staging", deploy)
+        self.assertIn("docker compose up -d --no-deps disclosure-agent-staging", deploy)
+        self.assertNotIn("docker compose down", deploy)
+        self.assertNotIn("CLOVASTUDIO_API_KEY=", deploy)
+
 
 if __name__ == "__main__":
     unittest.main()

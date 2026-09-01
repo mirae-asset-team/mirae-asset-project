@@ -2,6 +2,7 @@
 .github
 .env
 data/
+eval/qa_results/
 references/official/source_archives/
 tests/
 docs/

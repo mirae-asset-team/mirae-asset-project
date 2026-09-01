@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import os
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -12,6 +13,7 @@ from .attestation import verify_fast_identity
 from .agent import DisclosureAgent
 from .agent_contracts import to_jsonable
 from .calculator import calculate
+from .qa_evaluation import QA_CATEGORIES, QaCaseStore, QaEvaluator
 from .public_limits import PublicLimitSettings, PublicRequestLimiter
 from .query_planner import plan_query
 
@@ -164,6 +166,17 @@ def create_app(
     class HcxFunctionCallingRequest(BaseModel):
         question: str = Field(min_length=1, max_length=2000)
 
+    class EvalCaseRequest(BaseModel):
+        id: str = Field(min_length=3, max_length=100)
+        question: str = Field(min_length=1, max_length=2000)
+        category: str
+        expected: dict[str, Any] = Field(default_factory=dict)
+        forbidden_phrases: list[str] = Field(default_factory=list)
+
+    class EvalRunRequest(BaseModel):
+        ids: list[str] = Field(default_factory=list)
+        failed_only: bool = False
+
     class ContestQueryRequest(BaseModel):
         question_id: str | None = Field(default=None, max_length=200)
         question: str = Field(min_length=1, max_length=4000)
@@ -184,6 +197,17 @@ def create_app(
     web_directory = Path(__file__).with_name("web")
     limit_settings = PublicLimitSettings.from_env() if public_limits is None else public_limits
     request_limiter = PublicRequestLimiter(limit_settings)
+    eval_enabled = os.environ.get("EVAL_ENABLED") == "1"
+    project_root = Path(__file__).resolve().parents[2]
+    eval_store = QaCaseStore(
+        Path(os.environ.get("EVAL_CASES_PATH") or project_root / "eval" / "qa_cases.jsonl"),
+        Path(os.environ.get("EVAL_RESULTS_DIR") or project_root / "eval" / "qa_results"),
+    ) if eval_enabled else None
+    evaluator = (
+        QaEvaluator(function_calling_service, eval_store)
+        if eval_store is not None and function_calling_service is not None
+        else None
+    )
 
     @app.middleware("http")
     async def security_headers(request, call_next):
@@ -231,6 +255,12 @@ def create_app(
     def public_web():
         return FileResponse(web_directory / "index.html")
 
+    @app.get("/eval", include_in_schema=False)
+    def eval_web():
+        if not eval_enabled:
+            raise HTTPException(status_code=404, detail="not_found")
+        return FileResponse(web_directory / "eval.html")
+
     @app.on_event("startup")
     async def validate_runtime_once() -> None:
         """Run the full read-only runtime validation before serving requests.
@@ -272,6 +302,7 @@ def create_app(
         health_payload["function_calling_configured"] = bool(
             function_calling_service is not None and getattr(function_client, "configured", False)
         )
+        health_payload["eval_enabled"] = eval_enabled
         return envelope(health_payload, started)
 
     def verified_answer(
@@ -444,5 +475,89 @@ def create_app(
 
     hcx_function_answer.__annotations__["request"] = HcxFunctionCallingRequest
     app.post("/v1/hcx/function-answer")(hcx_function_answer)
+
+    def require_eval() -> tuple[QaCaseStore, QaEvaluator]:
+        if not eval_enabled:
+            raise HTTPException(status_code=404, detail="not_found")
+        if eval_store is None or evaluator is None:
+            raise HTTPException(status_code=503, detail="eval_runtime_not_ready")
+        return eval_store, evaluator
+
+    @app.get("/v1/eval/cases")
+    def list_eval_cases() -> dict[str, object]:
+        store, _ = require_eval()
+        return {"categories": sorted(QA_CATEGORIES), "cases": store.list_cases()}
+
+    def create_eval_case(request: EvalCaseRequest) -> dict[str, object]:
+        store, _ = require_eval()
+        try:
+            return store.create(request.model_dump())
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    create_eval_case.__annotations__["request"] = EvalCaseRequest
+    app.post("/v1/eval/cases", status_code=201)(create_eval_case)
+
+    def update_eval_case(identifier: str, request: EvalCaseRequest) -> dict[str, object]:
+        store, _ = require_eval()
+        try:
+            return store.update(identifier, request.model_dump())
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="qa_case_not_found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    update_eval_case.__annotations__["request"] = EvalCaseRequest
+    app.put("/v1/eval/cases/{identifier}")(update_eval_case)
+
+    @app.delete("/v1/eval/cases/{identifier}", status_code=204)
+    def delete_eval_case(identifier: str) -> None:
+        store, _ = require_eval()
+        try:
+            store.delete(identifier)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="qa_case_not_found") from exc
+
+    def run_eval(request: EvalRunRequest) -> dict[str, object]:
+        store, runner = require_eval()
+        cases = store.list_cases()
+        selected_ids = set(request.ids)
+        if request.failed_only:
+            previous = store.list_results()
+            failed_ids = {
+                str(row.get("qa_id"))
+                for row in (previous[0].get("results", []) if previous else [])
+                if isinstance(row, dict) and row.get("status") == "FAIL"
+            }
+            selected_ids.update(failed_ids)
+        if selected_ids:
+            cases = [case for case in cases if str(case["id"]) in selected_ids]
+        if not cases:
+            raise HTTPException(status_code=400, detail="qa_cases_empty")
+        return runner.run(cases)
+
+    run_eval.__annotations__["request"] = EvalRunRequest
+    app.post("/v1/eval/run")(run_eval)
+
+    @app.post("/v1/eval/run/{identifier}")
+    def run_one_eval(identifier: str) -> dict[str, object]:
+        store, runner = require_eval()
+        cases = [case for case in store.list_cases() if case["id"] == identifier]
+        if not cases:
+            raise HTTPException(status_code=404, detail="qa_case_not_found")
+        return runner.run(cases)
+
+    @app.get("/v1/eval/results")
+    def list_eval_results() -> list[dict[str, object]]:
+        store, _ = require_eval()
+        return store.list_results()
+
+    @app.get("/v1/eval/results/{run_id}")
+    def get_eval_result(run_id: str) -> dict[str, object]:
+        store, _ = require_eval()
+        try:
+            return store.get_result(run_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="qa_result_not_found") from exc
 
     return app

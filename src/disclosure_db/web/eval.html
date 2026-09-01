@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>공시 Agent QA Dashboard</title>
+    <link rel="stylesheet" href="/static/eval.css">
+  </head>
+  <body>
+    <header class="qa-header">
+      <div><p>MIRAE ASSET · STAGING ONLY</p><h1>공시 Agent QA Dashboard</h1></div>
+      <a href="/">일반 Agent로 이동</a>
+    </header>
+    <main>
+      <section class="stats" aria-label="최근 QA 결과">
+        <article><span>Total</span><strong id="stat-total">0</strong></article>
+        <article><span>PASS</span><strong id="stat-pass">0</strong></article>
+        <article><span>FAIL</span><strong id="stat-fail">0</strong></article>
+        <article><span>Pass Rate</span><strong id="stat-rate">0%</strong></article>
+        <article><span>최근 실행</span><strong id="stat-time">없음</strong></article>
+      </section>
+
+      <section class="toolbar" aria-label="QA 실행 작업">
+        <button id="add-case" type="button">QA 추가</button>
+        <button id="run-all" type="button">전체 실행</button>
+        <button id="run-selected" type="button">선택 실행</button>
+        <button id="run-failed" type="button">FAIL만 재실행</button>
+        <span id="qa-status" role="status" aria-live="polite">준비됨</span>
+      </section>
+
+      <section class="case-panel">
+        <div class="panel-heading"><h2>QA 목록</h2><span>체크박스로 실행 대상을 선택하세요.</span></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>선택</th><th>상태</th><th>질문</th><th>Category</th><th>Failure layer</th><th>Latency</th><th>관리</th></tr></thead>
+            <tbody id="case-list"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="detail-panel" class="detail-panel" hidden>
+        <div class="panel-heading"><h2>실패 상세</h2><button id="copy-report" type="button">Codex용 오류 보고서 복사</button></div>
+        <dl id="failure-summary"></dl>
+        <div class="trace-grid">
+          <article><h3>Resolver Trace</h3><div id="resolver-trace"></div></article>
+          <article><h3>Executor Trace</h3><div id="executor-trace"></div></article>
+          <article><h3>Evidence</h3><div id="evidence-trace"></div></article>
+          <article><h3>Call Counts</h3><div id="calls-trace"></div></article>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="case-dialog">
+      <form id="case-form" method="dialog">
+        <div class="dialog-heading"><h2 id="form-title">QA 추가</h2><button value="cancel" aria-label="닫기">×</button></div>
+        <input id="case-original-id" type="hidden">
+        <label>QA ID<input id="case-id" required pattern="[a-z0-9][a-z0-9_-]{2,99}"></label>
+        <label>질문<textarea id="case-question" required rows="3"></textarea></label>
+        <label>Category<select id="case-category" required></select></label>
+        <div class="form-grid">
+          <label>회사 1<input id="case-company" placeholder="삼성전자"></label>
+          <label>회사 목록(쉼표 구분)<input id="case-companies" placeholder="에스엠, 하이브"></label>
+          <label>기간<input id="case-period" placeholder="2025"></label>
+          <label>Metric<input id="case-metric" placeholder="매출액"></label>
+          <label>Workflow<input id="case-workflow" placeholder="financial_comparison"></label>
+          <label>금지 문구(쉼표 구분)<input id="case-forbidden"></label>
+        </div>
+        <fieldset><legend>Expected flags</legend>
+          <label><input id="flag-numeric" type="checkbox"> Backend 숫자/표시값 필수</label>
+          <label><input id="flag-citation" type="checkbox"> Citation 필수</label>
+          <label><input id="flag-answer" type="checkbox"> answer_allowed=true</label>
+          <label>Dense 최대<input id="case-dense" type="number" min="0" value="0"></label>
+          <label>Function Calling 최대<input id="case-fc" type="number" min="0" value="0"></label>
+        </fieldset>
+        <div class="dialog-actions"><button value="cancel">취소</button><button id="save-case" type="submit" value="default">저장</button></div>
+      </form>
+    </dialog>
+    <script type="module" src="/static/eval.js"></script>
+  </body>
+</html>
