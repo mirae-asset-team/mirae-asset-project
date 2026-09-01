@@ -235,6 +235,8 @@ def _first_failure(
     evidence = trace["evidence"]
     calls = trace["calls"]
     assert all(isinstance(item, Mapping) for item in (resolver, executors, evidence, calls))
+    if result.get("status") in {"error", "provider_unavailable"}:
+        return "INFRA", "successful runtime", result.get("status"), "runtime_or_provider_unavailable"
     for key in ("companies", "period", "metric", "workflow"):
         if key in expected and expected[key] != resolver.get(key):
             return "RESOLVER", expected[key], resolver.get(key), f"resolver_{key}_mismatch"
@@ -272,12 +274,35 @@ def _first_failure(
     if expected.get("answer_allowed") is not None and expected.get("answer_allowed") != evidence.get("answer_allowed"):
         return "EVIDENCE", expected.get("answer_allowed"), evidence.get("answer_allowed"), "answer_gate_mismatch"
     answer = str(result.get("answer") or "")
+    if result.get("answer_allowed") is True and not answer.strip():
+        return "HCX_FINAL", "non-empty answer", "", "agent_answer_missing"
     for phrase in case.get("forbidden_phrases", []):
         if phrase and phrase in answer:
             return "HCX_FINAL", f"not contains {phrase}", phrase, "forbidden_phrase_present"
-    if result.get("status") in {"error", "provider_unavailable"}:
-        return "INFRA", "successful runtime", result.get("status"), "runtime_or_provider_unavailable"
     return None, None, None, None
+
+
+def _safe_citations(result: Mapping[str, object]) -> list[dict[str, object]]:
+    citations = result.get("citations")
+    if not isinstance(citations, list):
+        return []
+    allowed = {"evidence_id", "rcept_no", "filing_id", "report_name", "filed_at", "section_title"}
+    return [
+        {key: value for key, value in citation.items() if key in allowed}
+        for citation in citations
+        if isinstance(citation, Mapping)
+    ]
+
+
+def _actual_summary(result: Mapping[str, object], trace: Mapping[str, object]) -> dict[str, object]:
+    resolver = trace.get("resolver") if isinstance(trace.get("resolver"), Mapping) else {}
+    executors = trace.get("executors") if isinstance(trace.get("executors"), Mapping) else {}
+    return {
+        "runtime_status": result.get("status"),
+        "resolver": dict(resolver),
+        "workflow": resolver.get("workflow"),
+        "executors": list(executors.get("tools") or []),
+    }
 
 
 class QaEvaluator:
@@ -285,21 +310,61 @@ class QaEvaluator:
         self.service = function_calling_service
         self.store = store
 
+    def _execute(self, question: str) -> tuple[dict[str, object], dict[str, object], str | None]:
+        started = perf_counter()
+        try:
+            route = self.service.router.route(question) if getattr(self.service, "router", None) else None
+            result_object = self.service.answer(question)
+            result = result_object.to_dict() if hasattr(result_object, "to_dict") else dict(result_object)
+            trace = build_eval_trace(route, result, (perf_counter() - started) * 1_000)
+            return result, trace, None
+        except Exception:  # The dashboard must report runtime failure without exposing internals.
+            result = {
+                "status": "error", "answer": "", "answer_allowed": False,
+                "citations": [], "metadata": {},
+            }
+            trace = build_eval_trace(None, result, (perf_counter() - started) * 1_000)
+            return result, trace, "agent_execution_failed"
+
+    def run_question(self, question: str) -> dict[str, object]:
+        """Run the real configured Agent once for the dashboard quick test."""
+        result, trace, execution_error = self._execute(question)
+        failure_layer = "INFRA" if execution_error or result.get("status") in {"error", "provider_unavailable"} else None
+        failure_reason = execution_error or ("runtime_or_provider_unavailable" if failure_layer else None)
+        return {
+            "question": question,
+            "status": "FAIL" if failure_layer else "PASS",
+            "failure_layer": failure_layer,
+            "failure_reason": failure_reason,
+            "answer": str(result.get("answer") or ""),
+            "actual": _actual_summary(result, trace),
+            "evidence_status": dict(trace["evidence"]),
+            "citations": _safe_citations(result),
+            "trace": trace,
+            "latency_ms": trace["latency_ms"],
+        }
+
     def run(self, cases: Sequence[Mapping[str, object]]) -> dict[str, object]:
         rows: list[dict[str, object]] = []
         for case in cases:
-            route = self.service.router.route(str(case["question"])) if getattr(self.service, "router", None) else None
-            started = perf_counter()
-            result_object = self.service.answer(str(case["question"]))
-            latency_ms = (perf_counter() - started) * 1_000
-            result = result_object.to_dict() if hasattr(result_object, "to_dict") else dict(result_object)
-            trace = build_eval_trace(route, result, latency_ms)
-            layer, expected, actual, reason = _first_failure(case, result, trace)
+            result, trace, execution_error = self._execute(str(case["question"]))
+            if execution_error:
+                layer, failure_expected, failure_actual, reason = (
+                    "INFRA", "successful runtime", "error", execution_error,
+                )
+            else:
+                layer, failure_expected, failure_actual, reason = _first_failure(case, result, trace)
             rows.append({
                 "qa_id": case["id"], "question": case["question"], "category": case["category"],
                 "status": "PASS" if layer is None else "FAIL",
-                "failure_layer": layer, "expected": expected, "actual": actual,
-                "short_reason": reason, "trace": trace,
+                "failure_layer": layer, "failure_reason": reason, "short_reason": reason,
+                "expected": dict(case["expected"]),
+                "actual": _actual_summary(result, trace),
+                "failure_expected": failure_expected, "failure_actual": failure_actual,
+                "agent_answer": str(result.get("answer") or ""),
+                "evidence_status": dict(trace["evidence"]),
+                "citations": _safe_citations(result),
+                "latency_ms": trace["latency_ms"], "trace": trace,
             })
         passed = sum(row["status"] == "PASS" for row in rows)
         run = {

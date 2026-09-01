@@ -177,6 +177,9 @@ def create_app(
         ids: list[str] = Field(default_factory=list)
         failed_only: bool = False
 
+    class EvalQuickQuestionRequest(BaseModel):
+        question: str = Field(min_length=1, max_length=2000)
+
     class ContestQueryRequest(BaseModel):
         question_id: str | None = Field(default=None, max_length=200)
         question: str = Field(min_length=1, max_length=4000)
@@ -538,6 +541,13 @@ def create_app(
 
     run_eval.__annotations__["request"] = EvalRunRequest
     app.post("/v1/eval/run")(run_eval)
+
+    def run_eval_quick_question(request: EvalQuickQuestionRequest) -> dict[str, object]:
+        _, runner = require_eval()
+        return runner.run_question(request.question)
+
+    run_eval_quick_question.__annotations__["request"] = EvalQuickQuestionRequest
+    app.post("/v1/eval/quick-answer")(run_eval_quick_question)
 
     @app.post("/v1/eval/run/{identifier}")
     def run_one_eval(identifier: str) -> dict[str, object]:

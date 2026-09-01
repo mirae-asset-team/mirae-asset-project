@@ -189,6 +189,26 @@ class QaEvaluationTests(unittest.TestCase):
             self.assertEqual(failure["failure_layer"], "RESOLVER")
             self.assertEqual(failure["short_reason"], "resolver_companies_mismatch")
 
+    def test_runtime_exception_is_a_sanitized_infra_failure(self) -> None:
+        class FailingService(FakeEvaluationService):
+            def answer(self, question: str) -> FunctionCallingResult:
+                raise RuntimeError("database password and stack details")
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = QaCaseStore(root / "qa_cases.jsonl", root / "qa_results")
+            case = {
+                "id": "infra_failure_001", "question": "실제 Agent 질문",
+                "category": "search", "expected": {}, "forbidden_phrases": [],
+            }
+            run = QaEvaluator(FailingService(), store).run([case])
+
+        failure = run["results"][0]
+        self.assertEqual(failure["status"], "FAIL")
+        self.assertEqual(failure["failure_layer"], "INFRA")
+        self.assertEqual(failure["failure_reason"], "agent_execution_failed")
+        self.assertNotIn("password", str(failure))
+
     def test_first_regression_jsonl_runs_as_four_structural_mock_cases(self) -> None:
         class RegressionService(FakeEvaluationService):
             def __init__(self) -> None:

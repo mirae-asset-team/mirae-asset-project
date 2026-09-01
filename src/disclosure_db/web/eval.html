@@ -12,6 +12,21 @@
       <a href="/">일반 Agent로 이동</a>
     </header>
     <main>
+      <section class="quick-test" aria-labelledby="quick-title">
+        <div class="panel-heading"><div><h2 id="quick-title">빠른 질문 테스트</h2><span>현재 staging Agent에 실제 질문을 1회 실행합니다.</span></div></div>
+        <form id="quick-form">
+          <textarea id="quick-question" rows="3" required placeholder="예: 삼성전자 2024년 매출액은?"></textarea>
+          <button id="quick-run" type="submit">실제 Agent 실행</button>
+        </form>
+        <div id="quick-result" class="quick-result" hidden>
+          <div class="result-heading"><strong id="quick-status"></strong><span id="quick-latency"></span></div>
+          <p id="quick-error" class="error-message" hidden></p>
+          <h3>Actual Agent Answer</h3><div id="quick-answer" class="answer-box"></div>
+          <h3>근거 공시</h3><ul id="quick-citations"></ul>
+          <button id="quick-save" type="button">QA로 저장</button>
+        </div>
+      </section>
+
       <section class="stats" aria-label="최근 QA 결과">
         <article><span>Total</span><strong id="stat-total">0</strong></article>
         <article><span>PASS</span><strong id="stat-pass">0</strong></article>
@@ -39,7 +54,7 @@
       </section>
 
       <section id="detail-panel" class="detail-panel" hidden>
-        <div class="panel-heading"><h2>실패 상세</h2><button id="copy-report" type="button">Codex용 오류 보고서 복사</button></div>
+        <div class="panel-heading"><h2>QA 결과 상세</h2><button id="copy-report" type="button">Codex용 오류 보고서 복사</button></div>
         <dl id="failure-summary"></dl>
         <div class="trace-grid">
           <article><h3>Resolver Trace</h3><div id="resolver-trace"></div></article>
@@ -52,7 +67,7 @@
 
     <dialog id="case-dialog">
       <form id="case-form" method="dialog">
-        <div class="dialog-heading"><h2 id="form-title">QA 추가</h2><button value="cancel" aria-label="닫기">×</button></div>
+        <div class="dialog-heading"><h2 id="form-title">QA 추가</h2><button id="close-case" type="button" aria-label="닫기">×</button></div>
         <input id="case-original-id" type="hidden">
         <label>QA ID<input id="case-id" required pattern="[a-z0-9][a-z0-9_-]{2,99}"></label>
         <label>질문<textarea id="case-question" required rows="3"></textarea></label>
@@ -72,8 +87,16 @@
           <label>Dense 최대<input id="case-dense" type="number" min="0" value="0"></label>
           <label>Function Calling 최대<input id="case-fc" type="number" min="0" value="0"></label>
         </fieldset>
-        <div class="dialog-actions"><button value="cancel">취소</button><button id="save-case" type="submit" value="default">저장</button></div>
+        <div class="dialog-actions"><button id="cancel-case" type="button">취소</button><button id="save-case" type="submit" value="default">저장</button></div>
       </form>
+    </dialog>
+    <dialog id="copy-dialog">
+      <section class="copy-fallback">
+        <div class="dialog-heading"><h2>오류 보고서 직접 복사</h2><button id="close-copy" type="button" aria-label="닫기">×</button></div>
+        <p>자동 복사가 차단되었습니다. 아래 내용을 선택해서 직접 복사해 주세요.</p>
+        <textarea id="copy-text" rows="16" readonly></textarea>
+        <div class="dialog-actions"><button id="select-copy" type="button">전체 선택</button><button id="dismiss-copy" type="button">닫기</button></div>
+      </section>
     </dialog>
     <script type="module" src="/static/eval.js"></script>
   </body>
