@@ -346,17 +346,21 @@ def create_app(
 
     app.get("/answer")(official_answer)
 
-    @app.post("/v1/query/plan")
     def query_plan(request: QueryRequest) -> dict[str, Any]:
         started = perf_counter()
         plan = plan_query(request.question, company_candidates=agent.evidence_service.company_candidates(), company_hint=request.company, as_of=request.as_of)
         return envelope(plan, started)
 
-    @app.post("/v1/evidence/search")
+    query_plan.__annotations__["request"] = QueryRequest
+    app.post("/v1/query/plan")(query_plan)
+
     def evidence_search(request: SearchRequest) -> dict[str, Any]:
         started = perf_counter()
         plan = plan_query(request.question, company_candidates=agent.evidence_service.company_candidates(), company_hint=request.company, as_of=request.as_of)
         return envelope(agent.evidence_service.search(plan, limit=request.limit), started)
+
+    evidence_search.__annotations__["request"] = SearchRequest
+    app.post("/v1/evidence/search")(evidence_search)
 
     @app.get("/financial-facts", include_in_schema=False)
     @app.get("/v1/financial-facts")
@@ -411,13 +415,15 @@ def create_app(
         facts = _fetch_event_facts(service, company=company, predicate=predicate, as_of=as_of, limit=limit)
         return envelope({"facts": facts}, started)
 
-    @app.post("/v1/calculate")
     def calculation(request: CalculationRequest) -> dict[str, Any]:
         started = perf_counter()
         try:
             return envelope(calculate(request.operation, request.operands, unit=request.unit, evidence_ids=request.evidence_ids), started)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    calculation.__annotations__["request"] = CalculationRequest
+    app.post("/v1/calculate")(calculation)
 
     def answer(request: QueryRequest) -> dict[str, Any]:
         started = perf_counter()

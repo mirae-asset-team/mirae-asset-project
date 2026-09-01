@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .agent import AgentSettings, DisclosureAgent
+from .dense_client import EvidenceServiceDenseRetriever
 from .disclosure_tools import HybridSearch, build_tool_registry
 from .hcx_function_calling import (
     HcxFunctionCallingService,
@@ -15,6 +16,7 @@ from .hcx_function_calling import (
     HyperClovaFunctionClient,
 )
 from .hybrid_retrieval import HybridRetriever, SparseRetriever
+from .question_routing import DeterministicQuestionRouter
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,17 +100,23 @@ def build_function_calling_service(
             base_sha256=attestation.sha256,
             expected_base_size=attestation.size_bytes,
         )
-        # Dense remains optional and unchanged. Until a validated full-corpus
-        # artifact exists, Function Calling uses the existing sparse fallback.
-        hybrid_retriever = HybridRetriever(sparse, None)
+        remote_dense = (
+            EvidenceServiceDenseRetriever(evidence_service)
+            if getattr(evidence_service, "dense_client", None) is not None
+            else None
+        )
+        hybrid_retriever = HybridRetriever(sparse, remote_dense)  # type: ignore[arg-type]
     registry = build_tool_registry(
         hybrid_retriever=hybrid_retriever,  # type: ignore[arg-type]
         evidence_service=evidence_service,
         base_database=Path(evidence_service.base_database),
     )
+    candidate_loader = getattr(evidence_service, "company_candidates", None)
+    router = DeterministicQuestionRouter(candidate_loader()) if callable(candidate_loader) else None
     return HcxFunctionCallingService(
         registry,
         client if client is not None else HyperClovaFunctionClient(),
+        router=router,
     )
 
 

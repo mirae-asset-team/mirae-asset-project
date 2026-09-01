@@ -10,6 +10,7 @@ from unittest.mock import Mock, patch
 
 from disclosure_db.attestation import load_distribution_attestation
 from disclosure_db.agent_contracts import EvidenceRef, QueryPlan
+from disclosure_db.dense_client import DenseChunkHit
 from disclosure_db.reranker import RerankResult
 from disclosure_db.schema import create_schema, create_indexes
 from disclosure_db.evidence_service import EvidenceService
@@ -88,6 +89,30 @@ class EvidenceServiceTests(unittest.TestCase):
             self.assertEqual(bundle.evidence[0].evidence_id, "ev1")
             self.assertFalse(bundle.retrieval_diagnostics["reranker_used_provider"])
             self.assertEqual(bundle.retrieval_diagnostics["reranker_reason_codes"], ["reranker_structured_bypass"])
+
+    def test_dense_hits_are_hydrated_through_attested_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp) / "base.sqlite"
+            seed_search_db(base)
+            dense = Mock()
+            dense.search.return_value = [
+                DenseChunkHit(7, 0.91, ("ev1",), "f1"),
+            ]
+            service = EvidenceService(base, dense_client=dense)
+
+            refs, diagnostics = service._search_dense(
+                "AI 투자",
+                company="삼성전자",
+                as_of=None,
+                filed_at=None,
+                correction_policy="current",
+            )
+
+            dense.search.assert_called_once_with("AI 투자", limit=40, filing_ids=["f1"])
+            self.assertEqual([ref.evidence_id for ref in refs], ["ev1"])
+            self.assertEqual(refs[0].locator["retrieval_source"], "bge-m3-dense")
+            self.assertTrue(diagnostics["dense_used"])
+            self.assertEqual(diagnostics["dense_evidence_count"], 1)
 
     def test_admitted_structured_fact_does_not_open_generic_search_index(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

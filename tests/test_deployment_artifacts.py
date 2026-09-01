@@ -8,7 +8,23 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn("/data/base/disclosure.sqlite:ro", text)
         self.assertIn("/data/agent:ro", text)
         self.assertIn("healthcheck:", text)
+        self.assertIn("dense-retriever:", text)
+        self.assertIn("/srv/mirae/data/dense:/data/dense:ro", text)
+        self.assertIn("/srv/mirae/data/model/bge-m3:/model:ro", text)
         self.assertNotIn("CLOVASTUDIO_API_KEY=", text)
+
+    def test_full_corpus_dense_runtime_is_bounded_and_explicit(self):
+        compose = Path("compose.yaml").read_text(encoding="utf-8")
+        example = Path(".env.example").read_text(encoding="utf-8")
+        dense_dockerfile = Path("Dockerfile.dense").read_text(encoding="utf-8")
+        for name, value in (
+            ("DISCLOSURE_DENSE_TIMEOUT_SECONDS", "5"),
+            ("DISCLOSURE_DENSE_VECTOR_COUNT", "2571506"),
+        ):
+            self.assertIn(f"{name}: ${{{name}:-{value}}}", compose)
+            self.assertIn(f"{name}={value}", example)
+        self.assertIn('CMD ["disclosure-dense"]', dense_dockerfile)
+        self.assertIn('HF_HUB_OFFLINE=1', dense_dockerfile)
 
     def test_public_limit_defaults_are_explicit_in_compose_and_example_env(self):
         compose = Path("compose.yaml").read_text(encoding="utf-8")
@@ -32,7 +48,7 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn(".env\n", gitignore.replace("\r\n", "\n"))
         self.assertNotIn("in-memory-test-key", compose)
 
-    def test_container_entrypoint_composes_sparse_only_hcx_function_calling_runtime(self):
+    def test_container_entrypoint_composes_remote_dense_hybrid_function_calling_runtime(self):
         dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
         cli = Path("src/disclosure_db/cli.py").read_text(encoding="utf-8")
         runtime = Path("src/disclosure_db/runtime.py").read_text(encoding="utf-8")
@@ -40,7 +56,9 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn('CMD ["disclosure-agent", "serve"]', dockerfile)
         self.assertIn("build_runtime_services(settings)", cli)
         self.assertIn("function_calling_service=services.function_calling", cli)
-        self.assertIn("HybridRetriever(sparse, None)", runtime)
+        self.assertIn("EvidenceServiceDenseRetriever(evidence_service)", runtime)
+        self.assertIn("HybridRetriever(sparse, remote_dense)", runtime)
+        self.assertIn("DISCLOSURE_DENSE_URL: http://dense-retriever:8080", Path("compose.yaml").read_text(encoding="utf-8"))
         self.assertIn('app.post("/v1/hcx/function-answer")', api)
 
     def test_dockerfile_does_not_copy_local_data(self):

@@ -27,7 +27,10 @@ export function evidenceStatusLabel(status) {
 
 export function blockedReason(body) {
   if (body?.recommended_action === "ask_clarification") {
-    return "회사명, 기간, 재무계정 또는 공시 범위를 더 구체적으로 입력해 주세요.";
+    return answerText(body) || "회사명, 기간, 재무계정 또는 공시 범위를 더 구체적으로 입력해 주세요.";
+  }
+  if (Array.isArray(body?.warnings) && body.warnings.includes("deterministic_unavailable")) {
+    return answerText(body) || "현재 공시 Agent가 제공하는 범위 밖의 질문입니다.";
   }
   if (body?.status === "provider_unavailable") {
     return "답변 생성 서비스가 설정되지 않았습니다. 운영 담당자에게 확인해 주세요.";

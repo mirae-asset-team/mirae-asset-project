@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from contextlib import closing
 from dataclasses import asdict, dataclass, is_dataclass
+from decimal import Decimal, InvalidOperation
 import json
 from pathlib import Path
 import sqlite3
@@ -25,6 +26,52 @@ from .tool_registry import ToolDefinition, ToolRegistry, object_schema
 
 TOOL_BACKEND_VERSION = "tool-registry-v1"
 CORRECTION_POLICIES = ("current", "original", "corrected", "both")
+
+
+def normalized_financial_value(
+    value: object, scale: object = 1, unit: object = "KRW",
+) -> Decimal | None:
+    """Apply the DB value/scale contract without asking HCX to recalculate."""
+
+    if str(unit or "").upper() not in {"KRW", "원"}:
+        return None
+    try:
+        numeric = Decimal(str(value)) * Decimal(str(scale or 1))
+    except (InvalidOperation, ValueError):
+        return None
+    return numeric if numeric.is_finite() else None
+
+
+def format_financial_value(
+    value: object, scale: object = 1, unit: object = "KRW",
+) -> str | None:
+    """Format validated KRW using deterministic 조/억/만/원 groups."""
+
+    normalized = normalized_financial_value(value, scale, unit)
+    if normalized is None:
+        return None
+    if normalized != normalized.to_integral_value():
+        return f"{normalized:,.2f} 원"
+    integer = int(normalized)
+    sign = "-" if integer < 0 else ""
+    remaining = abs(integer)
+    parts: list[str] = []
+    for divisor, label in (
+        (1_000_000_000_000, "조"),
+        (100_000_000, "억"),
+        (10_000, "만"),
+    ):
+        quotient, remaining = divmod(remaining, divisor)
+        if quotient:
+            parts.append(f"{quotient:,}{label}")
+    if remaining or not parts:
+        parts.append(f"{remaining:,}원")
+    elif parts:
+        parts[-1] = f"{parts[-1]} 원"
+    rendered = " ".join(parts)
+    if not rendered.endswith("원"):
+        rendered += " 원"
+    return sign + rendered
 
 
 class HybridSearch(Protocol):
@@ -143,6 +190,7 @@ def _evidence_item(row: Mapping[str, object]) -> dict[str, object]:
         "source_path": row.get("source_path"),
         "text": row.get("text_normalized") or row.get("text") or row.get("excerpt"),
         "structured_value": row.get("structured_value") or row.get("value_numeric"),
+        "scale": row.get("scale"),
         "unit": row.get("unit") or row.get("currency") or row.get("unit_raw"),
         "quality_status": _quality_status(row),
         "retrieval_path": _retrieval_path(row),
@@ -336,6 +384,16 @@ class DisclosureToolBackend:
                 "value_numeric": fact.get("value_numeric"),
                 "scale": fact.get("scale"),
                 "unit": fact.get("currency") or fact.get("unit_raw"),
+                "normalized_value": (
+                    str(normalized)
+                    if (normalized := normalized_financial_value(
+                        fact.get("value_numeric"), fact.get("scale"), fact.get("currency") or fact.get("unit_raw")
+                    )) is not None
+                    else None
+                ),
+                "display_value": format_financial_value(
+                    fact.get("value_numeric"), fact.get("scale"), fact.get("currency") or fact.get("unit_raw")
+                ),
                 "period": _period_for_fact(fact),
                 "scope": fact.get("scope"),
                 "company_identifiers": {
@@ -413,9 +471,13 @@ class DisclosureToolBackend:
                 f"SELECT doc_group filing_type,COUNT(*) count FROM filing WHERE {where} GROUP BY doc_group ORDER BY doc_group",
                 params,
             )]
+            correction_count = int(connection.execute(
+                f"SELECT COUNT(*) count FROM filing WHERE {where} AND is_correction=1",
+                params,
+            ).fetchone()["count"])
             representative_limit = int(request.get("representative_limit") or 10)
             representatives = [dict(row) for row in connection.execute(
-                f"""SELECT f.filing_id,f.issuer_corp_code,f.issuer_name,f.listed_name,f.reporter_name,f.stock_code,
+                f"""SELECT f.filing_id,f.issuer_corp_code,f.issuer_name,f.listed_name,NULL AS reporter_name,f.stock_code,
                            f.doc_group,f.doc_subtype_normalized,f.report_name_raw,f.filed_at,f.is_correction,
                            (SELECT fr.evidence_id FROM fragment fr WHERE fr.filing_id=f.filing_id
                              ORDER BY fr.sequence_no,fr.evidence_id LIMIT 1) evidence_id,
@@ -461,6 +523,7 @@ class DisclosureToolBackend:
             {
                 "count_by_period": count_by_period,
                 "count_by_type": count_by_type,
+                "correction_count": correction_count,
                 "representative_filings": representatives,
                 "total_count": total_count,
                 "requested_range": {"start_date": request["start_date"], "end_date": request["end_date"]},
@@ -478,7 +541,7 @@ class DisclosureToolBackend:
             rows = [dict(row) for row in connection.execute(
                 """SELECT v.event_id,v.version_no,v.parent_filing_id,v.lineage_status,
                           v.lineage_confidence,v.effective_from,v.effective_to,v.is_current,v.rationale,
-                          f.filing_id,f.issuer_corp_code,f.issuer_name,f.listed_name,f.reporter_name,
+                          f.filing_id,f.issuer_corp_code,f.issuer_name,f.listed_name,NULL AS reporter_name,
                           f.stock_code,f.report_name_raw,f.filed_at,f.is_correction,
                           (SELECT fr.evidence_id FROM fragment fr WHERE fr.filing_id=f.filing_id
                             ORDER BY fr.sequence_no,fr.evidence_id LIMIT 1) evidence_id,
@@ -592,8 +655,11 @@ def _filing_filters(request: Mapping[str, object], *, include_dates: bool) -> tu
         clauses.extend(("filed_at>=?", "filed_at<=?"))
         params.extend((request["start_date"], request["end_date"]))
     if request.get("company"):
-        clauses.append("(issuer_name=? OR listed_name=? OR reporter_name=? OR stock_code=? OR issuer_corp_code=?)")
-        params.extend([request["company"]] * 5)
+        # The frozen contest corpus predates the optional reporter_name column.
+        # issuer_name/listed_name and stable identifiers cover the same company
+        # lookup while keeping both legacy and current schemas readable.
+        clauses.append("(issuer_name=? OR listed_name=? OR stock_code=? OR issuer_corp_code=?)")
+        params.extend([request["company"]] * 4)
     if request.get("filing_type"):
         clauses.append("(doc_group=? OR doc_subtype_normalized=?)")
         params.extend([request["filing_type"]] * 2)
@@ -659,6 +725,7 @@ def tool_definitions(backend: DisclosureToolBackend) -> tuple[ToolDefinition, ..
                 {
                     "count_by_period": {"type": "array", "items": {"type": "object"}},
                     "count_by_type": {"type": "array", "items": {"type": "object"}},
+                    "correction_count": {"type": "integer"},
                     "representative_filings": {"type": "array", "items": {"type": "object"}},
                     "total_count": {"type": "integer"},
                     "requested_range": {"type": "object"},
@@ -666,7 +733,7 @@ def tool_definitions(backend: DisclosureToolBackend) -> tuple[ToolDefinition, ..
                     "coverage_complete": {"type": "boolean"},
                 },
                 required=(
-                    "count_by_period", "count_by_type", "representative_filings", "total_count",
+                    "count_by_period", "count_by_type", "correction_count", "representative_filings", "total_count",
                     "requested_range", "actual_aggregate_range", "coverage_complete",
                 ),
             ),

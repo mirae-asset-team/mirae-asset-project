@@ -60,7 +60,7 @@ def test_root_serves_accessible_web_shell(ready_agent) -> None:
         "question-form",
     ):
         assert f'id="{element_id}"' in response.text
-    assert "HCX FUNCTION CALLING V1.1" in response.text
+    assert "HCX-005 DISCLOSURE AGENT" in response.text
     assert "근거가 충분하지 않으면 답변을 만들지 않습니다." in response.text
     assert '<script type="module" src="/static/app.js"></script>' in response.text
 
@@ -109,3 +109,5 @@ def test_public_web_calls_only_hcx_function_answer_for_questions(ready_agent) ->
     assert "HCX_API_KEY" not in app_js
     assert "SQLITE" not in api_js.upper()
     assert "SQLITE" not in app_js.upper()
+    assert "선택 Tool" not in app_js
+    assert "HCX가 공시 Tool을 선택" not in app_js

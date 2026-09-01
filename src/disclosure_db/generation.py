@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.request
+import uuid
 from dataclasses import replace
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
@@ -163,15 +164,28 @@ class DeterministicGenerator:
 
 
 class HyperClovaGenerator:
-    """Minimal HCX-005-compatible adapter with deterministic fallback.
+    """Minimal HCX-007-compatible adapter with deterministic fallback.
 
     The adapter is opt-in: without CLOVASTUDIO_API_KEY it never makes a network call.  The
     prompt contains only retrieved evidence, and the verifier remains authoritative.
     """
 
-    def __init__(self, *, api_key: str | None = None, base_url: str | None = None, model: str | None = None, timeout: float = 20.0):
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        v3_base_url: str | None = None,
+        model: str | None = None,
+        timeout: float = 20.0,
+    ):
         self.api_key = api_key or os.getenv("CLOVASTUDIO_API_KEY")
         self.base_url = (base_url or os.getenv("CLOVASTUDIO_BASE_URL") or "https://clovastudio.stream.ntruss.com/v1/openai").rstrip("/")
+        self.v3_base_url = (
+            v3_base_url
+            or os.getenv("CLOVASTUDIO_V3_BASE_URL")
+            or "https://clovastudio.stream.ntruss.com/v3/chat-completions"
+        ).rstrip("/")
         self.model = model or os.getenv("CLOVASTUDIO_MODEL") or "HCX-005"
         self.timeout = timeout
         self.fallback = DeterministicGenerator()
@@ -186,29 +200,61 @@ class HyperClovaGenerator:
         if not bundle.answerable or not bundle.evidence:
             return self.fallback.generate(bundle)
         structured = bool(bundle.financial_facts or bundle.event_facts or bundle.calculation is not None)
-        payload = {
-            "model": self.model,
-            "temperature": 0,
-            "messages": [
-                {"role": "system", "content": "한국어 공시 분석가. 제공된 근거만 사용하고 JSON만 반환한다."},
-                {"role": "user", "content": json.dumps({
-                    "question": bundle.question,
-                    "evidence": [{"evidence_id": ref.evidence_id, "text": ref.text} for ref in bundle.evidence],
-                    "financial_facts": to_jsonable(bundle.financial_facts),
-                    "event_facts": to_jsonable(bundle.event_facts),
-                    "calculation": to_jsonable(bundle.calculation),
-                    "schema": {"answer": "string", "citation_ids": ["string"], "numeric_values": ["string"], "answerable": True},
-                }, ensure_ascii=False)},
-            ],
+        answer_schema = {
+            "type": "object",
+            "properties": {
+                "answer": {"type": "string"},
+                "citation_ids": {"type": "array", "items": {"type": "string"}},
+                "numeric_values": {"type": "array", "items": {"type": "string"}},
+                "answerable": {"type": "boolean"},
+            },
+            "required": ["answer", "citation_ids", "numeric_values", "answerable"],
         }
+        messages = [
+            {"role": "system", "content": "한국어 공시 분석가. 제공된 근거만 사용하고 JSON만 반환한다."},
+            {"role": "user", "content": json.dumps({
+                "question": bundle.question,
+                "evidence": [{"evidence_id": ref.evidence_id, "text": ref.text} for ref in bundle.evidence],
+                "financial_facts": to_jsonable(bundle.financial_facts),
+                "event_facts": to_jsonable(bundle.event_facts),
+                "calculation": to_jsonable(bundle.calculation),
+                "schema": {"answer": "string", "citation_ids": ["string"], "numeric_values": ["string"], "answerable": True},
+            }, ensure_ascii=False)},
+        ]
+        if self.model == "HCX-007":
+            payload = {
+                "messages": messages,
+                "topP": 0.8,
+                "topK": 0,
+                "maxCompletionTokens": 512,
+                "temperature": 0,
+                "repetitionPenalty": 1.1,
+                "thinking": {"effort": "none"},
+                "stop": [],
+                "responseFormat": {"type": "json", "schema": answer_schema},
+            }
+            endpoint = f"{self.v3_base_url}/{self.model}"
+        else:
+            payload = {"model": self.model, "temperature": 0, "messages": messages}
+            endpoint = f"{self.base_url}/chat/completions"
         request = urllib.request.Request(
-            f"{self.base_url}/chat/completions", data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}, method="POST",
+            endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+                "X-NCP-CLOVASTUDIO-REQUEST-ID": str(uuid.uuid4()),
+            },
+            method="POST",
         )
         try:
             with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 data = json.loads(response.read().decode("utf-8"))
-            content = data["choices"][0]["message"]["content"]
+            content = (
+                data["result"]["message"]["content"]
+                if self.model == "HCX-007"
+                else data["choices"][0]["message"]["content"]
+            )
             parsed: dict[str, Any] = parse_hcx_json_content(content)
             required_keys = {"answer", "citation_ids", "numeric_values", "answerable"}
             if not isinstance(parsed, dict) or set(parsed) != required_keys:

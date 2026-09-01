@@ -1,0 +1,483 @@
+"""Deterministic routing for clear disclosure questions before any LLM call."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+import json
+import os
+from pathlib import Path
+import re
+from typing import Iterable, Mapping
+
+from .financial_accounts import load_financial_account_catalog, normalize_account_text
+from .query_planner import plan_query
+
+
+_RECEIPT_NUMBER = re.compile(r"(?<!\d)(\d{14})(?!\d)")
+_TREND_MARKERS = ("트렌드", "트랜드", "추이", "동향", "빈도", "건수 변화")
+_SUMMARY_MARKERS = ("요약", "요악", "요약해", "정리해", "핵심 내용")
+_SEARCH_MARKERS = ("찾아", "검색", "언급", "관련 공시", "공시 내용", "어떤 공시")
+_CORRECTION_MARKERS = ("정정", "최초공시", "원공시", "변경 전", "변경 후")
+_CHANGE_REASON_MARKERS = ("증가한 이유", "감소한 이유", "증가 이유", "감소 이유", "변동 이유", "왜 증가", "왜 감소")
+_UNAVAILABLE_MARKERS = ("시가총액", "목표주가", "미래 주가", "주가 예측", "예상 주가")
+_COMPARISON_MARKERS = ("비교", "중", "더 높은", "더 낮은", "큰 곳", "작은 곳", "어디")
+_TOKEN = re.compile(r"[가-힣A-Za-z0-9]+")
+_KOREAN_SUFFIXES = ("으로", "에서", "에게", "까지", "부터", "처럼", "보다", "의", "은", "는", "이", "가", "을", "를", "로")
+
+
+def _distance_at_most_one(left: str, right: str) -> bool:
+    if left == right:
+        return False
+    if abs(len(left) - len(right)) > 1:
+        return False
+    if len(left) == len(right):
+        return sum(a != b for a, b in zip(left, right)) == 1
+    shorter, longer = (left, right) if len(left) < len(right) else (right, left)
+    short_index = 0
+    edits = 0
+    for character in longer:
+        if short_index < len(shorter) and shorter[short_index] == character:
+            short_index += 1
+        else:
+            edits += 1
+            if edits > 1:
+                return False
+    return True
+
+
+def _core_token(token: str) -> str:
+    for suffix in _KOREAN_SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) >= 4:
+            return token[:-len(suffix)]
+    return token
+
+
+@dataclass(frozen=True, slots=True)
+class QuestionRoute:
+    kind: str
+    reason: str
+    tool_name: str | None = None
+    arguments: Mapping[str, object] = field(default_factory=dict)
+    response_mode: str = "provider"
+    message: str | None = None
+    normalized_question: str | None = None
+    corrections: tuple[str, ...] = ()
+    workflow: str = "single"
+    metric_kind: str = "SEARCH"
+    context: Mapping[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.kind not in {"tool", "clarification", "unavailable"}:
+            raise ValueError("question_route_kind_invalid")
+        if self.kind == "tool" and not self.tool_name:
+            raise ValueError("question_route_tool_missing")
+        if self.response_mode not in {"deterministic", "provider"}:
+            raise ValueError("question_route_response_mode_invalid")
+        object.__setattr__(self, "arguments", dict(self.arguments))
+        object.__setattr__(self, "corrections", tuple(self.corrections))
+        object.__setattr__(self, "context", dict(self.context))
+
+
+class DeterministicQuestionRouter:
+    """Route only high-confidence Korean question shapes; otherwise return ``None``."""
+
+    def __init__(
+        self,
+        company_candidates: Iterable[str],
+        *,
+        company_aliases: Mapping[str, Iterable[str]] | None = None,
+    ) -> None:
+        self.company_candidates = tuple(dict.fromkeys(str(item) for item in company_candidates if str(item)))
+        self.company_aliases = self._load_company_aliases(company_aliases)
+        catalog = load_financial_account_catalog()
+        self.account_catalog = catalog
+        self.account_surfaces = tuple(
+            (normalize_account_text(surface), account.canonical_id, account.label_ko)
+            for account in catalog.accounts
+            for surface in (account.label_ko, *account.aliases)
+            if len(normalize_account_text(surface)) >= 4
+        )
+
+    def _load_company_aliases(
+        self, configured: Mapping[str, Iterable[str]] | None,
+    ) -> dict[str, tuple[str, ...]]:
+        if configured is not None:
+            raw = configured
+        else:
+            config_dir = Path(os.environ.get("DISCLOSURE_CONFIG_DIR") or Path(__file__).resolve().parents[2] / "config")
+            path = config_dir / "company_aliases.json"
+            if not path.is_file():
+                return {}
+            with path.open(encoding="utf-8") as handle:
+                payload = json.load(handle)
+            rows = payload.get("companies", []) if isinstance(payload, Mapping) else []
+            raw = {
+                str(row["canonical"]): tuple(str(item) for item in row.get("aliases", []))
+                for row in rows
+                if isinstance(row, Mapping) and row.get("canonical")
+            }
+        allowed = set(self.company_candidates)
+        return {
+            str(canonical): tuple(dict.fromkeys(str(alias) for alias in aliases if str(alias)))
+            for canonical, aliases in raw.items()
+            if str(canonical) in allowed
+        }
+
+    def _normalize_company_aliases(self, text: str) -> tuple[str, tuple[str, ...]]:
+        normalized = text
+        corrections: list[str] = []
+        surfaces = sorted(
+            (
+                (alias, canonical)
+                for canonical, aliases in self.company_aliases.items()
+                for alias in aliases
+            ),
+            key=lambda item: len(item[0]),
+            reverse=True,
+        )
+        for alias, canonical in surfaces:
+            if alias in normalized:
+                normalized = normalized.replace(alias, canonical)
+                corrections.append(f"alias:{alias}->{canonical}")
+        return normalized, tuple(dict.fromkeys(corrections))
+
+    def _companies_in_text(self, text: str) -> tuple[str, ...]:
+        matches = [
+            (text.find(company), -len(company), company)
+            for company in self.company_candidates
+            if company in text
+        ]
+        return tuple(company for _, _, company in sorted(matches))
+
+    @staticmethod
+    def _replace_unique_typo(
+        text: str,
+        candidates: Iterable[tuple[str, str, str]],
+    ) -> tuple[str, str | None]:
+        candidate_rows = tuple(candidates)
+        exact_surfaces = {surface for surface, _, _ in candidate_rows}
+        matches: list[tuple[str, str, str]] = []
+        for raw_token in _TOKEN.findall(text):
+            core = _core_token(raw_token)
+            normalized_core = normalize_account_text(core)
+            if len(normalized_core) < 4:
+                continue
+            # A real registered name must always win over a nearby one-edit
+            # candidate.  For example, Samsung Electronics (삼성전자) and
+            # Samsung Electro-Mechanics (삼성전기) differ by one character.
+            if normalized_core in exact_surfaces:
+                continue
+            for surface, identity, replacement in candidate_rows:
+                if _distance_at_most_one(normalized_core, surface):
+                    matches.append((core, identity, replacement))
+        identities = {identity for _, identity, _ in matches}
+        replacements = {(core, replacement) for core, _, replacement in matches}
+        if len(identities) != 1 or len(replacements) != 1:
+            return text, None
+        core, replacement = next(iter(replacements))
+        return text.replace(core, replacement, 1), f"{core}->{replacement}"
+
+    def _normalize_typos(self, text: str) -> tuple[str, tuple[str, ...]]:
+        normalized, alias_corrections = self._normalize_company_aliases(text)
+        company_surfaces = tuple(
+            (normalize_account_text(company), company, company)
+            for company in self.company_candidates
+            if len(normalize_account_text(company)) >= 4
+        )
+        normalized, company_correction = self._replace_unique_typo(normalized, company_surfaces)
+        existing_resolution = self.account_catalog.resolve(normalized)
+        if existing_resolution.status == "unknown":
+            normalized, account_correction = self._replace_unique_typo(normalized, self.account_surfaces)
+        else:
+            account_correction = None
+        return normalized, tuple([
+            *alias_corrections,
+            *(item for item in (company_correction, account_correction) if item),
+        ])
+
+    def route(self, question: str) -> QuestionRoute | None:
+        original = question.strip()
+        text, corrections = self._normalize_typos(original)
+        plan = plan_query(text, company_candidates=self.company_candidates)
+        companies = self._companies_in_text(text)
+        route_context = {
+            "normalized_question": text if corrections else None,
+            "corrections": corrections,
+        }
+
+        if plan.account_status == "ambiguous" and plan.account_warning:
+            return QuestionRoute(
+                "clarification",
+                "financial_account_ambiguous",
+                response_mode="deterministic",
+                message=plan.account_warning,
+                metric_kind="AMBIGUOUS",
+                context={"candidates": list(plan.account_candidates)},
+                **route_context,
+            )
+
+        if plan.question_type == "out_of_scope" or any(marker in text for marker in _UNAVAILABLE_MARKERS):
+            return QuestionRoute(
+                "unavailable",
+                "question_outside_disclosure_scope",
+                response_mode="deterministic",
+                message="이 서비스는 DART 공시 근거를 다루므로 주가 예측·목표주가·미래 전망은 답변 범위에 포함되지 않습니다.",
+                metric_kind="UNAVAILABLE",
+                context={"available_range": "DART 공시, 구조화 재무수치, 공시 검색·요약·정정 관계"},
+                **route_context,
+            )
+
+        if (
+            len(companies) >= 2
+            and any(marker in text for marker in _COMPARISON_MARKERS)
+            and plan.account_status == "resolved"
+            and plan.account_support_level == "structured"
+            and plan.account_terms
+        ):
+            arguments: dict[str, object] = {
+                "company": companies[0],
+                "account": plan.account_terms[0],
+                "correction_policy": plan.correction_policy,
+                "top_k": 1,
+            }
+            if plan.period_start:
+                arguments["start_date"] = plan.period_start
+            if plan.period_end:
+                arguments["end_date"] = plan.period_end
+            if plan.scope:
+                arguments["scope"] = plan.scope
+            return QuestionRoute(
+                "tool",
+                "financial_company_comparison",
+                "get_financial_facts",
+                arguments,
+                workflow="financial_comparison",
+                metric_kind="DERIVED",
+                context={
+                    "companies": list(companies),
+                    "period": plan.period_end[:4] if plan.period_end else None,
+                    "metric": plan.account_terms[0],
+                },
+                **route_context,
+            )
+
+        if any(marker in text for marker in _TREND_MARKERS):
+            if plan.period_start and plan.period_end:
+                arguments: dict[str, object] = {
+                    "start_date": plan.period_start,
+                    "end_date": plan.period_end,
+                    "granularity": "month",
+                    "representative_limit": 10,
+                }
+                if plan.company:
+                    arguments["company"] = plan.company
+                return QuestionRoute(
+                    "tool", "explicit_trend_question", "analyze_disclosure_trend", arguments,
+                    workflow="trend_with_content",
+                    metric_kind="SEARCH",
+                    context={"question": text},
+                    **route_context,
+                )
+            return None
+
+        receipt = _RECEIPT_NUMBER.search(text)
+        if receipt and any(marker in text for marker in _CORRECTION_MARKERS):
+            return QuestionRoute(
+                "tool",
+                "explicit_correction_receipt",
+                "get_correction_lineage",
+                {"filing_id": receipt.group(1)},
+                metric_kind="SEARCH",
+                **route_context,
+            )
+
+        if plan.company and any(marker in text for marker in _CORRECTION_MARKERS):
+            return QuestionRoute(
+                "tool",
+                "correction_question_without_receipt",
+                "search_disclosures",
+                {
+                    "question": text,
+                    "company": plan.company,
+                    "correction_policy": "both",
+                    "top_k": 10,
+                },
+                workflow="correction_search_then_lineage",
+                metric_kind="SEARCH",
+                **route_context,
+            )
+
+        if (
+            plan.company
+            and plan.account_status == "resolved"
+            and plan.account_support_level == "structured"
+            and plan.account_terms
+            and any(marker in text for marker in _CHANGE_REASON_MARKERS)
+        ):
+            arguments = {
+                "company": plan.company,
+                "account": plan.account_terms[0],
+                "correction_policy": plan.correction_policy,
+                "top_k": 2,
+            }
+            if plan.scope:
+                arguments["scope"] = plan.scope
+            return QuestionRoute(
+                "tool",
+                "financial_change_reason",
+                "get_financial_facts",
+                arguments,
+                workflow="financial_change_reason",
+                metric_kind="DERIVED",
+                context={
+                    "question": text,
+                    "company": plan.company,
+                    "target_start_date": plan.period_start,
+                    "target_end_date": plan.period_end,
+                },
+                **route_context,
+            )
+
+        if (
+            plan.company
+            and plan.account_status == "resolved"
+            and plan.account_support_level in {"structured", "derived"}
+            and plan.operation in {"growth_rate", "difference", "ratio", "sum"}
+            and (plan.account_terms or plan.required_account_ids)
+        ):
+            account_term = plan.account_terms[0] if plan.account_support_level == "structured" else None
+            if plan.account_support_level == "derived" and len(plan.required_account_ids) == 1:
+                source = self.account_catalog.by_id.get(plan.required_account_ids[0])
+                account_term = source.label_ko if source is not None else None
+            if not account_term:
+                return None
+            arguments = {
+                "company": plan.company,
+                "account": account_term,
+                "correction_policy": plan.correction_policy,
+                "top_k": max(2, min(plan.latest_period_count, 20)),
+            }
+            if plan.period_start:
+                arguments["start_date"] = plan.period_start
+            if plan.period_end:
+                arguments["end_date"] = plan.period_end
+            if plan.scope:
+                arguments["scope"] = plan.scope
+            return QuestionRoute(
+                "tool",
+                "structured_financial_calculation",
+                "get_financial_facts",
+                arguments,
+                workflow="financial_derived",
+                metric_kind="DERIVED",
+                context={"operation": plan.operation},
+                **route_context,
+            )
+
+        if (
+            plan.company
+            and plan.account_status == "resolved"
+            and plan.account_support_level == "structured"
+            and plan.operation == "lookup"
+            and plan.account_terms
+        ):
+            arguments = {
+                "company": plan.company,
+                "account": plan.account_terms[0],
+                "correction_policy": plan.correction_policy,
+                "top_k": max(1, min(plan.latest_period_count, 20)),
+            }
+            if plan.period_start:
+                arguments["start_date"] = plan.period_start
+            if plan.period_end:
+                arguments["end_date"] = plan.period_end
+            if plan.scope:
+                arguments["scope"] = plan.scope
+            return QuestionRoute(
+                "tool",
+                "structured_financial_lookup",
+                "get_financial_facts",
+                arguments,
+                metric_kind="DIRECT",
+                **route_context,
+            )
+
+        common_search: dict[str, object] = {
+            "question": text,
+            "correction_policy": plan.correction_policy,
+        }
+        if plan.company:
+            common_search["company"] = plan.company
+        if plan.period_start:
+            common_search["start_date"] = plan.period_start
+        if plan.period_end:
+            common_search["end_date"] = plan.period_end
+
+        if any(marker in text for marker in _SUMMARY_MARKERS):
+            return QuestionRoute(
+                "tool",
+                "explicit_summary_question",
+                "build_summary_context",
+                {**common_search, "top_k": 12, "max_chars": 8_000},
+                workflow="document_summary_check" if "사업보고서" in text else "single",
+                metric_kind="SEARCH",
+                context={"report_type": "사업보고서"} if "사업보고서" in text else {},
+                **route_context,
+            )
+
+        if plan.account_support_level == "retrieval_only" and plan.company:
+            quarter_match = re.search(r"([1-4])\s*분기", text)
+            statement_search = {
+                key: value for key, value in common_search.items()
+                if key not in {"start_date", "end_date"}
+            }
+            return QuestionRoute(
+                "tool",
+                "retrieval_only_financial_account",
+                "build_summary_context",
+                {**statement_search, "top_k": 12, "max_chars": 8_000},
+                workflow="financial_statement_metric",
+                metric_kind="SEARCH",
+                context={
+                    "metric": plan.account_terms[0] if plan.account_terms else None,
+                    "fiscal_year": plan.period_end[:4] if plan.period_end else None,
+                    "period_kind": "quarter" if quarter_match else "annual",
+                    "quarter": int(quarter_match.group(1)) if quarter_match else None,
+                },
+                **route_context,
+            )
+
+        if plan.question_type == "event_numeric" and plan.company:
+            return QuestionRoute(
+                "tool",
+                "event_search_fallback",
+                "search_disclosures",
+                {**common_search, "top_k": 10},
+                metric_kind="SEARCH",
+                **route_context,
+            )
+
+        if any(marker in text for marker in _SEARCH_MARKERS):
+            return QuestionRoute(
+                "tool",
+                "explicit_disclosure_search",
+                "search_disclosures",
+                {**common_search, "top_k": 10},
+                metric_kind="SEARCH",
+                **route_context,
+            )
+
+        if plan.account_status == "unsupported":
+            return QuestionRoute(
+                "unavailable",
+                "financial_metric_unavailable",
+                response_mode="deterministic",
+                message=plan.account_warning or "현재 구조화 재무계정 범위에서 지원하지 않는 지표입니다.",
+                metric_kind="UNAVAILABLE",
+                context={"available_range": "financial_account_catalog.json의 structured/retrieval_only 계정"},
+                **route_context,
+            )
+        return None
+
+
+__all__ = ["DeterministicQuestionRouter", "QuestionRoute"]

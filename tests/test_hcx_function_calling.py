@@ -16,6 +16,7 @@ from disclosure_db.hcx_function_calling import (
     HcxToolCall,
     HyperClovaFunctionClient,
 )
+from disclosure_db.question_routing import DeterministicQuestionRouter
 from disclosure_db.hcx_prompts import HCX_FUNCTION_PROMPT_VERSION
 from disclosure_db.hybrid_retrieval import RetrievalResult
 
@@ -86,6 +87,11 @@ class FakeHcxClient:
             raise self.generation_error
         return self.generated
 
+    def generate_routed_answer(
+        self, question: str, tool_call: HcxToolCall, tool_response: object,
+    ) -> HcxGeneratedAnswer:
+        return self.generate_answer(question, tool_call, tool_response)
+
 
 class _HttpResponse:
     def __init__(self, payload: dict[str, object]) -> None:
@@ -115,12 +121,104 @@ class FakeUrlOpen:
 class StaticRegistry:
     def __init__(self, response: dict[str, object]) -> None:
         self.response = response
+        self.calls: list[tuple[str, object]] = []
 
     def list_tools(self) -> list[dict[str, object]]:
         return []
 
     def dispatch(self, name: str, arguments: object) -> dict[str, object]:
+        self.calls.append((name, arguments))
         return self.response
+
+
+class NamedRegistry:
+    def __init__(self, responses: dict[str, dict[str, object]]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[str, object]] = []
+
+    def list_tools(self) -> list[dict[str, object]]:
+        return []
+
+    def dispatch(self, name: str, arguments: object) -> dict[str, object]:
+        self.calls.append((name, arguments))
+        return self.responses[name]
+
+
+def _sufficient_response(
+    tool_name: str, data: dict[str, object], *, evidence_id: str, receipt: str,
+    company: str = "삼성전자", account: str | None = None, report_name: str = "사업보고서",
+) -> dict[str, object]:
+    covered_scope: dict[str, object] = {"company": [company]}
+    if account:
+        covered_scope["account"] = [account]
+    return {
+        "status": "success",
+        "tool_name": tool_name,
+        "data": data,
+        "evidence_bundle": {
+            "question_intent": tool_name,
+            "requested_scope": {},
+            "covered_scope": covered_scope,
+            "items": [{
+                "evidence_id": evidence_id,
+                "evidence_ids": [evidence_id],
+                "filing_id": receipt,
+                "rcept_no": receipt,
+                "report_name": report_name,
+                "filed_at": "2026-03-18",
+                "quality_status": "validated_structured_evidence",
+            }],
+            "evidence_ids": [evidence_id],
+            "filing_ids": [receipt],
+            "issuer_corp_codes": ["00126380"],
+            "quality_warnings": [],
+            "correction_status": "policy_applied",
+            "retrieval_status": {"route": "test"},
+            "sufficiency": "sufficient",
+        },
+        "warnings": [],
+        "metadata": {"sufficiency_check": {
+            "status": "sufficient",
+            "answer_allowed": True,
+            "recommended_action": "answer",
+        }},
+    }
+
+
+def _financial_response(values: list[tuple[str, str]], account: str = "매출액") -> dict[str, object]:
+    facts = []
+    items = []
+    evidence_ids = []
+    filing_ids = []
+    for index, (year, value) in enumerate(values, start=1):
+        evidence_id = f"ev-fin-{index}"
+        receipt = f"{year}03180000{index:02d}"
+        evidence_ids.append(evidence_id)
+        filing_ids.append(receipt)
+        facts.append({
+            "account_id": "revenue" if account == "매출액" else "operating_profit",
+            "account_name": account,
+            "value_numeric": value,
+            "scale": 1,
+            "unit": "KRW",
+            "period": {"period_type": "duration", "period_start": f"{year}-01-01", "period_end": f"{year}-12-31", "instant_date": None},
+            "scope": "consolidated",
+            "company_identifiers": {"company": "삼성전자"},
+            "support_level": "structured",
+            "validation_status": "validated",
+            "evidence_ids": [evidence_id],
+        })
+        items.append({
+            "evidence_id": evidence_id, "evidence_ids": [evidence_id],
+            "filing_id": receipt, "rcept_no": receipt, "report_name": "사업보고서",
+            "filed_at": f"{year}-03-18", "quality_status": "validated_structured_evidence",
+        })
+    response = _sufficient_response(
+        "get_financial_facts", {"account_resolution": {"status": "resolved"}, "facts": facts},
+        evidence_id=evidence_ids[0], receipt=filing_ids[0], account=account,
+    )
+    response["evidence_bundle"].update({"items": items, "evidence_ids": evidence_ids, "filing_ids": filing_ids})
+    return response
 
 
 class HcxFunctionCallingTests(unittest.TestCase):
@@ -213,6 +311,274 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(result.recommended_action, "ask_clarification")
         self.assertIn("구체적으로", result.answer)
         self.assertEqual(client.generation_calls, [])
+
+    def test_clear_financial_lookup_skips_selection_and_calls_final_once(self) -> None:
+        receipt = "20250318000001"
+        response: dict[str, object] = {
+            "status": "success",
+            "tool_name": "get_financial_facts",
+            "data": {
+                "facts": [{
+                    "account_id": "revenue",
+                    "account_name": "매출액",
+                    "value_numeric": "1234567",
+                    "scale": 1,
+                    "unit": "KRW",
+                    "period": {
+                        "period_type": "duration",
+                        "period_start": "2025-01-01",
+                        "period_end": "2025-12-31",
+                        "instant_date": None,
+                    },
+                    "scope": "consolidated",
+                    "company_identifiers": {"company": "삼성전자"},
+                }],
+            },
+            "evidence_bundle": {
+                "evidence_ids": ["ev-fin"],
+                "items": [{
+                    "evidence_id": "ev-fin",
+                    "evidence_ids": ["ev-fin"],
+                    "filing_id": receipt,
+                    "rcept_no": receipt,
+                    "report_name": "사업보고서",
+                    "filed_at": "2026-03-18",
+                }],
+            },
+            "warnings": [],
+            "metadata": {
+                "sufficiency_check": {
+                    "status": "sufficient",
+                    "answer_allowed": True,
+                    "recommended_action": "answer",
+                }
+            },
+        }
+        registry = StaticRegistry(response)
+        client = FakeHcxClient(
+            self._search_call(),
+            generated=HcxGeneratedAnswer("삼성전자 2025년 연결 매출액은 1,234,567원입니다.", ("ev-fin",)),
+        )
+        service = HcxFunctionCallingService(
+            registry,  # type: ignore[arg-type]
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자 2025년 연결 매출액은?")
+
+        self.assertEqual(result.status, "answered")
+        self.assertTrue(result.answer_allowed)
+        self.assertEqual(result.tool_name, "get_financial_facts")
+        self.assertIn("1,234,567원", result.answer)
+        self.assertIn(receipt, result.answer)
+        self.assertEqual(client.selection_calls, [])
+        self.assertEqual(len(client.generation_calls), 1)
+        self.assertFalse(result.metadata["tool_selection_called"])
+        self.assertTrue(result.metadata["final_generation_called"])
+        self.assertEqual(result.metadata["route_source"], "deterministic")
+        self.assertEqual(registry.calls[0][0], "get_financial_facts")
+
+    def test_ambiguous_financial_term_skips_provider_and_tool(self) -> None:
+        registry = StaticRegistry({})
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry,  # type: ignore[arg-type]
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자 2025년 매출이익은?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertEqual(result.recommended_action, "ask_clarification")
+        self.assertIn("매출총이익", result.answer)
+        self.assertEqual(client.selection_calls, [])
+        self.assertEqual(client.generation_calls, [])
+        self.assertEqual(registry.calls, [])
+
+    def test_clear_trend_question_runs_content_and_calls_final_once(self) -> None:
+        receipt = "20260318000001"
+        response: dict[str, object] = {
+            "status": "success",
+            "tool_name": "analyze_disclosure_trend",
+            "data": {
+                "count_by_period": [{"period": "2026-03", "count": 3}],
+                "count_by_type": [{"filing_type": "사업보고서", "count": 3}],
+                "representative_filings": [{"filing_id": receipt}],
+                "total_count": 3,
+                "requested_range": {"start_date": "2026-01-01", "end_date": "2026-12-31"},
+                "actual_aggregate_range": {"start_date": "2026-03-18", "end_date": "2026-03-18"},
+                "coverage_complete": False,
+            },
+            "evidence_bundle": {
+                "question_intent": "analyze_disclosure_trend",
+                "requested_scope": {},
+                "covered_scope": {
+                    "company": ["삼성전자"],
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-12-31",
+                },
+                "evidence_ids": ["ev-trend"],
+                "items": [{
+                    "evidence_id": "ev-trend",
+                    "evidence_ids": ["ev-trend"],
+                    "filing_id": receipt,
+                    "rcept_no": receipt,
+                    "report_name": "사업보고서",
+                    "filed_at": "2026-03-18",
+                    "quality_status": "filing_metadata",
+                }],
+                "filing_ids": [receipt],
+                "issuer_corp_codes": ["00126380"],
+                "quality_warnings": [],
+                "correction_status": "filing_metadata_only",
+                "retrieval_status": {"route": "test"},
+                "sufficiency": "partial",
+            },
+            "warnings": ["requested_period_incomplete"],
+            "metadata": {"sufficiency_check": {
+                "status": "partial",
+                "answer_allowed": True,
+                "recommended_action": "answer_with_warning",
+            }},
+        }
+        content = _sufficient_response(
+            "build_summary_context", {"context": "2026년 사업과 투자 관련 공시 내용", "result_count": 1},
+            evidence_id="ev-content", receipt="20260401000001",
+        )
+        content["evidence_bundle"]["covered_scope"].update({
+            "start_date": "2026-01-01", "end_date": "2026-12-31",
+        })
+        registry = NamedRegistry({
+            "analyze_disclosure_trend": response,
+            "build_summary_context": content,
+        })
+        client = FakeHcxClient(
+            self._search_call(),
+            generated=HcxGeneratedAnswer("2026년 현재 공시는 3건입니다.", ("ev-trend",)),
+        )
+        service = HcxFunctionCallingService(
+            registry,  # type: ignore[arg-type]
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자 2026년도 공시트랜드를 알려줘")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(result.tool_name, "analyze_disclosure_trend")
+        self.assertIn("3건", result.answer)
+        self.assertEqual(client.selection_calls, [])
+        self.assertEqual(len(client.generation_calls), 1)
+        self.assertEqual([call[0] for call in registry.calls], [
+            "analyze_disclosure_trend", "build_summary_context",
+        ])
+        self.assertFalse(result.metadata["tool_selection_called"])
+        self.assertTrue(result.metadata["final_generation_called"])
+
+    def test_derived_financial_calculation_uses_financial_tool_only(self) -> None:
+        financial = _financial_response(
+            [("2023", "100"), ("2024", "120"), ("2025", "150")],
+            account="영업이익",
+        )
+        registry = NamedRegistry({"get_financial_facts": financial})
+        client = FakeHcxClient(
+            self._search_call(),
+            generated=HcxGeneratedAnswer("영업이익 증가율을 기간별로 계산했습니다.", ("ev-fin-1",)),
+        )
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자 최근 3년 영업이익 증가율은?")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts"])
+        self.assertEqual(len(result.tool_response["data"]["calculations"]), 2)
+        self.assertEqual(client.selection_calls, [])
+        self.assertEqual(len(client.generation_calls), 1)
+
+    def test_change_reason_checks_premise_before_dense_search(self) -> None:
+        financial = _financial_response([("2025", "200"), ("2026", "150")])
+        registry = NamedRegistry({"get_financial_facts": financial})
+        client = FakeHcxClient(
+            self._search_call(),
+            generated=HcxGeneratedAnswer("매출액은 증가하지 않아 증가 원인을 검색하지 않았습니다.", ("ev-fin-1",)),
+        )
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자 2026년 매출액이 증가한 이유는?")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(result.tool_response["data"]["premise"], "increase_not_confirmed")
+        self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts"])
+        self.assertEqual(len(client.generation_calls), 1)
+
+    def test_change_reason_searches_once_only_after_increase_is_verified(self) -> None:
+        financial = _financial_response([("2025", "100"), ("2026", "150")])
+        search = _sufficient_response(
+            "search_disclosures", {"results": [], "retrieval_mode": "hybrid"},
+            evidence_id="ev-reason", receipt="20260401000001",
+        )
+        registry = NamedRegistry({"get_financial_facts": financial, "search_disclosures": search})
+        client = FakeHcxClient(
+            self._search_call(),
+            generated=HcxGeneratedAnswer("증가 사실과 관련 공시 근거를 함께 확인했습니다.", ("ev-fin-1", "ev-reason")),
+        )
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자 2026년 매출액이 증가한 이유는?")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(result.tool_response["data"]["premise"], "confirmed_increase")
+        self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts", "search_disclosures"])
+        self.assertFalse(result.metadata["tool_selection_called"])
+        self.assertEqual(len(client.generation_calls), 1)
+
+    def test_document_summary_without_requested_report_is_unavailable(self) -> None:
+        summary = _sufficient_response(
+            "build_summary_context", {"context": "다른 공시", "result_count": 1},
+            evidence_id="ev-other", receipt="20260318000001", report_name="주요사항보고서",
+        )
+        registry = NamedRegistry({"build_summary_context": summary})
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자 2026년 사업보고서 요약해줘")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual(result.tool_response["data"]["document_existence"], "not_found")
+        self.assertEqual(client.generation_calls, [])
+
+    def test_concrete_adapter_routed_answer_uses_plain_single_chat(self) -> None:
+        opener = FakeUrlOpen([{
+            "choices": [{"message": {
+                "role": "assistant",
+                "content": "근거에 따르면 매출총이익이 증가했습니다.",
+            }}],
+        }])
+        client = HyperClovaFunctionClient(
+            api_key="in-memory-test-key", model="HCX-005", urlopen=opener
+        )
+
+        generated = client.generate_routed_answer(
+            "매출총이익은?", self._search_call(),
+            {"evidence_bundle": {"evidence_ids": ["ev-1"]}, "data": {"context": "근거"}},
+        )
+
+        self.assertEqual(generated.citation_ids, ("ev-1",))
+        payload = opener.requests[0][2]
+        self.assertNotIn("tools", payload)
+        self.assertNotIn("tool_choice", payload)
+        self.assertEqual([message["role"] for message in payload["messages"]], ["system", "user"])
 
     def test_unknown_final_citation_fails_closed(self) -> None:
         registry, _ = self._registry([_search_row()])
@@ -357,8 +723,13 @@ class HcxFunctionCallingTests(unittest.TestCase):
             final_payload["tool_choice"],
             {"type": "function", "function": {"name": FINAL_ANSWER_TOOL_NAME}},
         )
-        self.assertEqual(final_payload["tools"][0]["function"]["name"], FINAL_ANSWER_TOOL_NAME)
-        citation_schema = final_payload["tools"][0]["function"]["parameters"]["properties"]["citation_ids"]
+        self.assertEqual(
+            [tool["function"]["name"] for tool in final_payload["tools"]],
+            ["search_disclosures", FINAL_ANSWER_TOOL_NAME],
+        )
+        original_schema = final_payload["tools"][0]["function"]["parameters"]
+        self.assertEqual(original_schema["required"], ["question"])
+        citation_schema = final_payload["tools"][1]["function"]["parameters"]["properties"]["citation_ids"]
         self.assertEqual(citation_schema["items"]["enum"], ["ev-1"])
         self.assertEqual(
             [message["role"] for message in final_payload["messages"]],

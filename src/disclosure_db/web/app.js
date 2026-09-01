@@ -162,9 +162,7 @@ function renderCitations(parent, citations) {
 
 function renderMeta(parent, message) {
   const values = [
-    ["선택 Tool", message.tool_name],
     ["응답 시간", typeof message.latency_ms === "number" ? `${message.latency_ms} ms` : null],
-    ["Prompt", message.prompt_version],
   ].filter(([, value]) => value !== null && value !== undefined && value !== "");
   if (values.length === 0) {
     return;
@@ -188,7 +186,12 @@ function renderAssistant(message) {
 
   const header = document.createElement("div");
   header.className = "answer-header";
-  addText(header, "h3", "", answered ? "공시 기반 답변" : "답변을 제공할 수 없습니다");
+  const blockedTitle = message.recommended_action === "ask_clarification"
+    ? "질문을 조금 더 구체적으로 알려주세요"
+    : message.unavailable
+      ? "현재 제공 범위 밖의 질문입니다"
+      : "답변을 제공할 수 없습니다";
+  addText(header, "h3", "", answered ? "공시 기반 답변" : blockedTitle);
   addText(
     header,
     "span",
@@ -211,7 +214,16 @@ function renderAssistant(message) {
   } else {
     const panel = document.createElement("div");
     panel.className = "blocked-panel";
-    addText(panel, "strong", "", "근거 검증 단계에서 답변이 차단되었습니다.");
+    addText(
+      panel,
+      "strong",
+      "",
+      message.recommended_action === "ask_clarification"
+        ? "확인할 계정을 선택해 주세요."
+        : message.unavailable
+          ? "지원 가능한 공시 범위를 안내합니다."
+          : "근거 검증 단계에서 답변이 차단되었습니다.",
+    );
     addText(panel, "p", "", message.blocked_reason || message.text);
     item.append(panel);
   }
@@ -258,7 +270,7 @@ function renderLoading() {
     dots.append(document.createElement("span"));
   }
   dots.setAttribute("aria-hidden", "true");
-  item.append(dots, document.createTextNode("HCX가 공시 Tool을 선택하고 근거를 확인하고 있습니다."));
+  item.append(dots, document.createTextNode("공시와 재무 근거를 확인하고 답변을 작성하고 있습니다."));
   messages.append(item);
 }
 
@@ -389,12 +401,10 @@ async function submitQuestion(question, appendUser = true) {
       answer_allowed: body.answer_allowed,
       evidence_status: evidenceStatus(body),
       blocked_reason: answerState === "blocked" ? blockedReason(body) : null,
+      recommended_action: body.recommended_action,
+      unavailable: Array.isArray(body.warnings) && body.warnings.includes("deterministic_unavailable"),
       citations: Array.isArray(body.citations) ? body.citations : [],
-      tool_name: typeof body.tool_name === "string" ? body.tool_name : null,
       latency_ms: typeof body.latency_ms === "number" ? body.latency_ms : null,
-      prompt_version: typeof body.metadata?.prompt_version === "string"
-        ? body.metadata.prompt_version
-        : null,
     });
     saveStore();
     setServiceStatus(answerState === "answered" ? "답변 완료" : "근거 부족", "ready");

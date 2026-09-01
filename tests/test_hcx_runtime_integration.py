@@ -63,6 +63,9 @@ class FakeClient:
         self.generation_calls += 1
         return HcxGeneratedAnswer("테스트회사의 공시 근거가 확인됩니다.", ("ev-runtime",))
 
+    def generate_routed_answer(self, question: str, tool_call: HcxToolCall, tool_response: object) -> HcxGeneratedAnswer:
+        return self.generate_answer(question, tool_call, tool_response)
+
 
 class FakeEvidenceService:
     base_database = Path("unused.sqlite")
@@ -191,6 +194,7 @@ class HcxRuntimeIntegrationTests(unittest.TestCase):
                     json={"question": "테스트회사 사업 내용은?"},
                 )
                 health = api.get("/health").json()
+                openapi = api.get("/openapi.json")
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -199,6 +203,8 @@ class HcxRuntimeIntegrationTests(unittest.TestCase):
         self.assertEqual(body["citations"][0]["rcept_no"], RCEPT_NO)
         self.assertIsInstance(body["latency_ms"], float)
         self.assertTrue(health["function_calling_configured"])
+        self.assertEqual(openapi.status_code, 200)
+        self.assertIn("/v1/hcx/function-answer", openapi.json()["paths"])
 
     def test_endpoint_blocks_insufficient_evidence_without_final_hcx_call(self) -> None:
         try:

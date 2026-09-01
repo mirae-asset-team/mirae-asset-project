@@ -9,6 +9,7 @@ retrieval, evidence admission, or answerability policy.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 import json
 import logging
 import os
@@ -19,12 +20,18 @@ import urllib.request
 import uuid
 
 from .generation import UNANSWERABLE_TEXT
+from .calculator import calculate
+from .disclosure_tools import format_financial_value
+from .evidence_sufficiency import EvidenceSufficiencyChecker
 from .hcx_prompts import (
     HCX_FINAL_ANSWER_SYSTEM_PROMPT,
     HCX_FUNCTION_PROMPT_VERSION,
+    HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT,
     HCX_TOOL_SELECTION_SYSTEM_PROMPT,
 )
+from .question_routing import QuestionRoute
 from .tool_registry import ToolRegistry
+from .tool_contracts import ToolEvidenceBundle
 
 
 DEFAULT_HCX_BASE_URL = "https://clovastudio.stream.ntruss.com/v1/openai"
@@ -148,6 +155,14 @@ class HcxFunctionClient(Protocol):
         self, question: str, tool_call: HcxToolCall, tool_response: Mapping[str, object],
     ) -> HcxGeneratedAnswer: ...
 
+    def generate_routed_answer(
+        self, question: str, tool_call: HcxToolCall, tool_response: Mapping[str, object],
+    ) -> HcxGeneratedAnswer: ...
+
+
+class QuestionRouter(Protocol):
+    def route(self, question: str) -> QuestionRoute | None: ...
+
 
 @dataclass(slots=True)
 class FunctionCallingResult:
@@ -232,6 +247,49 @@ def _final_answer_tool(evidence_ids: Sequence[str]) -> dict[str, object]:
                     },
                 },
                 "required": ["answer", "citation_ids"],
+            },
+        },
+    }
+
+
+def _argument_schema(value: object) -> dict[str, object]:
+    if isinstance(value, bool):
+        return {"type": "boolean"}
+    if isinstance(value, int):
+        return {"type": "integer"}
+    if isinstance(value, float):
+        return {"type": "number"}
+    if isinstance(value, str):
+        return {"type": "string"}
+    if isinstance(value, Mapping):
+        properties = {str(key): _argument_schema(item) for key, item in value.items()}
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": list(properties),
+        }
+    if isinstance(value, (list, tuple)):
+        item_schema = _argument_schema(value[0]) if value else {"type": "string"}
+        return {"type": "array", "items": item_schema}
+    return {"type": "string"}
+
+
+def _conversation_tool(tool_call: HcxToolCall) -> dict[str, object]:
+    """Echo the executed Tool definition so HCX accepts the follow-up turn."""
+
+    properties = {
+        str(name): _argument_schema(value)
+        for name, value in tool_call.arguments.items()
+    }
+    return {
+        "type": "function",
+        "function": {
+            "name": tool_call.name,
+            "description": "The disclosure Tool already executed for this conversation.",
+            "parameters": {
+                "type": "object",
+                "properties": properties,
+                "required": list(properties),
             },
         },
     }
@@ -346,7 +404,10 @@ class HyperClovaFunctionClient:
                 tool_call.assistant_message(),
                 {"role": "tool", "tool_call_id": tool_call.call_id, "content": tool_content},
             ],
-            "tools": [final_tool],
+            # CLOVA validates every assistant tool_call against the tools list
+            # in the same stateless request.  Keep the already-executed Tool
+            # alongside the private forced final-answer Tool.
+            "tools": [_conversation_tool(tool_call), final_tool],
             "tool_choice": {
                 "type": "function",
                 "function": {"name": FINAL_ANSWER_TOOL_NAME},
@@ -375,6 +436,50 @@ class HyperClovaFunctionClient:
             return HcxGeneratedAnswer(answer, tuple(citations))
         except ValueError as exc:
             raise HcxProtocolError(str(exc), stage="final_generation_response") from exc
+
+    def generate_routed_answer(
+        self, question: str, tool_call: HcxToolCall, tool_response: Mapping[str, object],
+    ) -> HcxGeneratedAnswer:
+        """Generate once after a deterministic route without another Tool Call."""
+
+        bundle = tool_response.get("evidence_bundle")
+        raw_evidence_ids = bundle.get("evidence_ids") if isinstance(bundle, Mapping) else None
+        evidence_ids = list(dict.fromkeys(
+            str(item) for item in raw_evidence_ids if item
+        )) if isinstance(raw_evidence_ids, (list, tuple)) else []
+        if not evidence_ids:
+            raise HcxProtocolError(
+                "hcx_final_evidence_ids_empty", stage="final_generation_preflight"
+            )
+        data = self._chat({
+            "model": self.model,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": json.dumps({
+                        "question": question,
+                        "tool_name": tool_call.name,
+                        "tool_result": tool_response,
+                    }, ensure_ascii=False, separators=(",", ":")),
+                },
+            ],
+            "temperature": 0,
+            "max_tokens": FUNCTION_CALLING_MAX_TOKENS,
+        }, stage="routed_final_generation_request")
+        message = self._message(data, stage="routed_final_generation_response")
+        answer = message.get("content")
+        if not isinstance(answer, str):
+            raise HcxProtocolError(
+                "hcx_final_answer_invalid", stage="routed_final_generation_response"
+            )
+        try:
+            return HcxGeneratedAnswer(answer, tuple(evidence_ids[:5]))
+        except ValueError as exc:
+            raise HcxProtocolError(str(exc), stage="routed_final_generation_response") from exc
 
     def _chat(
         self, payload: Mapping[str, object], *, stage: str = "provider_request",
@@ -448,15 +553,595 @@ class HcxFunctionCallingService:
         client: HcxFunctionClient,
         *,
         max_question_chars: int = 2_000,
+        router: QuestionRouter | None = None,
     ) -> None:
         if max_question_chars <= 0:
             raise ValueError("max_question_chars_must_be_positive")
         self.registry = registry
         self.client = client
         self.max_question_chars = max_question_chars
+        self.router = router
+        self.evidence_checker = EvidenceSufficiencyChecker()
 
     def available_tools(self) -> list[dict[str, object]]:
         return hcx_tool_schemas(self.registry)
+
+    @staticmethod
+    def _fact_period_key(fact: Mapping[str, object]) -> str:
+        period = fact.get("period")
+        if not isinstance(period, Mapping):
+            return ""
+        return str(period.get("instant_date") or period.get("period_end") or period.get("period_start") or "")
+
+    @staticmethod
+    def _calculation_payload(result: object) -> dict[str, object]:
+        return {
+            "operation": str(getattr(result, "operation")),
+            "value": str(getattr(result, "value")),
+            "unit": getattr(result, "unit"),
+            "evidence_ids": list(getattr(result, "evidence_ids")),
+            "operands": [str(item) for item in getattr(result, "operands")],
+        }
+
+    @staticmethod
+    def _bundle_from_response(response: Mapping[str, object]) -> Mapping[str, object]:
+        bundle = response.get("evidence_bundle")
+        return bundle if isinstance(bundle, Mapping) else {}
+
+    def _merged_response(
+        self,
+        *,
+        tool_name: str,
+        request: Mapping[str, object],
+        data: Mapping[str, object],
+        responses: Sequence[Mapping[str, object]],
+        checker_tool: str,
+        checker_data: Mapping[str, object],
+        required_response_indexes: Sequence[int] = (),
+        extra_reasons: Sequence[str] = (),
+        force_answer_allowed: bool | None = None,
+    ) -> dict[str, object]:
+        items: list[dict[str, object]] = []
+        evidence_ids: list[str] = []
+        filing_ids: list[str] = []
+        issuer_codes: list[str] = []
+        warnings: list[str] = []
+        covered_scope: dict[str, object] = {}
+        retrieval_status: dict[str, object] = {"route": "deterministic_multi_executor"}
+        correction_statuses: list[str] = []
+        for response in responses:
+            bundle = self._bundle_from_response(response)
+            raw_items = bundle.get("items")
+            if isinstance(raw_items, list):
+                items.extend(dict(item) for item in raw_items if isinstance(item, Mapping))
+            for target, field_name in (
+                (evidence_ids, "evidence_ids"),
+                (filing_ids, "filing_ids"),
+                (issuer_codes, "issuer_corp_codes"),
+                (warnings, "quality_warnings"),
+            ):
+                values = bundle.get(field_name)
+                if isinstance(values, (list, tuple)):
+                    target.extend(str(item) for item in values if item)
+            raw_covered = bundle.get("covered_scope")
+            if isinstance(raw_covered, Mapping):
+                for key, value in raw_covered.items():
+                    if value not in (None, "", []):
+                        existing = covered_scope.get(str(key))
+                        if isinstance(existing, list) and isinstance(value, list):
+                            covered_scope[str(key)] = list(dict.fromkeys([*existing, *value]))
+                        else:
+                            covered_scope[str(key)] = value
+            raw_retrieval = bundle.get("retrieval_status")
+            if isinstance(raw_retrieval, Mapping):
+                retrieval_status[str(response.get("tool_name") or len(retrieval_status))] = dict(raw_retrieval)
+            correction_status = bundle.get("correction_status")
+            if correction_status:
+                correction_statuses.append(str(correction_status))
+            raw_warnings = response.get("warnings")
+            if isinstance(raw_warnings, list):
+                warnings.extend(str(item) for item in raw_warnings if item)
+
+        merged_bundle = ToolEvidenceBundle(
+            question_intent=tool_name,
+            requested_scope=dict(request),
+            covered_scope=covered_scope,
+            items=items,
+            evidence_ids=evidence_ids,
+            filing_ids=filing_ids,
+            issuer_corp_codes=issuer_codes,
+            quality_warnings=warnings,
+            correction_status=(
+                "resolved" if "resolved" in correction_statuses
+                else correction_statuses[0] if correction_statuses
+                else "not_evaluated"
+            ),
+            retrieval_status=retrieval_status,
+        )
+        checked = self.evidence_checker.check(checker_tool, request, merged_bundle, checker_data).to_dict()
+        required_failed = any(
+            index >= len(responses)
+            or self._sufficiency(responses[index]).get("answer_allowed") is not True
+            for index in required_response_indexes
+        )
+        if required_failed or force_answer_allowed is False:
+            checked = {
+                "status": "insufficient",
+                "reasons": list(dict.fromkeys([*checked.get("reasons", []), *extra_reasons])),
+                "missing_requirements": list(dict.fromkeys([
+                    *checked.get("missing_requirements", []),
+                    "required_executor_evidence",
+                ])),
+                "recommended_action": "abstain",
+                "answer_allowed": False,
+            }
+        elif force_answer_allowed is True and checked.get("answer_allowed") is True:
+            checked["reasons"] = list(dict.fromkeys([*checked.get("reasons", []), *extra_reasons]))
+        merged_bundle.sufficiency = str(checked["status"])
+        status = "success" if checked["status"] == "sufficient" else "partial" if checked["answer_allowed"] else "insufficient"
+        return {
+            "status": status,
+            "tool_name": tool_name,
+            "data": dict(data),
+            "evidence_bundle": merged_bundle.to_dict(),
+            "warnings": list(dict.fromkeys(warnings)),
+            "metadata": {
+                "schema_version": "tool-response-v1",
+                "backend_version": "tool-registry-v1",
+                "executors": [str(response.get("tool_name") or "unknown") for response in responses],
+                "sufficiency_check": checked,
+            },
+        }
+
+    def _financial_derived_response(
+        self, route: QuestionRoute, primary: Mapping[str, object],
+    ) -> dict[str, object]:
+        data = primary.get("data")
+        facts = data.get("facts") if isinstance(data, Mapping) else None
+        ordered = sorted(
+            (dict(item) for item in facts if isinstance(item, Mapping)),
+            key=self._fact_period_key,
+        ) if isinstance(facts, list) else []
+        operation = str(route.context.get("operation") or "")
+        calculations: list[dict[str, object]] = []
+        try:
+            if operation == "growth_rate":
+                if len(ordered) < 2:
+                    raise ValueError("growth_rate_requires_two_periods")
+                for previous, current in zip(ordered, ordered[1:]):
+                    ids = [
+                        str(item)
+                        for fact in (previous, current)
+                        for item in fact.get("evidence_ids", [])
+                        if item
+                    ]
+                    result = calculate(
+                        operation,
+                        [previous.get("value_numeric"), current.get("value_numeric")],
+                        unit="%",
+                        evidence_ids=ids,
+                    )
+                    calculations.append({
+                        **self._calculation_payload(result),
+                        "from_period": previous.get("period"),
+                        "to_period": current.get("period"),
+                    })
+            elif operation in {"difference", "ratio"}:
+                if len(ordered) < 2:
+                    raise ValueError(f"{operation}_requires_two_periods")
+                selected = ordered[-2:]
+                result = calculate(
+                    operation,
+                    [item.get("value_numeric") for item in selected],
+                    unit=selected[-1].get("unit") if operation == "difference" else None,
+                    evidence_ids=[
+                        str(evidence_id)
+                        for item in selected
+                        for evidence_id in item.get("evidence_ids", [])
+                        if evidence_id
+                    ],
+                )
+                calculations.append(self._calculation_payload(result))
+            elif operation == "sum":
+                if not ordered:
+                    raise ValueError("sum_requires_facts")
+                result = calculate(
+                    operation,
+                    [item.get("value_numeric") for item in ordered],
+                    unit=ordered[-1].get("unit"),
+                    evidence_ids=[
+                        str(evidence_id)
+                        for item in ordered
+                        for evidence_id in item.get("evidence_ids", [])
+                        if evidence_id
+                    ],
+                )
+                calculations.append(self._calculation_payload(result))
+            else:
+                raise ValueError("derived_operation_unsupported")
+        except (TypeError, ValueError):
+            calculations = []
+        return self._merged_response(
+            tool_name="get_financial_facts",
+            request=route.arguments,
+            data={**dict(data or {}), "calculations": calculations},
+            responses=[primary],
+            checker_tool="get_financial_facts",
+            checker_data=dict(data or {}),
+            required_response_indexes=(0,),
+            extra_reasons=("backend_calculation_complete",) if calculations else ("backend_calculation_unavailable",),
+            force_answer_allowed=bool(calculations),
+        )
+
+    @staticmethod
+    def _fact_comparable_value(fact: Mapping[str, object]) -> Decimal | None:
+        raw_normalized = fact.get("normalized_value")
+        try:
+            value = (
+                Decimal(str(raw_normalized))
+                if raw_normalized not in (None, "")
+                else Decimal(str(fact.get("value_numeric"))) * Decimal(str(fact.get("scale") or 1))
+            )
+        except (InvalidOperation, ValueError):
+            return None
+        return value if value.is_finite() else None
+
+    def _financial_comparison_response(
+        self, route: QuestionRoute, primary: Mapping[str, object],
+    ) -> dict[str, object]:
+        companies = [str(item) for item in route.context.get("companies", []) if item]
+        responses: list[Mapping[str, object]] = [primary]
+        for company in companies[1:]:
+            responses.append(self.registry.dispatch(
+                "get_financial_facts", {**route.arguments, "company": company},
+            ))
+        selected: list[tuple[str, dict[str, object], Decimal]] = []
+        all_facts: list[dict[str, object]] = []
+        for company, response in zip(companies, responses):
+            data = response.get("data")
+            facts = data.get("facts") if isinstance(data, Mapping) else None
+            ordered = sorted(
+                (dict(item) for item in facts if isinstance(item, Mapping)),
+                key=self._fact_period_key,
+            ) if isinstance(facts, list) else []
+            if len(ordered) != 1:
+                continue
+            fact = ordered[0]
+            value = self._fact_comparable_value(fact)
+            if value is None or not fact.get("display_value"):
+                continue
+            selected.append((company, fact, value))
+            all_facts.append(fact)
+        complete = len(selected) == len(companies) and len(companies) >= 2
+        comparison: dict[str, object] = {
+            "status": "complete" if complete else "incomplete",
+            "companies": companies,
+            "metric": route.context.get("metric"),
+            "period": route.context.get("period"),
+            "values": {
+                company: fact.get("display_value") for company, fact, _ in selected
+            },
+            "winner": None,
+        }
+        if complete:
+            maximum = max(value for _, _, value in selected)
+            winners = [company for company, _, value in selected if value == maximum]
+            comparison["winner"] = winners[0] if len(winners) == 1 else None
+            comparison["tie"] = len(winners) > 1
+        checker_request = {
+            key: value for key, value in route.arguments.items() if key != "company"
+        }
+        checker_request["companies"] = companies
+        return self._merged_response(
+            tool_name="get_financial_facts",
+            request=checker_request,
+            data={"facts": all_facts, "comparison": comparison},
+            responses=responses,
+            checker_tool="get_financial_facts",
+            checker_data={"facts": all_facts},
+            required_response_indexes=tuple(range(len(responses))),
+            extra_reasons=("all_company_values_compared",) if complete else ("company_value_missing",),
+            force_answer_allowed=complete,
+        )
+
+    def _trend_response(
+        self, question: str, route: QuestionRoute, primary: Mapping[str, object],
+    ) -> dict[str, object]:
+        summary_request = {
+            "question": question,
+            "correction_policy": "current",
+            "top_k": 12,
+            "max_chars": 8_000,
+        }
+        for name in ("company", "start_date", "end_date"):
+            if route.arguments.get(name):
+                summary_request[name] = route.arguments[name]
+        content = self.registry.dispatch("build_summary_context", summary_request)
+        primary_data = primary.get("data") if isinstance(primary.get("data"), Mapping) else {}
+        return self._merged_response(
+            tool_name="analyze_disclosure_trend",
+            request=route.arguments,
+            data={"quantitative_trend": dict(primary_data), "content_trend": dict(content.get("data") or {})},
+            responses=[primary, content],
+            checker_tool="analyze_disclosure_trend",
+            checker_data=dict(primary_data),
+            required_response_indexes=(0, 1),
+            extra_reasons=("quantitative_and_content_evidence_merged",),
+            force_answer_allowed=True,
+        )
+
+    def _change_reason_response(
+        self, question: str, route: QuestionRoute, primary: Mapping[str, object],
+    ) -> dict[str, object]:
+        primary_data = primary.get("data") if isinstance(primary.get("data"), Mapping) else {}
+        facts = primary_data.get("facts") if isinstance(primary_data, Mapping) else None
+        ordered = sorted(
+            (dict(item) for item in facts if isinstance(item, Mapping)),
+            key=self._fact_period_key,
+        ) if isinstance(facts, list) else []
+        target_end = str(route.context.get("target_end_date") or "")
+        if target_end:
+            target_year = target_end[:4]
+            indexes = [index for index, fact in enumerate(ordered) if self._fact_period_key(fact).startswith(target_year)]
+            current_index = indexes[-1] if indexes else -1
+        else:
+            current_index = len(ordered) - 1
+        calculations: list[dict[str, object]] = []
+        if current_index <= 0:
+            return self._merged_response(
+                tool_name="get_financial_facts", request=route.arguments,
+                data={**dict(primary_data), "calculations": [], "premise": "unverified"},
+                responses=[primary], checker_tool="get_financial_facts", checker_data=dict(primary_data),
+                required_response_indexes=(0,), extra_reasons=("comparison_period_missing",),
+                force_answer_allowed=False,
+            )
+        previous, current = ordered[current_index - 1], ordered[current_index]
+        evidence_ids = [
+            str(item)
+            for fact in (previous, current)
+            for item in fact.get("evidence_ids", [])
+            if item
+        ]
+        try:
+            difference = calculate(
+                "difference", [previous.get("value_numeric"), current.get("value_numeric")],
+                unit=current.get("unit"), evidence_ids=evidence_ids,
+            )
+            growth = calculate(
+                "growth_rate", [previous.get("value_numeric"), current.get("value_numeric")],
+                unit="%", evidence_ids=evidence_ids,
+            )
+        except (TypeError, ValueError):
+            return self._merged_response(
+                tool_name="get_financial_facts", request=route.arguments,
+                data={**dict(primary_data), "calculations": [], "premise": "unverified"},
+                responses=[primary], checker_tool="get_financial_facts", checker_data=dict(primary_data),
+                required_response_indexes=(0,), extra_reasons=("backend_calculation_unavailable",),
+                force_answer_allowed=False,
+            )
+        calculations.extend((self._calculation_payload(difference), self._calculation_payload(growth)))
+        increased = getattr(difference, "value") > 0
+        base_data = {
+            **dict(primary_data),
+            "calculations": calculations,
+            "premise": "confirmed_increase" if increased else "increase_not_confirmed",
+        }
+        if not increased:
+            return self._merged_response(
+                tool_name="get_financial_facts", request=route.arguments, data=base_data,
+                responses=[primary], checker_tool="get_financial_facts", checker_data=dict(primary_data),
+                required_response_indexes=(0,), extra_reasons=("question_premise_rejected_without_search",),
+                force_answer_allowed=True,
+            )
+        search_request: dict[str, object] = {
+            "question": question,
+            "company": route.context.get("company"),
+            "correction_policy": "current",
+            "top_k": 10,
+        }
+        if route.context.get("target_start_date"):
+            search_request["start_date"] = route.context["target_start_date"]
+        if route.context.get("target_end_date"):
+            search_request["end_date"] = route.context["target_end_date"]
+        search = self.registry.dispatch("search_disclosures", search_request)
+        return self._merged_response(
+            tool_name="get_financial_facts", request=route.arguments,
+            data={**base_data, "reason_evidence": dict(search.get("data") or {})},
+            responses=[primary, search], checker_tool="get_financial_facts", checker_data=dict(primary_data),
+            required_response_indexes=(0, 1), extra_reasons=("increase_verified_before_reason_search",),
+            force_answer_allowed=True,
+        )
+
+    def _correction_response(
+        self, route: QuestionRoute, search: Mapping[str, object],
+    ) -> tuple[HcxToolCall, dict[str, object]]:
+        bundle = self._bundle_from_response(search)
+        items = bundle.get("items")
+        rows = [item for item in items if isinstance(item, Mapping)] if isinstance(items, list) else []
+        corrected = [item for item in rows if item.get("is_correction") is True]
+        selected = corrected[0] if corrected else rows[0] if rows else None
+        filing_id = str(selected.get("filing_id") or "") if selected is not None else ""
+        if not filing_id:
+            return HcxToolCall(f"call_{uuid.uuid4().hex[:24]}", "get_correction_lineage", {"filing_id": "00000000000000"}), self._merged_response(
+                tool_name="get_correction_lineage", request=route.arguments,
+                data={"search": dict(search.get("data") or {}), "original_filing": None, "corrected_filings": [], "current_filing": None, "lineage_confidence": "none"},
+                responses=[search], checker_tool="get_correction_lineage", checker_data={},
+                required_response_indexes=(0,), extra_reasons=("correction_receipt_not_found",),
+                force_answer_allowed=False,
+            )
+        call = HcxToolCall(f"call_{uuid.uuid4().hex[:24]}", "get_correction_lineage", {"filing_id": filing_id})
+        lineage = self.registry.dispatch(call.name, call.arguments)
+        lineage_data = lineage.get("data") if isinstance(lineage.get("data"), Mapping) else {}
+        return call, self._merged_response(
+            tool_name="get_correction_lineage", request=call.arguments,
+            data={**dict(lineage_data), "search": dict(search.get("data") or {})},
+            responses=[search, lineage], checker_tool="get_correction_lineage", checker_data=dict(lineage_data),
+            required_response_indexes=(1,), extra_reasons=("correction_search_and_lineage_merged",),
+            force_answer_allowed=True,
+        )
+
+    def _document_summary_response(
+        self, route: QuestionRoute, primary: Mapping[str, object],
+    ) -> dict[str, object]:
+        report_type = str(route.context.get("report_type") or "")
+        bundle = self._bundle_from_response(primary)
+        items = bundle.get("items")
+        matched = [
+            item for item in items
+            if isinstance(item, Mapping) and report_type in str(item.get("report_name") or "")
+        ] if isinstance(items, list) else []
+        primary_data = primary.get("data") if isinstance(primary.get("data"), Mapping) else {}
+        return self._merged_response(
+            tool_name="build_summary_context",
+            request=route.arguments,
+            data={
+                **dict(primary_data),
+                "document_existence": "confirmed" if matched else "not_found",
+                "requested_report_type": report_type,
+            },
+            responses=[primary],
+            checker_tool="build_summary_context",
+            checker_data=dict(primary_data),
+            required_response_indexes=(0,),
+            extra_reasons=("requested_document_confirmed",) if matched else ("requested_document_not_found",),
+            force_answer_allowed=bool(matched),
+        )
+
+    @staticmethod
+    def _statement_item_matches(item: Mapping[str, object], route: QuestionRoute) -> bool:
+        year = str(route.context.get("fiscal_year") or "")
+        period = item.get("period")
+        if not year or not isinstance(period, Mapping):
+            return False
+        start = str(period.get("period_start") or period.get("start") or "")
+        end = str(period.get("period_end") or period.get("end") or period.get("instant_date") or "")
+        if not end.startswith(year):
+            return False
+        report_name = str(item.get("report_name") or "")
+        if route.context.get("period_kind") == "quarter":
+            quarter = int(route.context.get("quarter") or 0)
+            expected_month = {1: "03", 2: "06", 3: "09", 4: "12"}.get(quarter)
+            if expected_month is None or end[5:7] != expected_month:
+                return False
+            if quarter != 4 and "분기보고서" not in report_name and "반기보고서" not in report_name:
+                return False
+        else:
+            if "사업보고서" not in report_name or end[5:7] != "12" or not start.startswith(year):
+                return False
+        locator = item.get("locator")
+        locator_fields = {str(key).casefold() for key in locator} if isinstance(locator, Mapping) else set()
+        has_cell_location = bool(
+            item.get("table_id")
+            and locator_fields.intersection({"row", "row_index", "row_label", "column", "column_index", "column_label", "cell"})
+        )
+        return bool(
+            item.get("structured_value") is not None
+            and item.get("unit")
+            and item.get("rcept_no")
+            and has_cell_location
+        )
+
+    def _financial_statement_response(
+        self, route: QuestionRoute, primary: Mapping[str, object],
+    ) -> dict[str, object]:
+        raw_bundle = self._bundle_from_response(primary)
+        raw_items = raw_bundle.get("items")
+        admitted = [
+            dict(item) for item in raw_items
+            if isinstance(item, Mapping) and self._statement_item_matches(item, route)
+        ] if isinstance(raw_items, list) else []
+        validated_values: list[dict[str, object]] = []
+        for item in admitted:
+            rendered = format_financial_value(
+                item.get("structured_value"), item.get("scale") or 1, item.get("unit"),
+            )
+            if rendered:
+                item["display_value"] = rendered
+                validated_values.append({
+                    "metric": route.context.get("metric"),
+                    "period": item.get("period"),
+                    "display_value": rendered,
+                    "evidence_ids": list(item.get("evidence_ids") or []),
+                    "rcept_no": item.get("rcept_no"),
+                })
+        admitted = [item for item in admitted if item.get("display_value")]
+        evidence_ids = [
+            str(evidence_id) for item in admitted
+            for evidence_id in item.get("evidence_ids", []) if evidence_id
+        ]
+        filing_ids = [str(item.get("filing_id")) for item in admitted if item.get("filing_id")]
+        context = "\n\n".join(
+            f"[{item.get('rcept_no')}|{item.get('evidence_id')}] {item.get('text') or ''}"
+            for item in admitted
+        )
+        bundle = ToolEvidenceBundle(
+            question_intent="build_summary_context",
+            requested_scope={**route.arguments, **route.context},
+            covered_scope=dict(raw_bundle.get("covered_scope") or {}),
+            items=admitted,
+            evidence_ids=evidence_ids,
+            filing_ids=filing_ids,
+            issuer_corp_codes=list(raw_bundle.get("issuer_corp_codes") or []),
+            quality_warnings=[] if admitted else ["financial_statement_cell_contract_not_met"],
+            correction_status=str(raw_bundle.get("correction_status") or "not_evaluated"),
+            retrieval_status=dict(raw_bundle.get("retrieval_status") or {}),
+        )
+        data = {
+            "context": context,
+            "context_chars": len(context),
+            "result_count": len(admitted),
+            "validated_statement_values": validated_values,
+            "fiscal_year": route.context.get("fiscal_year"),
+            "period_kind": route.context.get("period_kind"),
+            "unavailable_reason": None if admitted else "row_column_unit_period_contract_not_met",
+        }
+        checked = self.evidence_checker.check(
+            "build_summary_context", route.arguments, bundle, data,
+        ).to_dict()
+        if not admitted:
+            checked.update({
+                "status": "insufficient",
+                "reasons": ["financial_statement_cell_contract_not_met"],
+                "missing_requirements": ["row", "column", "unit", "fiscal_period", "rcept_no"],
+                "recommended_action": "abstain",
+                "answer_allowed": False,
+            })
+        bundle.sufficiency = str(checked["status"])
+        return {
+            "status": "success" if checked["answer_allowed"] else "insufficient",
+            "tool_name": "build_summary_context",
+            "data": data,
+            "evidence_bundle": bundle.to_dict(),
+            "warnings": list(bundle.quality_warnings),
+            "metadata": {
+                "schema_version": "tool-response-v1",
+                "backend_version": "tool-registry-v1",
+                "executors": ["build_summary_context"],
+                "sufficiency_check": checked,
+            },
+        }
+
+    def _execute_route(
+        self, question: str, route: QuestionRoute, tool_call: HcxToolCall,
+    ) -> tuple[HcxToolCall, dict[str, object]]:
+        primary = self.registry.dispatch(tool_call.name, tool_call.arguments)
+        if str(primary.get("status") or "error") in {"invalid_request", "error"}:
+            return tool_call, primary
+        if route.workflow == "financial_derived":
+            return tool_call, self._financial_derived_response(route, primary)
+        if route.workflow == "financial_comparison":
+            return tool_call, self._financial_comparison_response(route, primary)
+        if route.workflow == "trend_with_content":
+            return tool_call, self._trend_response(question, route, primary)
+        if route.workflow == "financial_change_reason":
+            return tool_call, self._change_reason_response(question, route, primary)
+        if route.workflow == "correction_search_then_lineage":
+            return self._correction_response(route, primary)
+        if route.workflow == "document_summary_check":
+            return tool_call, self._document_summary_response(route, primary)
+        if route.workflow == "financial_statement_metric":
+            return tool_call, self._financial_statement_response(route, primary)
+        return tool_call, primary
 
     def answer(self, question: object) -> FunctionCallingResult:
         if not isinstance(question, str) or not question.strip() or len(question) > self.max_question_chars:
@@ -464,29 +1149,104 @@ class HcxFunctionCallingService:
                 "invalid_request", "질문 형식이 올바르지 않습니다.", warnings=["question_invalid"]
             )
         question = question.strip()
+        route = self.router.route(question) if self.router is not None else None
+        if route is not None and route.kind in {"clarification", "unavailable"}:
+            recommended_action = "ask_clarification" if route.kind == "clarification" else "abstain"
+            bundle = ToolEvidenceBundle(
+                question_intent=route.metric_kind.casefold(),
+                requested_scope=dict(route.context),
+                quality_warnings=[route.reason],
+                correction_status="not_evaluated",
+                sufficiency="insufficient",
+            )
+            tool_response = {
+                "status": "insufficient",
+                "tool_name": "resolver",
+                "data": {
+                    "ambiguity": dict(route.context) if route.kind == "clarification" else None,
+                    "unavailable_reason": route.message if route.kind == "unavailable" else None,
+                    "available_range": route.context.get("available_range"),
+                },
+                "evidence_bundle": bundle.to_dict(),
+                "warnings": [route.reason],
+                "metadata": {
+                    "schema_version": "tool-response-v1",
+                    "sufficiency_check": {
+                        "status": "insufficient",
+                        "reasons": [route.reason],
+                        "missing_requirements": ["resolved_supported_question"],
+                        "recommended_action": recommended_action,
+                        "answer_allowed": False,
+                    },
+                },
+            }
+            return self._result(
+                "abstained",
+                route.message or "질문의 계정이나 범위를 더 구체적으로 알려주세요.",
+                tool_response=tool_response,
+                recommended_action=recommended_action,
+                warnings=["deterministic_clarification" if route.kind == "clarification" else "deterministic_unavailable"],
+                metadata={
+                    "provider_configured": bool(self.client.configured),
+                    "route_source": "deterministic",
+                    "route_reason": route.reason,
+                    "question_corrections": list(route.corrections),
+                    "tool_selection_called": False,
+                    "final_generation_called": False,
+                },
+            )
+
+        tool_selection_called = route is None
         if not self.client.configured:
             return self._result(
                 "provider_unavailable", UNANSWERABLE_TEXT,
-                warnings=["hcx_api_key_not_configured"], metadata={"provider_configured": False},
+                warnings=["hcx_api_key_not_configured"],
+                metadata={
+                    "provider_configured": False,
+                    "route_source": "deterministic" if route is not None else "provider",
+                    "route_reason": route.reason if route is not None else "provider_tool_selection",
+                    "question_corrections": list(route.corrections) if route is not None else [],
+                    "tool_selection_called": False,
+                    "final_generation_called": False,
+                },
             )
-        tools = self.available_tools()
-        try:
-            tool_call = self.client.select_tool(question, tools)
-        except Exception as exc:
-            diagnostics = self._record_failure("tool_selection", exc)
-            return self._result(
-                "error", UNANSWERABLE_TEXT, warnings=["hcx_tool_selection_failed"],
-                metadata={"provider_configured": True, **diagnostics},
+        if route is not None:
+            tool_call = HcxToolCall(
+                f"call_{uuid.uuid4().hex[:24]}",
+                str(route.tool_name),
+                route.arguments,
             )
+        else:
+            tools = self.available_tools()
+            try:
+                tool_call = self.client.select_tool(question, tools)
+            except Exception as exc:
+                diagnostics = self._record_failure("tool_selection", exc)
+                return self._result(
+                    "error", UNANSWERABLE_TEXT, warnings=["hcx_tool_selection_failed"],
+                    metadata={"provider_configured": True, **diagnostics},
+                )
 
         # Search/context Tools must execute the original user question.  A
         # malformed or omitted question still reaches Registry validation and
         # is rejected; only an already-string provider paraphrase is replaced.
         if isinstance(tool_call.arguments.get("question"), str):
             tool_call = HcxToolCall(
-                tool_call.call_id, tool_call.name, {**tool_call.arguments, "question": question}
+                tool_call.call_id,
+                tool_call.name,
+                {
+                    **tool_call.arguments,
+                    "question": (
+                        route.normalized_question
+                        if route is not None and route.normalized_question
+                        else question
+                    ),
+                },
             )
-        tool_response = self.registry.dispatch(tool_call.name, tool_call.arguments)
+        if route is not None:
+            tool_call, tool_response = self._execute_route(question, route, tool_call)
+        else:
+            tool_response = self.registry.dispatch(tool_call.name, tool_call.arguments)
         tool_status = str(tool_response.get("status") or "error")
         sufficiency = self._sufficiency(tool_response)
         recommended_action = str(sufficiency.get("recommended_action") or "abstain")
@@ -500,10 +1260,15 @@ class HcxFunctionCallingService:
             "tool_response": tool_response,
             "recommended_action": recommended_action,
             "metadata": {
-                "provider_configured": True,
+                "provider_configured": bool(self.client.configured),
                 "model": self.client.model,
                 "prompt_version": HCX_FUNCTION_PROMPT_VERSION,
-                "tool_selection_called": True,
+                "route_source": "deterministic" if route is not None else "provider",
+                "route_reason": route.reason if route is not None else "provider_tool_selection",
+                "metric_kind": route.metric_kind if route is not None else "SEARCH",
+                "workflow": route.workflow if route is not None else "function_calling_fallback",
+                "question_corrections": list(route.corrections) if route is not None else [],
+                "tool_selection_called": tool_selection_called,
                 "final_generation_called": False,
             },
         }
@@ -548,7 +1313,7 @@ class HcxFunctionCallingService:
         common["metadata"]["final_generation_called"] = True  # type: ignore[index]
         failure_stage = "final_generation"
         try:
-            generated = self.client.generate_answer(question, tool_call, tool_response)
+            generated = self.client.generate_routed_answer(question, tool_call, tool_response)
             failure_stage = "final_citation_validation"
             known_ids = {
                 str(item) for item in (
@@ -577,6 +1342,99 @@ class HcxFunctionCallingService:
             citation_ids=[item.evidence_id for item in citations],
             citations=[item.to_dict() for item in citations], **common,
         )
+
+    @staticmethod
+    def _deterministic_financial_answer(
+        tool_response: Mapping[str, object],
+        available_evidence_ids: Sequence[str],
+    ) -> HcxGeneratedAnswer | None:
+        data = tool_response.get("data")
+        facts = data.get("facts") if isinstance(data, Mapping) else None
+        if not isinstance(facts, list) or not facts or not available_evidence_ids:
+            return None
+        sentences: list[str] = []
+        for raw_fact in facts[:5]:
+            if not isinstance(raw_fact, Mapping) or raw_fact.get("value_numeric") is None:
+                continue
+            identifiers = raw_fact.get("company_identifiers")
+            company = identifiers.get("company") if isinstance(identifiers, Mapping) else None
+            account_name = raw_fact.get("account_name") or raw_fact.get("account_id") or "재무 수치"
+            period = raw_fact.get("period")
+            period_label = ""
+            if isinstance(period, Mapping):
+                instant = str(period.get("instant_date") or "")
+                start = str(period.get("period_start") or "")
+                end = str(period.get("period_end") or "")
+                if instant:
+                    period_label = instant
+                elif start and end and start[:4] == end[:4]:
+                    period_label = f"{end[:4]}년"
+                elif start or end:
+                    period_label = "~".join(item for item in (start, end) if item)
+            scope = {"consolidated": "연결", "separate": "별도"}.get(str(raw_fact.get("scope") or ""), "")
+            raw_value = str(raw_fact["value_numeric"])
+            try:
+                number = Decimal(raw_value)
+                value = f"{number:,f}".rstrip("0").rstrip(".") if "." in f"{number:f}" else f"{number:,f}"
+            except (InvalidOperation, ValueError):
+                value = raw_value
+            unit = "원" if str(raw_fact.get("unit") or "").upper() == "KRW" else str(raw_fact.get("unit") or "")
+            scale = raw_fact.get("scale")
+            scale_note = f"(원문 배율 {scale})" if scale not in (None, 1, "1") else ""
+            subject = " ".join(str(item) for item in (company, period_label, scope, account_name) if item)
+            sentences.append(f"{subject}은 {value}{unit}{scale_note}입니다.")
+        if not sentences:
+            return None
+        answer = sentences[0] if len(sentences) == 1 else "\n".join(f"- {item}" for item in sentences)
+        return HcxGeneratedAnswer(answer, tuple(available_evidence_ids[:5]))
+
+    @staticmethod
+    def _deterministic_trend_answer(
+        tool_response: Mapping[str, object],
+        available_evidence_ids: Sequence[str],
+    ) -> HcxGeneratedAnswer | None:
+        data = tool_response.get("data")
+        if not isinstance(data, Mapping) or not available_evidence_ids:
+            return None
+        total_count = data.get("total_count")
+        if not isinstance(total_count, int) or total_count <= 0:
+            return None
+        bundle = tool_response.get("evidence_bundle")
+        requested_scope = bundle.get("requested_scope") if isinstance(bundle, Mapping) else None
+        company = requested_scope.get("company") if isinstance(requested_scope, Mapping) else None
+        requested_range = data.get("requested_range")
+        start_date = requested_range.get("start_date") if isinstance(requested_range, Mapping) else None
+        end_date = requested_range.get("end_date") if isinstance(requested_range, Mapping) else None
+
+        period_rows = data.get("count_by_period")
+        period_parts = [
+            f"{row.get('period')} {row.get('count')}건"
+            for row in period_rows
+            if isinstance(row, Mapping) and row.get("period") and row.get("count") is not None
+        ] if isinstance(period_rows, list) else []
+        type_labels = {
+            "periodic": "정기공시",
+            "major": "주요사항공시",
+            "exchange": "거래소공시",
+            "holding": "지주회사공시",
+        }
+        type_rows = data.get("count_by_type")
+        type_parts = [
+            f"{type_labels.get(str(row.get('filing_type')), str(row.get('filing_type')))} {row.get('count')}건"
+            for row in type_rows
+            if isinstance(row, Mapping) and row.get("filing_type") and row.get("count") is not None
+        ] if isinstance(type_rows, list) else []
+
+        subject = str(company or "해당 회사")
+        range_label = "~".join(str(item) for item in (start_date, end_date) if item)
+        sentences = [f"{subject}의 {range_label or '요청 기간'} 공시는 총 {total_count}건입니다."]
+        if period_parts:
+            sentences.append("월별 건수는 " + ", ".join(period_parts) + "입니다.")
+        if type_parts:
+            sentences.append("유형별 건수는 " + ", ".join(type_parts) + "입니다.")
+        if data.get("coverage_complete") is not True:
+            sentences.append("요청 기간 전체가 아니라 현재 데이터에 수록된 공시 기준입니다.")
+        return HcxGeneratedAnswer(" ".join(sentences), tuple(available_evidence_ids[:5]))
 
     @staticmethod
     def _available_citations(

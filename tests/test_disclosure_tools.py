@@ -73,7 +73,6 @@ def _create_metadata_database(path: Path) -> None:
             stock_code TEXT NOT NULL,
             issuer_name TEXT NOT NULL,
             listed_name TEXT NOT NULL,
-            reporter_name TEXT NOT NULL,
             doc_group TEXT NOT NULL,
             doc_subtype_normalized TEXT,
             report_name_raw TEXT NOT NULL,
@@ -101,11 +100,11 @@ def _create_metadata_database(path: Path) -> None:
         """
     )
     filings = [
-        ("f-1", "00000001", "000001", "테스트회사", "테스트회사", "테스트회사", "periodic", "annual", "사업보고서", "2024-01-01", 0),
-        ("f-2", "00000001", "000001", "테스트회사", "테스트회사", "테스트회사", "periodic", "annual", "정정 사업보고서", "2024-01-15", 1),
-        ("f-3", "00000001", "000001", "테스트회사", "테스트회사", "테스트회사", "major", "contract", "주요사항보고서", "2024-02-01", 0),
+        ("f-1", "00000001", "000001", "테스트회사", "테스트회사", "periodic", "annual", "사업보고서", "2024-01-01", 0),
+        ("f-2", "00000001", "000001", "테스트회사", "테스트회사", "periodic", "annual", "정정 사업보고서", "2024-01-15", 1),
+        ("f-3", "00000001", "000001", "테스트회사", "테스트회사", "major", "contract", "주요사항보고서", "2024-02-01", 0),
     ]
-    connection.executemany("INSERT INTO filing VALUES(?,?,?,?,?,?,?,?,?,?,?)", filings)
+    connection.executemany("INSERT INTO filing VALUES(?,?,?,?,?,?,?,?,?,?)", filings)
     versions = [
         ("f-1", "event-1", 1, None, "root", "high", "2024-01-01", "2024-01-15", 0, "original"),
         ("f-2", "event-1", 2, "f-1", "unresolved", "none", "2024-01-15", None, 1, "uncertain match"),

@@ -23,9 +23,20 @@ Evidence에 없는 사실이나 숫자는 만들거나 추측하지 않는다.
 Tool argument에는 정확히 answer와 citation_ids 두 필드만 포함한다.
 """
 
+HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT = """\
+백엔드가 선택하고 실행한 DART Tool Result만 사용해 한국어로 간결하게 답한다.
+Evidence에 없는 사실이나 숫자는 만들거나 추측하지 않는다.
+DB를 새로 조회하거나 산술 계산을 하지 않는다. calculations가 있으면 그 결과만 설명한다.
+증가·감소 원인은 reason_evidence에 명시된 내용만 사용하고 시장 원인, 기업 전략,
+미래 전망을 추측하지 않는다.
+회사, 기간, 재무계정, 단위를 Tool Result와 정확히 일치시킨다.
+접수번호는 답변 본문에 직접 만들거나 복사하지 않는다.
+JSON이나 Tool Call을 만들지 말고 최종 답변 문장만 반환한다.
+"""
 
 __all__ = [
     "HCX_FINAL_ANSWER_SYSTEM_PROMPT",
     "HCX_FUNCTION_PROMPT_VERSION",
+    "HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT",
     "HCX_TOOL_SELECTION_SYSTEM_PROMPT",
 ]

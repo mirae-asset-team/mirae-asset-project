@@ -428,6 +428,18 @@ def _result_identity(row: Mapping[str, object]) -> str | None:
     return None
 
 
+def _result_aliases(row: Mapping[str, object]) -> list[str]:
+    aliases: list[str] = []
+    if row.get("chunk_id"):
+        aliases.append(f"chunk:{row['chunk_id']}")
+    if row.get("evidence_id"):
+        aliases.append(f"evidence:{row['evidence_id']}")
+    raw_ids = row.get("evidence_ids")
+    if isinstance(raw_ids, (list, tuple)):
+        aliases.extend(f"evidence:{item}" for item in raw_ids if item)
+    return list(dict.fromkeys(aliases))
+
+
 def _rrf_hybrid(
     sparse_hits: Sequence[Mapping[str, object]],
     dense_hits: Sequence[Mapping[str, object]],
@@ -436,15 +448,20 @@ def _rrf_hybrid(
     rrf_k: int,
 ) -> list[Mapping[str, object]]:
     fused: dict[str, dict[str, object]] = {}
+    alias_owner: dict[str, str] = {}
     for source, ranking in (("sparse", sparse_hits), ("dense", dense_hits)):
         seen_in_ranking: set[str] = set()
         for rank, raw_row in enumerate(ranking, start=1):
-            identity = _result_identity(raw_row)
+            aliases = _result_aliases(raw_row)
+            identity = next((alias_owner[item] for item in aliases if item in alias_owner), None)
+            identity = identity or _result_identity(raw_row)
             if identity is None or identity in seen_in_ranking:
                 continue
             seen_in_ranking.add(identity)
             if identity not in fused:
                 fused[identity] = {**raw_row, "rrf_score": 0.0, "retrieval_sources": []}
+            for alias in aliases:
+                alias_owner.setdefault(alias, identity)
             target = fused[identity]
             target["rrf_score"] = float(target["rrf_score"]) + 1.0 / (rrf_k + rank)
             target[f"{source}_rank"] = rank
