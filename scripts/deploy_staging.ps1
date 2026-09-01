@@ -2,12 +2,12 @@
 param(
     [Parameter(Mandatory = $true)][string]$ServerHost,
     [Parameter(Mandatory = $true)][string]$SshUser,
-    [Parameter(Mandatory = $true)][string]$KeyPath,
+    [string]$KeyPath = "",
     [string]$RemoteDirectory = "/srv/mirae/staging/app"
 )
 
 $ErrorActionPreference = "Stop"
-if (-not (Test-Path -LiteralPath $KeyPath -PathType Leaf)) {
+if ($KeyPath -and -not (Test-Path -LiteralPath $KeyPath -PathType Leaf)) {
     throw "SSH private key was not found: $KeyPath"
 }
 if ($ServerHost -notmatch '^[A-Za-z0-9.-]+$' -or $SshUser -notmatch '^[A-Za-z0-9._-]+$') {
@@ -32,7 +32,12 @@ try {
     Assert-LastExitCode "package"
     Pop-Location
 
-    & scp -i $KeyPath $archive "${target}:$remoteArchive"
+    if ($KeyPath) {
+        & scp -i $KeyPath $archive "${target}:$remoteArchive"
+    }
+    else {
+        & scp $archive "${target}:$remoteArchive"
+    }
     Assert-LastExitCode "upload"
 
     $remoteCommand = @(
@@ -43,7 +48,12 @@ try {
         "docker compose up -d --no-deps disclosure-agent-staging",
         "curl --fail --silent --show-error http://127.0.0.1:8001/health"
     ) -join " && "
-    & ssh -i $KeyPath $target $remoteCommand
+    if ($KeyPath) {
+        & ssh -i $KeyPath $target $remoteCommand
+    }
+    else {
+        & ssh $target $remoteCommand
+    }
     Assert-LastExitCode "staging deployment or health check"
 }
 finally {
