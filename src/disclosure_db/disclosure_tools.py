@@ -281,8 +281,20 @@ def _period_for_fact(fact: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _is_validated_actual_fact(fact: Mapping[str, object]) -> bool:
+    if fact.get("validation_status") != "validated":
+        return False
+    forecast_fields = " ".join(
+        str(fact.get(key) or "")
+        for key in ("fact_status", "value_type", "account_name_raw", "extraction_method")
+    ).casefold()
+    return not any(marker in forecast_fields for marker in (
+        "forecast", "estimate", "projection", "guidance", "예상", "전망", "추정",
+    ))
+
+
 def _fact_matches_request(fact: Mapping[str, object], request: Mapping[str, object], account_id: str) -> bool:
-    if fact.get("account_id") != account_id or fact.get("validation_status") != "validated":
+    if fact.get("account_id") != account_id or not _is_validated_actual_fact(fact):
         return False
     company = str(request["company"])
     actual_company_values = {

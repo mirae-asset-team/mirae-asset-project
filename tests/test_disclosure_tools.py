@@ -242,6 +242,32 @@ class FinancialToolTests(unittest.TestCase):
         self.assertEqual(response["evidence_bundle"]["evidence_ids"], ["ev-fin"])
         self.assertEqual(len(service.calls), 1)
 
+    def test_validated_actual_precedes_forecast_for_historical_period(self) -> None:
+        common = {
+            "filing_id": "f-fin", "account_id": "revenue", "scale": 1,
+            "currency": "KRW", "unit_raw": "원", "scope": "consolidated",
+            "period_type": "duration", "period_start": "2025-01-01", "period_end": "2025-12-31",
+            "instant_date": None, "evidence_ids": ["ev-fin"], "issuer_name": "테스트회사",
+        }
+        forecast = {
+            **common, "financial_fact_id": "ff-forecast", "account_name_raw": "예상 매출액",
+            "value_numeric": "999", "validation_status": "validated", "value_type": "forecast",
+        }
+        actual = {
+            **common, "financial_fact_id": "ff-actual", "account_name_raw": "매출액",
+            "value_numeric": "200", "validation_status": "validated", "value_type": "actual",
+        }
+        registry, _service = self._registry([forecast, actual])
+
+        response = registry.dispatch("get_financial_facts", {
+            "company": "테스트회사", "account": "매출액",
+            "start_date": "2025-01-01", "end_date": "2025-12-31",
+        })
+
+        self.assertEqual(response["status"], "success")
+        self.assertEqual(len(response["data"]["facts"]), 1)
+        self.assertEqual(response["data"]["facts"][0]["value_numeric"], "200")
+
     def test_non_structured_accounts_are_blocked_before_evidence_service(self) -> None:
         registry, service = self._registry([])
         for account, warning in (

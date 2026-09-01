@@ -41,6 +41,11 @@ FINAL_ANSWER_TOOL_NAME = "submit_grounded_answer"
 FUNCTION_FLOW_STATUSES = frozenset({"answered", "abstained", "invalid_request", "provider_unavailable", "error"})
 _DART_RCEPT_NO = re.compile(r"\d{14}\Z")
 _DART_RCEPT_NO_IN_TEXT = re.compile(r"접수번호\s*[:：]?\s*\d{14}")
+_FORECAST_CLAIM = re.compile(
+    r"(?:될\s*것으로\s*(?:예상|전망)|예상(?:됩니다|입니다|된다|될|치|\s*(?:매출|수익|실적|금액|수치))|"
+    r"전망(?:됩니다|입니다|된다|될|치)|추정(?:됩니다|입니다|된다|될|치)|forecast|estimated?)",
+    re.IGNORECASE,
+)
 _SAFE_DIAGNOSTIC_TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
 _LOGGER = logging.getLogger(__name__)
 
@@ -790,57 +795,151 @@ class HcxFunctionCallingService:
         self, route: QuestionRoute, primary: Mapping[str, object],
     ) -> dict[str, object]:
         companies = [str(item) for item in route.context.get("companies", []) if item]
+        periods = [str(item) for item in route.context.get("periods", []) if item]
+        raw_requirements = route.context.get("requirements")
+        requirements = [
+            dict(item) for item in raw_requirements if isinstance(item, Mapping)
+        ] if isinstance(raw_requirements, list) else []
+        if not requirements:
+            requirements = [
+                {"company": company, "period": periods[0] if len(periods) == 1 else None, "account": route.context.get("metric")}
+                for company in companies
+            ]
         responses: list[Mapping[str, object]] = [primary]
-        for company in companies[1:]:
-            responses.append(self.registry.dispatch(
-                "get_financial_facts", {**route.arguments, "company": company},
-            ))
-        selected: list[tuple[str, dict[str, object], Decimal]] = []
+        for requirement in requirements[1:]:
+            request = {
+                **route.arguments,
+                "company": requirement.get("company"),
+                "account": requirement.get("account") or route.arguments.get("account"),
+                "top_k": 1,
+            }
+            period = str(requirement.get("period") or "")
+            if period:
+                request.update({"start_date": f"{period}-01-01", "end_date": f"{period}-12-31"})
+            else:
+                request.pop("start_date", None)
+                request.pop("end_date", None)
+            responses.append(self.registry.dispatch("get_financial_facts", request))
+        selected: list[tuple[dict[str, object], dict[str, object], Decimal]] = []
         all_facts: list[dict[str, object]] = []
-        for company, response in zip(companies, responses):
+        requirement_coverage: list[dict[str, object]] = []
+        for requirement, response in zip(requirements, responses):
             data = response.get("data")
             facts = data.get("facts") if isinstance(data, Mapping) else None
             ordered = sorted(
                 (dict(item) for item in facts if isinstance(item, Mapping)),
                 key=self._fact_period_key,
             ) if isinstance(facts, list) else []
-            if len(ordered) != 1:
+            expected_period = str(requirement.get("period") or "")
+            matching = [
+                fact for fact in ordered
+                if not expected_period or self._fact_period_key(fact).startswith(expected_period)
+            ]
+            if len(matching) != 1:
+                requirement_coverage.append({**requirement, "covered": False})
                 continue
-            fact = ordered[0]
+            fact = matching[0]
             value = self._fact_comparable_value(fact)
             if value is None or not fact.get("display_value"):
+                requirement_coverage.append({**requirement, "covered": False})
                 continue
-            selected.append((company, fact, value))
+            requirement_coverage.append({
+                **requirement, "covered": True,
+                "actual_period": self._fact_period_key(fact)[:4] or None,
+            })
+            selected.append((requirement, fact, value))
             all_facts.append(fact)
-        complete = len(selected) == len(companies) and len(companies) >= 2
+        calculations: list[dict[str, object]] = []
+        calculation_failed = False
+        if len(companies) == 1 and len(periods) >= 2:
+            ordered_selected = sorted(selected, key=lambda item: str(item[0].get("period") or ""))
+            for (previous_requirement, previous, previous_value), (current_requirement, current, current_value) in zip(
+                ordered_selected, ordered_selected[1:],
+            ):
+                evidence_ids = [
+                    str(item)
+                    for fact in (previous, current)
+                    for item in fact.get("evidence_ids", [])
+                    if item
+                ]
+                try:
+                    difference = calculate(
+                        "difference", [previous_value, current_value],
+                        unit=current.get("unit"), evidence_ids=evidence_ids,
+                    )
+                    growth = calculate(
+                        "growth_rate", [previous_value, current_value],
+                        unit="%", evidence_ids=evidence_ids,
+                    )
+                except (TypeError, ValueError):
+                    calculation_failed = True
+                    break
+                calculations.extend((
+                    {
+                        **self._calculation_payload(difference),
+                        "company": companies[0],
+                        "from_period": previous_requirement.get("period"),
+                        "to_period": current_requirement.get("period"),
+                    },
+                    {
+                        **self._calculation_payload(growth),
+                        "company": companies[0],
+                        "from_period": previous_requirement.get("period"),
+                        "to_period": current_requirement.get("period"),
+                    },
+                ))
+        complete = (
+            len(requirements) >= 2
+            and len(selected) == len(requirements)
+            and not calculation_failed
+            and (len(companies) != 1 or len(periods) < 2 or len(calculations) == 2 * (len(periods) - 1))
+        )
         comparison: dict[str, object] = {
             "status": "complete" if complete else "incomplete",
             "companies": companies,
             "metric": route.context.get("metric"),
             "period": route.context.get("period"),
-            "values": {
-                company: fact.get("display_value") for company, fact, _ in selected
-            },
+            "periods": periods,
+            "values": [
+                {
+                    "company": requirement.get("company"),
+                    "period": requirement.get("period"),
+                    "display_value": fact.get("display_value"),
+                }
+                for requirement, fact, _ in selected
+            ],
+            "calculations": calculations,
             "winner": None,
         }
-        if complete:
+        if complete and len(companies) >= 2 and len(periods) <= 1:
             maximum = max(value for _, _, value in selected)
-            winners = [company for company, _, value in selected if value == maximum]
+            winners = [str(requirement.get("company")) for requirement, _, value in selected if value == maximum]
             comparison["winner"] = winners[0] if len(winners) == 1 else None
             comparison["tie"] = len(winners) > 1
+        elif complete and len(companies) == 1 and periods:
+            maximum = max(value for _, _, value in selected)
+            largest = [str(requirement.get("period")) for requirement, _, value in selected if value == maximum]
+            comparison["largest_period"] = largest[0] if len(largest) == 1 else None
         checker_request = {
-            key: value for key, value in route.arguments.items() if key != "company"
+            "account": route.arguments.get("account"),
+            "companies": companies,
+            "periods": periods,
+            "requirements": requirements,
         }
-        checker_request["companies"] = companies
         return self._merged_response(
             tool_name="get_financial_facts",
             request=checker_request,
-            data={"facts": all_facts, "comparison": comparison},
+            data={
+                "facts": all_facts,
+                "comparison": comparison,
+                "calculations": calculations,
+                "requirement_coverage": requirement_coverage,
+            },
             responses=responses,
             checker_tool="get_financial_facts",
-            checker_data={"facts": all_facts},
+            checker_data={"facts": all_facts, "requirement_coverage": requirement_coverage},
             required_response_indexes=tuple(range(len(responses))),
-            extra_reasons=("all_company_values_compared",) if complete else ("company_value_missing",),
+            extra_reasons=("all_financial_comparison_requirements_covered",) if complete else ("financial_comparison_requirement_missing",),
             force_answer_allowed=complete,
         )
 
@@ -939,10 +1038,8 @@ class HcxFunctionCallingService:
             "correction_policy": "current",
             "top_k": 10,
         }
-        if route.context.get("target_start_date"):
-            search_request["start_date"] = route.context["target_start_date"]
-        if route.context.get("target_end_date"):
-            search_request["end_date"] = route.context["target_end_date"]
+        # target_start/end are fiscal periods, while search_disclosures dates
+        # are filing dates. Do not exclude an FY2025 annual report filed in 2026.
         search = self.registry.dispatch("search_disclosures", search_request)
         return self._merged_response(
             tool_name="get_financial_facts", request=route.arguments,
@@ -1315,6 +1412,23 @@ class HcxFunctionCallingService:
         try:
             generated = self.client.generate_routed_answer(question, tool_call, tool_response)
             failure_stage = "final_citation_validation"
+            data = tool_response.get("data")
+            facts = data.get("facts") if isinstance(data, Mapping) else None
+            has_validated_actual = isinstance(facts, list) and any(
+                isinstance(fact, Mapping)
+                and fact.get("support_level") == "structured"
+                and fact.get("validation_status") == "validated"
+                and bool(fact.get("display_value"))
+                for fact in facts
+            )
+            if has_validated_actual and _FORECAST_CLAIM.search(generated.answer):
+                grounded = self._deterministic_financial_answer(
+                    tool_response,
+                    list(tool_response.get("evidence_bundle", {}).get("evidence_ids", [])),  # type: ignore[union-attr]
+                ) if route is not None and route.workflow == "single" else None
+                if grounded is None:
+                    raise HcxProtocolError("hcx_final_forecast_conflicts_with_validated_actual")
+                generated = grounded
             known_ids = {
                 str(item) for item in (
                     tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
@@ -1372,17 +1486,11 @@ class HcxFunctionCallingService:
                 elif start or end:
                     period_label = "~".join(item for item in (start, end) if item)
             scope = {"consolidated": "연결", "separate": "별도"}.get(str(raw_fact.get("scope") or ""), "")
-            raw_value = str(raw_fact["value_numeric"])
-            try:
-                number = Decimal(raw_value)
-                value = f"{number:,f}".rstrip("0").rstrip(".") if "." in f"{number:f}" else f"{number:,f}"
-            except (InvalidOperation, ValueError):
-                value = raw_value
-            unit = "원" if str(raw_fact.get("unit") or "").upper() == "KRW" else str(raw_fact.get("unit") or "")
-            scale = raw_fact.get("scale")
-            scale_note = f"(원문 배율 {scale})" if scale not in (None, 1, "1") else ""
             subject = " ".join(str(item) for item in (company, period_label, scope, account_name) if item)
-            sentences.append(f"{subject}은 {value}{unit}{scale_note}입니다.")
+            display_value = str(raw_fact.get("display_value") or "")
+            if not display_value:
+                continue
+            sentences.append(f"{subject}은 {display_value}입니다.")
         if not sentences:
             return None
         answer = sentences[0] if len(sentences) == 1 else "\n".join(f"- {item}" for item in sentences)

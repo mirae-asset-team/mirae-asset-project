@@ -21,6 +21,9 @@ _CORRECTION_MARKERS = ("정정", "최초공시", "원공시", "변경 전", "변
 _CHANGE_REASON_MARKERS = ("증가한 이유", "감소한 이유", "증가 이유", "감소 이유", "변동 이유", "왜 증가", "왜 감소")
 _UNAVAILABLE_MARKERS = ("시가총액", "목표주가", "미래 주가", "주가 예측", "예상 주가")
 _COMPARISON_MARKERS = ("비교", "중", "더 높은", "더 낮은", "큰 곳", "작은 곳", "어디")
+_PERIOD_COMPARISON_MARKERS = (
+    "비교", "대비", "보다", "변화", "추이", "증가", "감소", "상승", "하락", "늘", "줄",
+)
 _TOKEN = re.compile(r"[가-힣A-Za-z0-9]+")
 _KOREAN_SUFFIXES = ("으로", "에서", "에게", "까지", "부터", "처럼", "보다", "의", "은", "는", "이", "가", "을", "를", "로")
 
@@ -200,6 +203,11 @@ class DeterministicQuestionRouter:
         text, corrections = self._normalize_typos(original)
         plan = plan_query(text, company_candidates=self.company_candidates)
         companies = self._companies_in_text(text)
+        periods = tuple(dict.fromkeys(
+            str(period.get("end") or period.get("instant") or "")[:4]
+            for period in plan.target_periods
+            if str(period.get("end") or period.get("instant") or "")[:4]
+        ))
         route_context = {
             "normalized_question": text if corrections else None,
             "corrections": corrections,
@@ -227,36 +235,60 @@ class DeterministicQuestionRouter:
                 **route_context,
             )
 
+        multi_company_comparison = (
+            len(companies) >= 2 and any(marker in text for marker in _COMPARISON_MARKERS)
+        )
+        multi_period_comparison = (
+            plan.company is not None
+            and len(periods) >= 2
+            and any(marker in text for marker in _PERIOD_COMPARISON_MARKERS)
+        )
         if (
-            len(companies) >= 2
-            and any(marker in text for marker in _COMPARISON_MARKERS)
+            (multi_company_comparison or multi_period_comparison)
             and plan.account_status == "resolved"
             and plan.account_support_level == "structured"
             and plan.account_terms
         ):
+            required_companies = list(companies) if companies else [str(plan.company)]
+            required_periods: list[str | None] = list(periods) if periods else [None]
+            requirements = [
+                {
+                    "company": company,
+                    "period": period,
+                    "account": plan.account_terms[0],
+                }
+                for company in required_companies
+                for period in required_periods
+            ]
+            first_requirement = requirements[0]
             arguments: dict[str, object] = {
-                "company": companies[0],
+                "company": first_requirement["company"],
                 "account": plan.account_terms[0],
                 "correction_policy": plan.correction_policy,
                 "top_k": 1,
             }
-            if plan.period_start:
-                arguments["start_date"] = plan.period_start
-            if plan.period_end:
-                arguments["end_date"] = plan.period_end
+            first_period = first_requirement["period"]
+            if first_period:
+                arguments["start_date"] = f"{first_period}-01-01"
+                arguments["end_date"] = f"{first_period}-12-31"
             if plan.scope:
                 arguments["scope"] = plan.scope
             return QuestionRoute(
                 "tool",
-                "financial_company_comparison",
+                "financial_multi_axis_comparison",
                 "get_financial_facts",
                 arguments,
                 workflow="financial_comparison",
                 metric_kind="DERIVED",
                 context={
-                    "companies": list(companies),
-                    "period": plan.period_end[:4] if plan.period_end else None,
+                    "companies": required_companies,
+                    "period": periods[0] if len(periods) == 1 else None,
+                    "periods": list(periods),
                     "metric": plan.account_terms[0],
+                    "metric_id": plan.account_id,
+                    "intent": "financial_comparison",
+                    "requirements": requirements,
+                    "required_evidence": "validated_structured_fact_per_company_and_period",
                 },
                 **route_context,
             )

@@ -7,7 +7,7 @@ from disclosure_db.question_routing import DeterministicQuestionRouter
 
 class DeterministicQuestionRouterTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.router = DeterministicQuestionRouter(["삼성전자", "SK하이닉스", "현대자동차"])
+        self.router = DeterministicQuestionRouter(["삼성전자", "SK하이닉스", "현대자동차", "미래에셋증권"])
 
     def test_structured_financial_lookup_skips_provider_selection(self) -> None:
         route = self.router.route("삼성전자 2025년 매출액은?")
@@ -105,6 +105,32 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
         self.assertIsNotNone(typo)
         self.assertEqual(typo.tool_name, "get_financial_facts")
         self.assertEqual(typo.arguments["company"], "삼성전자")
+
+    def test_multi_period_financial_comparison_is_company_agnostic(self) -> None:
+        cases = {
+            "SK하이닉스 24년 대비 25년 매출 변화": ("SK하이닉스", ["2024", "2025"]),
+            "삼성전자 2023년과 2024년 매출 비교": ("삼성전자", ["2023", "2024"]),
+            "미래에셋증권 2024년 대비 2025년 매출 변화": ("미래에셋증권", ["2024", "2025"]),
+            "삼성전자 2025년 매출은 2024년보다 늘었어?": ("삼성전자", ["2024", "2025"]),
+            "SK하이닉스 2023, 2024, 2025 매출 추이": ("SK하이닉스", ["2023", "2024", "2025"]),
+        }
+        for question, (company, periods) in cases.items():
+            with self.subTest(question=question):
+                route = self.router.route(question)
+                self.assertIsNotNone(route)
+                self.assertEqual(route.workflow, "financial_comparison")
+                self.assertEqual(route.tool_name, "get_financial_facts")
+                self.assertEqual(route.context["companies"], [company])
+                self.assertEqual(route.context["periods"], periods)
+                self.assertEqual(route.context["metric_id"], "revenue")
+                self.assertEqual(len(route.context["requirements"]), len(periods))
+                self.assertEqual(route.arguments["start_date"], f"{periods[0]}-01-01")
+                self.assertEqual(route.arguments["end_date"], f"{periods[0]}-12-31")
+
+        single = self.router.route("SK하이닉스 2025년 매출액")
+        self.assertIsNotNone(single)
+        self.assertEqual(single.workflow, "single")
+        self.assertEqual(single.arguments["end_date"], "2025-12-31")
 
 
 if __name__ == "__main__":

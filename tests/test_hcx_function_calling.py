@@ -221,6 +221,56 @@ def _financial_response(values: list[tuple[str, str]], account: str = "매출액
     return response
 
 
+class PeriodFinancialRegistry:
+    def __init__(self, values: dict[tuple[str, str], str]) -> None:
+        self.values = values
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def list_tools(self) -> list[dict[str, object]]:
+        return []
+
+    def dispatch(self, name: str, arguments: object) -> dict[str, object]:
+        request = dict(arguments)  # type: ignore[arg-type]
+        self.calls.append((name, request))
+        company = str(request["company"])
+        year = str(request.get("end_date") or "")[:4]
+        value = self.values.get((company, year))
+        if value is None:
+            return {
+                "status": "insufficient", "tool_name": "get_financial_facts",
+                "data": {"account_resolution": {"status": "resolved"}, "facts": []},
+                "evidence_bundle": {
+                    "question_intent": "get_financial_facts", "requested_scope": request,
+                    "covered_scope": {}, "items": [], "evidence_ids": [], "filing_ids": [],
+                    "issuer_corp_codes": [], "quality_warnings": [],
+                    "correction_status": "not_evaluated", "retrieval_status": {},
+                    "sufficiency": "insufficient",
+                },
+                "warnings": ["financial_fact_grain_mismatch_or_missing"],
+                "metadata": {"sufficiency_check": {
+                    "status": "insufficient", "answer_allowed": False,
+                    "recommended_action": "abstain",
+                }},
+            }
+        response = _financial_response([(year, value)])
+        evidence_id = f"ev-{year}"
+        receipt = f"{year}0318000001"
+        fact = response["data"]["facts"][0]
+        fact.update({
+            "company_identifiers": {"company": company},
+            "normalized_value": value,
+            "display_value": f"{int(value):,}원",
+            "evidence_ids": [evidence_id],
+        })
+        item = response["evidence_bundle"]["items"][0]
+        item.update({"evidence_id": evidence_id, "evidence_ids": [evidence_id], "filing_id": receipt, "rcept_no": receipt})
+        response["evidence_bundle"].update({
+            "covered_scope": {"company": [company], "account": [str(request["account"])]},
+            "evidence_ids": [evidence_id], "filing_ids": [receipt],
+        })
+        return response
+
+
 class HcxFunctionCallingTests(unittest.TestCase):
     def _registry(self, rows: list[dict[str, object]] | None = None):
         hybrid = StaticHybrid(list(rows or []))
@@ -499,6 +549,69 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(client.selection_calls, [])
         self.assertEqual(len(client.generation_calls), 1)
 
+    def test_validated_historical_actual_replaces_hcx_forecast_wording(self) -> None:
+        financial = _financial_response([("2025", "200")])
+        financial["data"]["facts"][0]["display_value"] = "200원"
+        registry = StaticRegistry(financial)
+        client = FakeHcxClient(
+            self._search_call(),
+            generated=HcxGeneratedAnswer("2025년 매출액은 200원이 될 것으로 예상됩니다.", ("ev-fin-1",)),
+        )
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자 2025년 매출액")
+
+        self.assertEqual(result.status, "answered")
+        self.assertIn("200원입니다", result.answer)
+        self.assertNotIn("예상", result.answer)
+        self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts"])
+
+    def test_single_company_multi_period_comparison_executes_every_period_and_calculates(self) -> None:
+        registry = PeriodFinancialRegistry({
+            ("SK하이닉스", "2024"): "100",
+            ("SK하이닉스", "2025"): "150",
+        })
+        client = FakeHcxClient(
+            self._search_call(),
+            generated=HcxGeneratedAnswer("2025년 실제 매출액이 더 큽니다.", ("ev-2024", "ev-2025")),
+        )
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["SK하이닉스"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("SK하이닉스 24년 대비 25년 매출 변화")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(result.metadata["workflow"], "financial_comparison")
+        self.assertEqual([call[1]["end_date"] for call in registry.calls], ["2024-12-31", "2025-12-31"])
+        self.assertEqual([call[0] for call in registry.calls], ["get_financial_facts", "get_financial_facts"])
+        self.assertEqual(
+            [item["operation"] for item in result.tool_response["data"]["calculations"]],
+            ["difference", "growth_rate"],
+        )
+        self.assertEqual(result.tool_response["data"]["comparison"]["largest_period"], "2025")
+        self.assertFalse(result.metadata["tool_selection_called"])
+
+    def test_multi_period_comparison_blocks_when_one_required_period_is_missing(self) -> None:
+        registry = PeriodFinancialRegistry({("미래에셋증권", "2024"): "100"})
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["미래에셋증권"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("미래에셋증권 2024년 대비 2025년 매출 변화")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual(result.tool_response["data"]["comparison"]["status"], "incomplete")
+        self.assertIn(
+            "financial_comparison_requirement:1",
+            result.tool_response["metadata"]["sufficiency_check"]["missing_requirements"],
+        )
+        self.assertEqual(len(client.generation_calls), 0)
+
     def test_change_reason_checks_premise_before_dense_search(self) -> None:
         financial = _financial_response([("2025", "200"), ("2026", "150")])
         registry = NamedRegistry({"get_financial_facts": financial})
@@ -537,6 +650,8 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(result.status, "answered")
         self.assertEqual(result.tool_response["data"]["premise"], "confirmed_increase")
         self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts", "search_disclosures"])
+        self.assertNotIn("start_date", registry.calls[1][1])
+        self.assertNotIn("end_date", registry.calls[1][1])
         self.assertFalse(result.metadata["tool_selection_called"])
         self.assertEqual(len(client.generation_calls), 1)
 

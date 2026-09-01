@@ -41,6 +41,16 @@ def _resolve_company(question: str, candidates: Iterable[str]) -> str | None:
     return max(matches, key=len) if matches else None
 
 
+def _fiscal_years(text: str) -> list[int]:
+    """Return every explicit fiscal year, normalized and chronologically ordered."""
+    years = {int(match.group(1)) for match in re.finditer(r"(?<!\d)(20\d{2})(?!\d)", text)}
+    years.update(
+        2000 + int(match.group(1))
+        for match in re.finditer(r"(?<!\d)(\d{2})\s*년", text)
+    )
+    return sorted(years)
+
+
 def plan_query(
     question: str,
     *,
@@ -50,6 +60,7 @@ def plan_query(
 ) -> QueryPlan:
     text = question.strip()
     company = company_hint or _resolve_company(text, company_candidates)
+    fiscal_years = _fiscal_years(text)
     date_match = re.search(
         r"(20\d{2})\s*[-./년]\s*(0?[1-9]|1[0-2])"
         r"(?:\s*[-./월]\s*(0?[1-9]|[12]\d|3[01]))?(?!\d)",
@@ -75,12 +86,10 @@ def plan_query(
             period_end = f"{year:04d}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
             period_start = f"{year:04d}-{month:02d}-01"
         reason_codes.append("explicit_date")
-    elif not date_match:
-        year_match = re.search(r"(20\d{2})년", text)
-        if year_match:
-            period_start = f"{year_match.group(1)}-01-01"
-            period_end = f"{year_match.group(1)}-12-31"
-            reason_codes.append("explicit_year")
+    elif fiscal_years:
+        period_start = f"{fiscal_years[0]}-01-01"
+        period_end = f"{fiscal_years[0]}-12-31"
+        reason_codes.append("explicit_year" if len(fiscal_years) == 1 else "explicit_multiple_fiscal_years")
     account_resolution = resolve_financial_account(text)
     account_id = account_resolution.canonical_id
     account_terms = [
@@ -187,14 +196,25 @@ def plan_query(
         filing_date = parsed_calendar_date
         instant_date = None
     target_periods: list[dict[str, str | None]] = []
-    if instant_date:
+    if len(fiscal_years) > 1 and not date_match:
+        target_periods.extend(
+            {
+                "period_type": "duration",
+                "start": f"{year}-01-01",
+                "end": f"{year}-12-31",
+                "instant": None,
+            }
+            for year in fiscal_years
+        )
+    elif instant_date:
         target_periods.append({"period_type": "instant", "start": None, "end": None, "instant": instant_date})
     elif period_start or period_end:
         target_periods.append({"period_type": "duration", "start": period_start, "end": period_end, "instant": None})
     latest_period_count = 3 if re.search(r"(?<!\d)(?:최근\s*)?3\s*개?년", text) or "3개년" in text else 1
+    latest_period_count = max(latest_period_count, len(target_periods))
     if operation == "growth_rate":
         latest_period_count = max(latest_period_count, 2)
-    requires_complete = operation in {"growth_rate", "difference", "ratio", "percentage_ratio", "sum", "count_above", "list_above", "rank"}
+    requires_complete = len(target_periods) > 1 or operation in {"growth_rate", "difference", "ratio", "percentage_ratio", "sum", "count_above", "list_above", "rank"}
     if structured_account and company is None and asks_company_universe and operation in {"count_above", "list_above", "rank"}:
         reason_codes.append("corpus_wide_financial_coverage_required")
     if company is None and operation not in {"count_above", "list_above", "rank"}:

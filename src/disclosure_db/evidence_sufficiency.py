@@ -48,7 +48,7 @@ class EvidenceSufficiencyChecker:
             reasons.append("correction_policy_status_not_fully_known")
 
         if tool_name == "get_financial_facts":
-            return self._financial(bundle, data, reasons, missing)
+            return self._financial(request, bundle, data, reasons, missing)
         if tool_name in {"search_disclosures", "build_summary_context"}:
             return self._search_or_summary(bundle, data, reasons, missing)
         if tool_name == "analyze_disclosure_trend":
@@ -59,6 +59,7 @@ class EvidenceSufficiencyChecker:
 
     @staticmethod
     def _financial(
+        request: Mapping[str, object],
         bundle: ToolEvidenceBundle,
         data: Mapping[str, object],
         reasons: list[str],
@@ -76,6 +77,15 @@ class EvidenceSufficiencyChecker:
             for field_name in ("value_numeric", "unit", "period", "scope", "evidence_ids"):
                 if fact.get(field_name) in (None, "", []):
                     missing.append(f"financial_fact:{field_name}")
+        requirements = request.get("requirements")
+        if isinstance(requirements, list) and requirements:
+            coverage = data.get("requirement_coverage")
+            coverage_rows = [item for item in coverage if isinstance(item, Mapping)] if isinstance(coverage, list) else []
+            if len(coverage_rows) != len(requirements):
+                missing.append("financial_comparison_requirement_coverage")
+            for index, _requirement in enumerate(requirements):
+                if index >= len(coverage_rows) or coverage_rows[index].get("covered") is not True:
+                    missing.append(f"financial_comparison_requirement:{index}")
         if not bundle.evidence_ids:
             missing.append("citable_evidence")
         if not bundle.items:
