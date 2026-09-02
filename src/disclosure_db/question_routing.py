@@ -459,10 +459,43 @@ class DeterministicQuestionRouter:
 
         if plan.account_support_level == "retrieval_only" and plan.company:
             quarter_match = re.search(r"([1-4])\s*분기", text)
-            statement_search = {
-                key: value for key, value in common_search.items()
-                if key not in {"start_date", "end_date"}
-            }
+            quarter = int(quarter_match.group(1)) if quarter_match else None
+            fiscal_year = int(plan.period_end[:4]) if plan.period_end else None
+            account_resolution = self.account_catalog.resolve(plan.account_terms[0]) if plan.account_terms else None
+            account = (
+                self.account_catalog.by_id.get(account_resolution.canonical_id)
+                if account_resolution is not None and account_resolution.canonical_id
+                else None
+            )
+            annual_period = bool(
+                quarter is None
+                and fiscal_year is not None
+                and plan.period_start == f"{fiscal_year}-01-01"
+                and plan.period_end == f"{fiscal_year}-12-31"
+            )
+            deterministic_supported = bool(
+                fiscal_year is not None
+                and plan.correction_policy == "current"
+                and plan.operation == "lookup"
+                and len(plan.target_periods) == 1
+                and account is not None
+                and account.statement_type == "income_statement"
+                and account.expected_value_type == "monetary"
+                and (annual_period or quarter == 1)
+            )
+            statement_search = dict(common_search)
+            if deterministic_supported:
+                statement_search.pop("start_date", None)
+                statement_search.pop("end_date", None)
+                statement_search.update({
+                    "account": plan.account_terms[0] if plan.account_terms else "",
+                    "fiscal_year": fiscal_year,
+                    "period_kind": "quarter" if quarter is not None else "annual",
+                })
+                if quarter is not None:
+                    statement_search["quarter"] = quarter
+                if plan.scope:
+                    statement_search["scope"] = plan.scope
             return QuestionRoute(
                 "tool",
                 "retrieval_only_financial_account",
@@ -472,9 +505,9 @@ class DeterministicQuestionRouter:
                 metric_kind="SEARCH",
                 context={
                     "metric": plan.account_terms[0] if plan.account_terms else None,
-                    "fiscal_year": plan.period_end[:4] if plan.period_end else None,
-                    "period_kind": "quarter" if quarter_match else "annual",
-                    "quarter": int(quarter_match.group(1)) if quarter_match else None,
+                    "fiscal_year": str(fiscal_year) if fiscal_year is not None else None,
+                    "period_kind": "quarter" if quarter is not None else "annual",
+                    "quarter": quarter,
                 },
                 **route_context,
             )

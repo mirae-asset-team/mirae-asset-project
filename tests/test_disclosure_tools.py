@@ -121,6 +121,88 @@ def _create_metadata_database(path: Path) -> None:
     connection.close()
 
 
+def _create_statement_database(path: Path) -> None:
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE filing(
+            filing_id TEXT PRIMARY KEY, issuer_corp_code TEXT, stock_code TEXT,
+            issuer_name TEXT, listed_name TEXT,
+            doc_subtype_normalized TEXT, report_name_raw TEXT, filed_at TEXT,
+            base_year INTEGER, base_month INTEGER, is_correction INTEGER
+        );
+        CREATE TABLE filing_version(
+            filing_id TEXT PRIMARY KEY, lineage_status TEXT, is_current INTEGER
+        );
+        CREATE TABLE source_document(
+            source_id TEXT PRIMARY KEY, source_path TEXT
+        );
+        CREATE TABLE table_record(
+            table_id TEXT PRIMARY KEY, filing_id TEXT, source_id TEXT, sequence_no INTEGER,
+            section_path_json TEXT, caption TEXT, unit_text TEXT, row_count INTEGER,
+            column_count INTEGER, parse_status TEXT, locator_json TEXT
+        );
+        CREATE TABLE table_cell(
+            evidence_id TEXT PRIMARY KEY, table_id TEXT, source_id TEXT, filing_id TEXT,
+            row_index INTEGER, column_index INTEGER, rowspan INTEGER, colspan INTEGER,
+            cell_kind TEXT, row_header_path_json TEXT, column_header_path_json TEXT,
+            locator_json TEXT, text_raw TEXT, text_normalized TEXT, parser_version TEXT
+        );
+        """
+    )
+    filings = [
+        ("annual", "annual-src", "annual.xml", "annual-consolidated", "2. 연결재무제표", "2-2. 연결 손익계산서", 12),
+        ("quarter", "quarter-src", "quarter.xml", "quarter-consolidated", "2. 연결재무제표", "2-2. 연결 손익계산서", 3),
+    ]
+    for filing_id, source_id, source_path, table_id, section, caption, month in filings:
+        report_name = "사업보고서 (2025.12)" if month == 12 else "분기보고서 (2025.03)"
+        subtype = "annual" if month == 12 else "quarter"
+        connection.execute(
+            "INSERT INTO filing VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (filing_id, "00126380", "005930", "삼성전자", "삼성전자", subtype,
+             report_name, "2026-03-10" if month == 12 else "2025-05-15", 2025, month, 0),
+        )
+        connection.execute("INSERT INTO filing_version VALUES(?,?,?)", (filing_id, "root", 1))
+        connection.execute("INSERT INTO source_document VALUES(?,?)", (source_id, source_path))
+        connection.execute(
+            "INSERT INTO table_record VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (table_id, filing_id, source_id, 1, f'["III. 재무에 관한 사항", "{section}"]',
+             caption, "단위 : 백만원", 2, 5, "success", '{"kind":"table","ordinal":1}'),
+        )
+        cells = [
+            ("label", 0, "[]", "매출총이익"),
+            ("value", 1, '["제 57 기"]' if month == 12 else '["제 57 기 1분기", "3개월"]',
+             "131,370,425" if month == 12 else "28,130,572"),
+        ]
+        if month == 3:
+            cells.append(("cumulative", 2, '["제 57 기 1분기", "누적"]', "99,999,999"))
+        for suffix, column, headers, value in cells:
+            evidence_id = f"{filing_id}-{suffix}"
+            connection.execute(
+                "INSERT INTO table_cell VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (evidence_id, table_id, source_id, filing_id, 1, column, 1, 1, "data", "[]", headers,
+                 f'{{"kind":"table_cell","row":1,"column":{column}}}', value, value, "fixture-v1"),
+            )
+    # A conflicting separate-statement value must never override consolidated scope.
+    connection.execute(
+        "INSERT INTO table_record VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        ("annual-separate", "annual", "annual-src", 2,
+         '["III. 재무에 관한 사항", "4. 재무제표"]', "4-2. 손익계산서",
+         "단위 : 백만원", 2, 2, "success", '{"kind":"table","ordinal":2}'),
+    )
+    for evidence_id, column, headers, value in (
+        ("annual-separate-label", 0, "[]", "매출총이익"),
+        ("annual-separate-value", 1, '["제 57 기"]', "72,048,719"),
+    ):
+        connection.execute(
+            "INSERT INTO table_cell VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (evidence_id, "annual-separate", "annual-src", "annual", 1, column, 1, 1, "data", "[]", headers,
+             f'{{"kind":"table_cell","row":1,"column":{column}}}', value, value, "fixture-v1"),
+        )
+    connection.commit()
+    connection.close()
+
+
 class ToolRegistryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.hybrid = FakeHybrid(_result([_search_row()]))
@@ -351,6 +433,98 @@ class MetadataToolTests(unittest.TestCase):
         self.assertEqual(response["data"]["context_chars"], 100)
         self.assertEqual(len(response["data"]["context"]), 100)
         self.assertTrue(response["data"]["context"].startswith("[f-1|ev-1] "))
+
+
+class StatementMetricToolTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp = TemporaryDirectory()
+        self.database = Path(self.temp.name) / "statements.sqlite3"
+        _create_statement_database(self.database)
+        self.hybrid = FakeHybrid(_result([]))
+        self.registry = build_tool_registry(
+            hybrid_retriever=self.hybrid, base_database=self.database  # type: ignore[arg-type]
+        )
+
+    def tearDown(self) -> None:
+        self.temp.cleanup()
+
+    def test_annual_metric_uses_exact_consolidated_statement_cell(self) -> None:
+        response = self.registry.dispatch("build_summary_context", {
+            "question": "삼성전자 2025년 매출총이익은?", "company": "삼성전자",
+            "account": "매출총이익", "fiscal_year": 2025, "period_kind": "annual",
+            "top_k": 12, "max_chars": 8000,
+        })
+
+        self.assertEqual(response["status"], "success")
+        self.assertEqual(response["data"]["retrieval_mode"], "deterministic_statement_cell")
+        item = response["evidence_bundle"]["items"][0]
+        self.assertEqual(item["filing_id"], "annual")
+        self.assertEqual(item["structured_value"], "131370425")
+        self.assertEqual(item["scale"], 1_000_000)
+        self.assertEqual(item["unit"], "KRW")
+        self.assertEqual(item["scope"], "consolidated")
+        self.assertEqual(item["period"], {
+            "period_type": "duration", "period_start": "2025-01-01", "period_end": "2025-12-31",
+        })
+        self.assertIn("annual-value", item["evidence_ids"])
+        self.assertEqual(self.hybrid.calls, [])
+
+    def test_quarter_metric_uses_three_month_column_and_exact_period(self) -> None:
+        response = self.registry.dispatch("build_summary_context", {
+            "question": "삼성전자 2025년 1분기 매출총이익은?", "company": "삼성전자",
+            "account": "매출총이익", "fiscal_year": 2025, "period_kind": "quarter", "quarter": 1,
+            "top_k": 12, "max_chars": 8000,
+        })
+
+        self.assertEqual(response["status"], "success")
+        item = response["evidence_bundle"]["items"][0]
+        self.assertEqual(item["filing_id"], "quarter")
+        self.assertEqual(item["structured_value"], "28130572")
+        self.assertEqual(item["period"], {
+            "period_type": "duration", "period_start": "2025-01-01", "period_end": "2025-03-31",
+        })
+        self.assertEqual(item["locator"]["column_label"], "제 57 기 1분기 > 3개월")
+
+    def test_explicit_separate_scope_and_noncurrent_policy_do_not_return_current_consolidated(self) -> None:
+        separate = self.registry.dispatch("build_summary_context", {
+            "question": "삼성전자 2025년 별도 매출총이익은?", "company": "삼성전자",
+            "account": "매출총이익", "fiscal_year": 2025, "period_kind": "annual",
+            "scope": "separate", "top_k": 12, "max_chars": 8000,
+        })
+        self.assertEqual(separate["status"], "success")
+        item = separate["evidence_bundle"]["items"][0]
+        self.assertEqual(item["scope"], "separate")
+        self.assertEqual(item["structured_value"], "72048719")
+
+        original = self.registry.dispatch("build_summary_context", {
+            "question": "삼성전자 2025년 최초 공시 매출총이익은?", "company": "삼성전자",
+            "account": "매출총이익", "fiscal_year": 2025, "period_kind": "annual",
+            "correction_policy": "original", "top_k": 12, "max_chars": 8000,
+        })
+        self.assertEqual(original["status"], "insufficient")
+        self.assertEqual(original["evidence_bundle"]["items"], [])
+        self.assertEqual(len(self.hybrid.calls), 1)
+
+    def test_unsupported_statement_cell_shapes_keep_hybrid_fallback(self) -> None:
+        requests = (
+            {
+                "question": "삼성전자 2025년 2분기 매출총이익은?", "company": "삼성전자",
+                "account": "매출총이익", "fiscal_year": 2025,
+                "period_kind": "quarter", "quarter": 2,
+            },
+            {
+                "question": "삼성전자 2025년 기본주당이익은?", "company": "삼성전자",
+                "account": "기본주당이익", "fiscal_year": 2025, "period_kind": "annual",
+            },
+        )
+        for request in requests:
+            with self.subTest(question=request["question"]):
+                calls_before = len(self.hybrid.calls)
+                response = self.registry.dispatch("build_summary_context", {
+                    **request, "top_k": 12, "max_chars": 8000,
+                })
+                self.assertEqual(response["status"], "insufficient")
+                self.assertEqual(len(self.hybrid.calls), calls_before + 1)
 
 
 if __name__ == "__main__":

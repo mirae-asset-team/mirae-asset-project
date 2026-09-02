@@ -30,6 +30,41 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
         self.assertIsNotNone(route)
         self.assertEqual(route.tool_name, "build_summary_context")
         self.assertEqual(route.response_mode, "provider")
+        self.assertEqual(route.arguments["account"], "매출총이익")
+        self.assertEqual(route.arguments["fiscal_year"], 2025)
+        self.assertEqual(route.arguments["period_kind"], "annual")
+
+        quarter = self.router.route("삼성전자 2025년 1분기 매출총이익은?")
+        self.assertIsNotNone(quarter)
+        self.assertEqual(quarter.arguments["account"], "매출총이익")
+        self.assertEqual(quarter.arguments["fiscal_year"], 2025)
+        self.assertEqual(quarter.arguments["period_kind"], "quarter")
+        self.assertEqual(quarter.arguments["quarter"], 1)
+
+    def test_statement_cell_route_stays_narrow_and_preserves_safe_fallbacks(self) -> None:
+        separate = self.router.route("삼성전자 2025년 별도 매출총이익은?")
+        self.assertIsNotNone(separate)
+        self.assertEqual(separate.arguments["scope"], "separate")
+
+        fallback_questions = (
+            "삼성전자 매출총이익은?",
+            "삼성전자 2025년 3월 매출총이익은?",
+            "삼성전자 2024년과 2025년 매출총이익 차이는?",
+            "삼성전자 2025년 2분기 매출총이익은?",
+            "삼성전자 2025년 4분기 매출총이익은?",
+            "삼성전자 2025년 영업활동현금흐름은?",
+            "삼성전자 2025년 유동자산은?",
+            "삼성전자 2025년 기본주당이익은?",
+            "삼성전자 2025년 최초 공시 매출총이익은?",
+        )
+        for question in fallback_questions:
+            with self.subTest(question=question):
+                route = self.router.route(question)
+                self.assertIsNotNone(route)
+                self.assertEqual(route.tool_name, "build_summary_context")
+                self.assertNotIn("account", route.arguments)
+                self.assertNotIn("fiscal_year", route.arguments)
+                self.assertNotIn("period_kind", route.arguments)
 
     def test_explicit_trend_uses_aggregation_tool(self) -> None:
         route = self.router.route("삼성전자 2026년도 공시 트렌드를 알려줘")

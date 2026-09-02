@@ -15,7 +15,7 @@ def response_for_item(item: dict[str, object]) -> dict[str, object]:
         "data": {"context": "원문", "result_count": 1},
         "evidence_bundle": {
             "question_intent": "build_summary_context", "requested_scope": {},
-            "covered_scope": {"company": ["삼성전자"]}, "items": [item],
+            "covered_scope": {"company": ["삼성전자"], "account": ["매출총이익"]}, "items": [item],
             "evidence_ids": [item["evidence_id"]], "filing_ids": [item["filing_id"]],
             "issuer_corp_codes": ["00126380"], "quality_warnings": [],
             "correction_status": "policy_applied", "retrieval_status": {"route": "test"},
