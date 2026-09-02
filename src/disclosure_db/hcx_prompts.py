@@ -5,6 +5,13 @@ from __future__ import annotations
 
 HCX_FUNCTION_PROMPT_VERSION = "hcx-function-v1.2"
 
+_DISCLOSURE_TYPE_FIDELITY_RULE = """\
+질문이 특정 공시 유형(주요사항보고서의 결정 공시, 대량보유상황보고서 등)을 지정하면
+근거 공시의 보고서 유형을 답변에 명시한다. 지정된 유형의 공시가 Evidence에 없고
+정기보고서 본문 언급만 있으면, 해당 결정 공시는 확인되지 않으며 정기보고서 서술을
+근거로 한다는 점을 밝힌다.
+"""
+
 HCX_TOOL_SELECTION_SYSTEM_PROMPT = """\
 사용자 질문에 답하기 위해 제공된 DART 공시 Tool 중 정확히 하나를 선택한다.
 Tool Evidence를 실행 전에 추측하거나 사용자 질문에 직접 답하지 않는다.
@@ -25,7 +32,7 @@ Tool argument에는 answer, citation_ids, claims, limitations와 스키마가 �
 calculation_refs, evidence_slot_ids, numeric_values를 빠짐없이 기록한다.
 claim_contract에 등록되지 않은 ID나 수치를 사용하지 않는다. 산술은 새로 수행하지 않고
 검증된 calculation_refs만 설명한다. NaN과 Infinity는 답변하거나 숫자로 제출하지 않는다.
-"""
+""" + _DISCLOSURE_TYPE_FIDELITY_RULE
 
 HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT = """\
 백엔드가 선택하고 실행한 DART Tool Result만 사용해 한국어로 간결하게 답한다.
@@ -44,7 +51,7 @@ Tool argument에는 answer, citation_ids, claims, limitations를 정확히 포�
 claims의 각 주장에는 claim_contract에 등록된 citation_ids, fact_refs, calculation_refs,
 evidence_slot_ids와 본문에 쓴 모든 numeric_values를 빠짐없이 기록한다.
 등록되지 않은 ID·수치, NaN, Infinity는 사용하지 않는다.
-"""
+""" + _DISCLOSURE_TYPE_FIDELITY_RULE
 
 __all__ = [
     "HCX_FINAL_ANSWER_SYSTEM_PROMPT",
