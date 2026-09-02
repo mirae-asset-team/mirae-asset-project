@@ -32,10 +32,12 @@ Completed 2026-09-03 and corrected through review fix round 2. Suite SHA-256 `47
 
 ## Task 3 — Input and routing hardening
 
-- Normalize NFKC, whitespace/zero-width characters, manifest aliases, English issuer names/tickers, and unique one-edit typos.
-- Decompose multiple issuers, periods, and metrics without silently collapsing them.
-- Set every public question field to a 2,000-character maximum and reject malformed or contradictory inputs.
-- Detect bounded encoded/multilingual prompt-injection surfaces without executing or forwarding decoded instructions.
+- [x] Normalize NFKC, whitespace/zero-width characters, manifest aliases, English issuer names/tickers, and unique one-edit typos.
+- [x] Decompose multiple issuers, periods, and metrics without silently collapsing them.
+- [x] Set every public question field to a 2,000-character maximum and reject malformed or contradictory inputs.
+- [x] Detect bounded encoded/multilingual prompt-injection surfaces without executing or forwarding decoded instructions.
+
+Completed locally on 2026-09-03 from base `ab143611f000279ff8f8e2bd099dcdbbc7829272`. Focused input/routing/API/Function Calling/policy/agent regression passed `159` tests with `36` subtests; full Python passed `591` with `2` existing optional skips and `84` subtests; Web passed `12/12`. Public Tool count remains five and existing fields remain present. The 600-case Judge Stress V2 app evaluation, Docker/image, Dense quality, live/provider, NCP, and deployment checks were not run or claimed. See the git-ignored `.superpowers/sdd/2026-09-02-judge-stress-v2/task-3-report.md`.
 
 ## Task 4 — Bounded analysis executor
 

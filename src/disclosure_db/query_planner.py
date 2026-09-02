@@ -5,9 +5,12 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from decimal import Decimal
+import json
+from pathlib import Path
 
 from .agent_contracts import QueryPlan
 from .financial_accounts import load_financial_account_catalog, resolve_financial_account
+from .input_hardening import detect_prompt_injection, preflight_public_question
 
 
 _STATEMENT_CODES = {
@@ -41,6 +44,48 @@ def _resolve_company(question: str, candidates: Iterable[str]) -> str | None:
     return max(matches, key=len) if matches else None
 
 
+def _normalize_configured_company_aliases(question: str, candidates: Iterable[str]) -> str:
+    """Apply only aliases committed in the project catalog for eligible issuers."""
+
+    candidate_set = {str(item) for item in candidates if str(item)}
+    project_root = Path(__file__).resolve().parents[2]
+    if not candidate_set:
+        return question
+    rows: list[dict[str, object]] = []
+    universe_path = project_root / "data" / "derived" / "financial_company_universe.json"
+    config_path = project_root / "config" / "company_aliases.json"
+    for path, kind in ((universe_path, "universe"), (config_path, "config")):
+        if not path.is_file():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        source_rows = payload.get("companies", []) if isinstance(payload, dict) else []
+        for raw in source_rows:
+            if not isinstance(raw, dict):
+                continue
+            canonical = raw.get("issuer_name") if kind == "universe" else raw.get("canonical")
+            aliases = list(raw.get("aliases", [])) if isinstance(raw.get("aliases"), list) else []
+            if kind == "universe":
+                aliases.extend([raw.get("listed_name"), raw.get("stock_code")])
+            rows.append({"canonical": canonical, "aliases": aliases})
+    text = question
+    for row in rows:
+        if not isinstance(row, dict) or str(row.get("canonical")) not in candidate_set:
+            continue
+        canonical = str(row["canonical"])
+        aliases = sorted(
+            (str(item) for item in row.get("aliases", []) if item),
+            key=len,
+            reverse=True,
+        )
+        for alias in aliases:
+            boundary = r"(?<![A-Za-z0-9]){}(?![A-Za-z0-9])" if any(ch.isascii() and ch.isalnum() for ch in alias) else r"{}"
+            text = re.sub(boundary.format(re.escape(alias)), canonical, text, flags=re.IGNORECASE)
+    return text
+
+
 def _fiscal_years(text: str) -> list[int]:
     """Return every explicit fiscal year, normalized and chronologically ordered."""
     years = {int(match.group(1)) for match in re.finditer(r"(?<!\d)(20\d{2})(?!\d)", text)}
@@ -58,14 +103,17 @@ def plan_query(
     company_hint: str | None = None,
     as_of: str | None = None,
 ) -> QueryPlan:
-    text = question.strip()
-    company = company_hint or _resolve_company(text, company_candidates)
+    candidates = tuple(company_candidates)
+    text = preflight_public_question(question)
+    text = _normalize_configured_company_aliases(text, candidates)
+    company = company_hint or _resolve_company(text, candidates)
     fiscal_years = _fiscal_years(text)
-    date_match = re.search(
+    date_matches = list(re.finditer(
         r"(20\d{2})\s*[-./년]\s*(0?[1-9]|1[0-2])"
         r"(?:\s*[-./월]\s*(0?[1-9]|[12]\d|3[01]))?(?!\d)",
         text,
-    )
+    ))
+    date_match = date_matches[0] if date_matches else None
     resolved_as_of = as_of
     as_of_source = "api" if as_of is not None else None
     period_start: str | None = None
@@ -142,7 +190,7 @@ def plan_query(
     elif parsed_calendar_date and statement_type == "BS":
         instant_date = parsed_calendar_date
     question_type = "numeric" if operation != "lookup" or account_resolution.status != "unknown" else "text"
-    if any(marker in text.casefold() for marker in ("ignore previous", "ignore all previous", "system prompt", "developer message", "이전 지시를 무시", "지시를 무시", "시스템 프롬프트")):
+    if detect_prompt_injection(text):
         question_type = "adversarial"
         reason_codes.append("prompt_injection_question")
     elif any(term in text for term in ("주가", "목표주가", "내년", "예상", "전망")):
@@ -196,7 +244,35 @@ def plan_query(
         filing_date = parsed_calendar_date
         instant_date = None
     target_periods: list[dict[str, str | None]] = []
-    if len(fiscal_years) > 1 and not date_match:
+    if len(date_matches) > 1:
+        for match in date_matches:
+            year = int(match.group(1))
+            month = int(match.group(2))
+            day = int(match.group(3)) if match.group(3) else None
+            if day is None:
+                import calendar
+                end = f"{year:04d}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
+                target_periods.append({
+                    "period_type": "duration",
+                    "start": f"{year:04d}-{month:02d}-01",
+                    "end": end,
+                    "instant": None,
+                })
+            elif statement_type == "BS":
+                target_periods.append({
+                    "period_type": "instant",
+                    "start": None,
+                    "end": None,
+                    "instant": f"{year:04d}-{month:02d}-{day:02d}",
+                })
+            else:
+                target_periods.append({
+                    "period_type": "duration",
+                    "start": f"{year:04d}-01-01",
+                    "end": f"{year:04d}-{month:02d}-{day:02d}",
+                    "instant": None,
+                })
+    elif len(fiscal_years) > 1 and not date_match:
         target_periods.extend(
             {
                 "period_type": "duration",

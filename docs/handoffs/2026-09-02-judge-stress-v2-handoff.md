@@ -2,7 +2,7 @@
 
 ## 결론
 
-`agent/judge-stress-v2` 브랜치에서 Task 1과 Task 2를 구현·검증했다. Task 2는 독립 600건 suite와 안전한 JSON/HTML report contract까지만 완료했으며 실제 앱 평가는 `NOT_RUN`이다. Task 3~8과 8001/8000 배포는 미완료다. 다음 작업은 Task 3 입력·routing hardening이다.
+`agent/judge-stress-v2` 브랜치에서 Task 1~3을 로컬 구현·검증했다. Task 2는 독립 600건 suite와 안전한 JSON/HTML report contract까지만 완료했으며 실제 앱 평가는 `NOT_RUN`이다. Task 4~8과 8001/8000 배포는 미완료다. 다음 작업은 Task 4 bounded analysis executor다.
 
 ## Git 기준점
 
@@ -14,6 +14,7 @@
   - `736f0c2 fix: bind dense identity to immutable files`
   - `1dc6178 fix: attest dense model revision provenance`
 - Task 2는 별도 `feat: add independent judge stress v2 suite` 커밋으로 끝낸다. 이 문서는 해당 커밋에 포함되며 정확한 hash는 `git log -1 --oneline`이 기준이다.
+- Task 3는 별도 `feat: harden public input routing` 커밋으로 끝낸다. 이 문서는 해당 커밋에 포함되며 정확한 hash는 `git log -1 --oneline`이 기준이다.
 
 ## Task 1 완료 범위
 
@@ -39,6 +40,14 @@
 - suite SHA-256은 `47664c91b6d241288ab4cd928955321eae301658de5681b06a40665054125a87`이다. Summary는 실제 실행 전이므로 `NOT_RUN`이다.
 
 Privacy claim은 exact authored private 질문과 private rubric ID가 tracked 개발 코드/산출물에서 조회·재구성되지 않고 literal scan이 `0`이라는 범위다. 공개 issuer/fact provenance 또는 공개 DB fact answer를 암호학적으로 숨긴다는 주장은 아니다. hashed group/source ID는 finite public corpus와 대조 가능할 수 있으며, pre-paraphrase/public-fact reconstruction은 exact private holdout 원문과 구별한다.
+
+## Task 3 완료 범위
+
+- 공개 question-bearing API는 `/query`, GET `/answer`, query/evidence/answer aliases, HCX Function Calling과 공개 eval 경로 모두 OpenAPI `maxLength=2000`이며 실제 2,000/2,001 경계를 검증했다. 내부 Dense sidecar 제한은 그대로다.
+- NFKC·Unicode 공백·zero-width 정규화를 공통화했다. 회사 해석은 고정 financial universe manifest와 검토된 alias config의 issuer/listed/alias/stock-code만 사용하며 대소문자를 구분하지 않는다. catalog 밖 alias는 추론하지 않고 한 글자 오타는 canonical 후보가 정확히 하나일 때만 고친다.
+- 여러 회사·연도·structured metric은 독립 company × period × metric requirements로 실행한다. 잘못된 날짜, 연결/별도 충돌, 의미를 바꾸는 중복 기간은 stable clarification/error로 fail-closed한다.
+- URL/percent, Base64, Unicode/spacing과 등록된 다국어 injection 표지는 최대 2,000자 bounded detection만 수행한다. decoded payload는 Tool arguments, provider prompt, public response로 전달하지 않는다. 기존 recommendation policy 우선순위와 공개 Tool 5개/필드는 유지한다.
+- 확대 focused 결과는 `159 passed, 36 subtests`; 전체 Python은 `591 passed, 2 skipped, 72 warnings, 84 subtests`; Web은 `12/12`다. 실제 600건 suite, live/provider, Docker, Dense/NCP 평가는 실행하지 않았다.
 
 재생성은 다음 명령만 사용한다. Builder는 repository의 git-ignored evaluator root 밖 raw 출력을 거부한다.
 
@@ -82,12 +91,11 @@ git diff --check
 
 ## 다음 작업 — 반드시 이 순서
 
-1. **Task 3:** NFKC·제로폭·manifest alias·유일한 1글자 오타·한영 회사명·종목코드·다중 요구조건 분해·공개 질문 2,000자 제한을 공통화한다.
-2. **Task 4:** 평가 전용 `plan_analysis → search_analysis`를 공개 Function Calling 내부 `BoundedAnalysisExecutor`에 연결한다. 공개 Tool은 5개를 유지한다.
-3. **Task 5:** issuer/공시버전/기간 선필터 후 Sparse+Dense gate를 평가한다. 기준 미달이면 Sparse로 되돌린다.
-4. **Task 6:** 주장별 citation·Decimal 숫자 검증과 결정론적 fallback을 구현한다.
-5. **Task 7:** 공격·metamorphic·장애·20동시 요청 평가를 실행하고 V2 JSON/HTML을 실제 결과로 갱신한다.
-6. **Task 8:** 모든 hard gate 통과 후에만 8001 staging → 동일 image 8000 승격을 수행한다.
+1. **Task 4:** 평가 전용 `plan_analysis → search_analysis`를 공개 Function Calling 내부 `BoundedAnalysisExecutor`에 연결한다. 공개 Tool은 5개를 유지한다.
+2. **Task 5:** issuer/공시버전/기간 선필터 후 Sparse+Dense gate를 평가한다. 기준 미달이면 Sparse로 되돌린다.
+3. **Task 6:** 주장별 citation·Decimal 숫자 검증과 결정론적 fallback을 구현한다.
+4. **Task 7:** 공격·metamorphic·장애·20동시 요청 평가를 실행하고 V2 JSON/HTML을 실제 결과로 갱신한다.
+5. **Task 8:** 모든 hard gate 통과 후에만 8001 staging → 동일 image 8000 승격을 수행한다.
 
 각 Task는 `실패 테스트 → 최소 구현 → 관련 테스트 → 전체 회귀 → 보고서 → 독립 커밋`을 지킨다. Plan의 기준이나 read-only 제약을 낮추지 않는다.
 

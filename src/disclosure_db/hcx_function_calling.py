@@ -29,6 +29,12 @@ from .hcx_prompts import (
     HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT,
     HCX_TOOL_SELECTION_SYSTEM_PROMPT,
 )
+from .input_hardening import (
+    PUBLIC_QUESTION_MAX_CHARS,
+    QuestionInputError,
+    detect_prompt_injection,
+    preflight_public_question,
+)
 from .question_routing import QuestionRoute
 from .tool_registry import ToolRegistry
 from .tool_contracts import ToolEvidenceBundle
@@ -562,6 +568,8 @@ class HcxFunctionCallingService:
     ) -> None:
         if max_question_chars <= 0:
             raise ValueError("max_question_chars_must_be_positive")
+        if max_question_chars > PUBLIC_QUESTION_MAX_CHARS:
+            raise ValueError("max_question_chars_exceeds_public_limit")
         self.registry = registry
         self.client = client
         self.max_question_chars = max_question_chars
@@ -796,6 +804,9 @@ class HcxFunctionCallingService:
     ) -> dict[str, object]:
         companies = [str(item) for item in route.context.get("companies", []) if item]
         periods = [str(item) for item in route.context.get("periods", []) if item]
+        metrics = [str(item) for item in route.context.get("metrics", []) if item]
+        if not metrics and route.context.get("metric"):
+            metrics = [str(route.context["metric"])]
         raw_requirements = route.context.get("requirements")
         requirements = [
             dict(item) for item in raw_requirements if isinstance(item, Mapping)
@@ -815,10 +826,24 @@ class HcxFunctionCallingService:
             }
             period = str(requirement.get("period") or "")
             if period:
-                request.update({"start_date": f"{period}-01-01", "end_date": f"{period}-12-31"})
+                request.pop("instant_date", None)
+                if requirement.get("instant_date"):
+                    request.pop("start_date", None)
+                    request.pop("end_date", None)
+                    request["instant_date"] = requirement["instant_date"]
+                elif requirement.get("start_date") or requirement.get("end_date"):
+                    request.pop("start_date", None)
+                    request.pop("end_date", None)
+                    if requirement.get("start_date"):
+                        request["start_date"] = requirement["start_date"]
+                    if requirement.get("end_date"):
+                        request["end_date"] = requirement["end_date"]
+                else:
+                    request.update({"start_date": f"{period}-01-01", "end_date": f"{period}-12-31"})
             else:
                 request.pop("start_date", None)
                 request.pop("end_date", None)
+                request.pop("instant_date", None)
             responses.append(self.registry.dispatch("get_financial_facts", request))
         selected: list[tuple[dict[str, object], dict[str, object], Decimal]] = []
         all_facts: list[dict[str, object]] = []
@@ -851,7 +876,7 @@ class HcxFunctionCallingService:
             all_facts.append(fact)
         calculations: list[dict[str, object]] = []
         calculation_failed = False
-        if len(companies) == 1 and len(periods) >= 2:
+        if len(metrics) == 1 and len(companies) == 1 and len(periods) >= 2:
             ordered_selected = sorted(selected, key=lambda item: str(item[0].get("period") or ""))
             for (previous_requirement, previous, previous_value), (current_requirement, current, current_value) in zip(
                 ordered_selected, ordered_selected[1:],
@@ -892,18 +917,25 @@ class HcxFunctionCallingService:
             len(requirements) >= 2
             and len(selected) == len(requirements)
             and not calculation_failed
-            and (len(companies) != 1 or len(periods) < 2 or len(calculations) == 2 * (len(periods) - 1))
+            and (
+                len(metrics) != 1
+                or len(companies) != 1
+                or len(periods) < 2
+                or len(calculations) == 2 * (len(periods) - 1)
+            )
         )
         comparison: dict[str, object] = {
             "status": "complete" if complete else "incomplete",
             "companies": companies,
             "metric": route.context.get("metric"),
+            "metrics": metrics,
             "period": route.context.get("period"),
             "periods": periods,
             "values": [
                 {
                     "company": requirement.get("company"),
                     "period": requirement.get("period"),
+                    "metric": requirement.get("account"),
                     "display_value": fact.get("display_value"),
                 }
                 for requirement, fact, _ in selected
@@ -911,12 +943,12 @@ class HcxFunctionCallingService:
             "calculations": calculations,
             "winner": None,
         }
-        if complete and len(companies) >= 2 and len(periods) <= 1:
+        if complete and len(metrics) == 1 and len(companies) >= 2 and len(periods) <= 1:
             maximum = max(value for _, _, value in selected)
             winners = [str(requirement.get("company")) for requirement, _, value in selected if value == maximum]
             comparison["winner"] = winners[0] if len(winners) == 1 else None
             comparison["tie"] = len(winners) > 1
-        elif complete and len(companies) == 1 and periods:
+        elif complete and len(metrics) == 1 and len(companies) == 1 and periods:
             maximum = max(value for _, _, value in selected)
             largest = [str(requirement.get("period")) for requirement, _, value in selected if value == maximum]
             comparison["largest_period"] = largest[0] if len(largest) == 1 else None
@@ -1241,11 +1273,42 @@ class HcxFunctionCallingService:
         return tool_call, primary
 
     def answer(self, question: object) -> FunctionCallingResult:
-        if not isinstance(question, str) or not question.strip() or len(question) > self.max_question_chars:
+        try:
+            question = preflight_public_question(question)
+        except QuestionInputError as exc:
+            if exc.code in {
+                "question_date_invalid",
+                "question_conditions_contradictory",
+                "question_duplicate_condition_changes_meaning",
+            }:
+                return self._result(
+                    "abstained",
+                    "질문의 날짜 또는 조건을 명확히 다시 입력해 주세요.",
+                    recommended_action="ask_clarification",
+                    warnings=[exc.code],
+                    metadata={"tool_selection_called": False, "final_generation_called": False},
+                )
             return self._result(
-                "invalid_request", "질문 형식이 올바르지 않습니다.", warnings=["question_invalid"]
+                "invalid_request", "질문 형식이 올바르지 않습니다.", warnings=[exc.code]
             )
-        question = question.strip()
+        if len(question) > self.max_question_chars:
+            return self._result(
+                "invalid_request", "질문 형식이 올바르지 않습니다.", warnings=["question_too_long"]
+            )
+        if detect_prompt_injection(question):
+            return self._result(
+                "abstained",
+                "질문에 실행 지시 변경 요청이 포함되어 처리할 수 없습니다.",
+                recommended_action="abstain",
+                warnings=["prompt_injection_detected"],
+                metadata={
+                    "provider_configured": bool(self.client.configured),
+                    "route_source": "deterministic",
+                    "route_reason": "prompt_injection_detected",
+                    "tool_selection_called": False,
+                    "final_generation_called": False,
+                },
+            )
         route = self.router.route(question) if self.router is not None else None
         if route is not None and route.kind in {"clarification", "unavailable"}:
             recommended_action = "ask_clarification" if route.kind == "clarification" else "abstain"
@@ -1515,9 +1578,9 @@ class HcxFunctionCallingService:
         rows = [item for item in values if isinstance(item, Mapping)] if isinstance(values, list) else []
         if len(rows) < 2:
             return None
-        metric = str(comparison.get("metric") or "재무 수치")
         lines = [
-            f"{row.get('company')} {row.get('period')}년 {metric}은 {row.get('display_value')}입니다."
+            f"{row.get('company')} {row.get('period')}년 "
+            f"{row.get('metric') or comparison.get('metric') or '재무 수치'}은 {row.get('display_value')}입니다."
             for row in rows
             if row.get("company") and row.get("period") and row.get("display_value")
         ]
@@ -1525,6 +1588,7 @@ class HcxFunctionCallingService:
             return None
         largest_period = comparison.get("largest_period")
         winner = comparison.get("winner")
+        metric = str(comparison.get("metric") or "재무 수치")
         if largest_period:
             lines.append(f"따라서 {largest_period}년 {metric}이 더 큽니다.")
         elif winner:

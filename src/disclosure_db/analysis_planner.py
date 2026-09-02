@@ -10,19 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from .analysis_contracts import AnalysisPlan, EvidenceSlot, PolicyDecision, QueryPlanSnapshot
+from .input_hardening import detect_prompt_injection
 from .query_planner import plan_query
 
 
 _DEFAULT_DIMENSIONS_PATH = Path(__file__).resolve().parents[2] / "config" / "analysis_dimensions.json"
-_PROMPT_INJECTION_MARKERS = (
-    "ignore previous",
-    "ignore all previous",
-    "system prompt",
-    "developer message",
-    "이전 지시를 무시",
-    "지시를 무시",
-    "시스템 프롬프트",
-)
 _ANALYSIS_MARKERS = ("공시", "사업보고서", "분기보고서", "반기보고서", "판단", "분석", "개선", "악화", "위험요인")
 _DIRECT_TRANSACTION_ACTION = re.compile(
     r"(?:"
@@ -227,10 +219,9 @@ def load_dimension_catalog(path: str | Path | None = None) -> tuple[Mapping[str,
 def classify_policy(question: str) -> PolicyDecision:
     """Apply recommendation, injection, and bounded-analysis policy in precedence order."""
     text = question.strip()
-    folded = text.casefold()
     if _is_direct_transaction_action(text) or any(re.search(pattern, text) for pattern in _RECOMMENDATION_PATTERNS):
         return PolicyDecision("refuse_recommendation", ("policy_recommendation_or_suitability_refusal",))
-    if any(marker in folded for marker in _PROMPT_INJECTION_MARKERS):
+    if detect_prompt_injection(text):
         return PolicyDecision("refuse_prompt_injection", ("policy_prompt_injection_refusal",))
     if any(marker in text for marker in _ANALYSIS_MARKERS):
         return PolicyDecision("allow_analysis", ("policy_historical_disclosure_analysis",))

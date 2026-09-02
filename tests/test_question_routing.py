@@ -96,6 +96,41 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
         self.assertEqual(route.normalized_question, "삼성전자 2025년 매출액은?")
         self.assertEqual(route.corrections, ("삼선전자->삼성전자",))
 
+    def test_shared_normalization_resolves_audited_english_alias_and_zero_width_text(self) -> None:
+        route = self.router.route(
+            "  ＳＡＭＳＵＮＧ\u200b　ＥＬＥＣＴＲＯＮＩＣＳ\t２０２５년   매출액은?  "
+        )
+
+        self.assertIsNotNone(route)
+        self.assertEqual(route.tool_name, "get_financial_facts")
+        self.assertEqual(route.arguments["company"], "삼성전자")
+        self.assertEqual(route.arguments["start_date"], "2025-01-01")
+        self.assertEqual(route.normalized_question, "삼성전자 2025년 매출액은?")
+        self.assertIn("alias:samsung electronics->삼성전자", route.corrections)
+
+    def test_manifest_aliases_are_case_insensitive_and_stock_codes_are_supported(self) -> None:
+        cases = {
+            "sm엔터테인먼트 2025년 매출액은?": "에스엠",
+            "ls electric 2025년 매출액은?": "엘에스일렉트릭",
+            "005930 2025년 매출액은?": "삼성전자",
+        }
+        router = DeterministicQuestionRouter(
+            ["에스엠", "엘에스일렉트릭", "삼성전자"]
+        )
+
+        for question, company in cases.items():
+            with self.subTest(question=question):
+                route = router.route(question)
+                self.assertIsNotNone(route)
+                self.assertEqual(route.arguments["company"], company)
+                self.assertTrue(any(item.startswith("alias:") for item in route.corrections))
+
+    def test_company_aliases_are_catalog_only_and_ambiguous_one_edit_typos_are_not_guessed(self) -> None:
+        router = DeterministicQuestionRouter(["삼성전자", "삼성전기"])
+
+        self.assertIsNone(router.route("Samsung 2025년 매출액은?"))
+        self.assertIsNone(router.route("삼성전가 2025년 매출액은?"))
+
     def test_exact_company_is_not_changed_to_one_edit_neighbor(self) -> None:
         router = DeterministicQuestionRouter(["삼성전자", "삼성전기", "현대자동차"])
 
@@ -166,6 +201,79 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
         self.assertIsNotNone(single)
         self.assertEqual(single.workflow, "single")
         self.assertEqual(single.arguments["end_date"], "2025-12-31")
+
+    def test_multiple_issuers_periods_and_metrics_form_independent_requirements(self) -> None:
+        route = self.router.route(
+            "삼성전자와 SK하이닉스의 2024년과 2025년 매출액과 영업이익을 비교해줘"
+        )
+
+        self.assertIsNotNone(route)
+        self.assertEqual(route.kind, "tool")
+        self.assertEqual(route.workflow, "financial_comparison")
+        self.assertEqual(route.context["companies"], ["삼성전자", "SK하이닉스"])
+        self.assertEqual(route.context["periods"], ["2024", "2025"])
+        self.assertEqual(route.context["metrics"], ["매출액", "영업이익"])
+        self.assertEqual(route.context["metric_ids"], ["revenue", "operating_income"])
+        self.assertEqual(
+            route.context["requirements"],
+            [
+                {"company": company, "period": period, "account": account}
+                for company in ("삼성전자", "SK하이닉스")
+                for period in ("2024", "2025")
+                for account in ("매출액", "영업이익")
+            ],
+        )
+        self.assertEqual(route.arguments["account"], "매출액")
+
+    def test_multiple_metrics_without_an_explicit_comparison_are_not_collapsed(self) -> None:
+        route = self.router.route("삼성전자 2025년 매출액과 영업이익을 알려줘")
+
+        self.assertIsNotNone(route)
+        self.assertEqual(route.kind, "tool")
+        self.assertEqual(route.workflow, "financial_comparison")
+        self.assertEqual(route.context["requirements"], [
+            {"company": "삼성전자", "period": "2025", "account": "매출액"},
+            {"company": "삼성전자", "period": "2025", "account": "영업이익"},
+        ])
+
+    def test_multiple_iso_dates_keep_exact_boundaries_in_requirements(self) -> None:
+        route = self.router.route(
+            "삼성전자 2024-03-31과 2024-06-30 매출액 차이를 비교해줘"
+        )
+
+        self.assertIsNotNone(route)
+        self.assertEqual(route.workflow, "financial_comparison")
+        self.assertEqual(route.context["periods"], ["2024-03-31", "2024-06-30"])
+        self.assertEqual(route.arguments["start_date"], "2024-01-01")
+        self.assertEqual(route.arguments["end_date"], "2024-03-31")
+        self.assertEqual(route.context["requirements"], [
+            {
+                "company": "삼성전자", "period": "2024-03-31",
+                "start_date": "2024-01-01", "end_date": "2024-03-31",
+                "account": "매출액",
+            },
+            {
+                "company": "삼성전자", "period": "2024-06-30",
+                "start_date": "2024-01-01", "end_date": "2024-06-30",
+                "account": "매출액",
+            },
+        ])
+
+    def test_malformed_and_contradictory_conditions_return_stable_clarification(self) -> None:
+        cases = {
+            "삼성전자 2025-02-30 매출액은?": "question_date_invalid",
+            "삼성전자 2025년 연결 및 별도 매출액은?": "question_conditions_contradictory",
+            "삼성전자 2024년과 2024년 매출액 차이는?": "question_duplicate_condition_changes_meaning",
+        }
+
+        for question, reason in cases.items():
+            with self.subTest(question=question):
+                route = self.router.route(question)
+                self.assertIsNotNone(route)
+                self.assertEqual(route.kind, "clarification")
+                self.assertEqual(route.reason, reason)
+                self.assertEqual(route.response_mode, "deterministic")
+                self.assertTrue(route.message)
 
 
 if __name__ == "__main__":

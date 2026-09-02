@@ -820,3 +820,37 @@
 - review fix round 2 privacy ruling: 요구 경계는 exact authored private 질문과 private rubric ID를 개발 코드에서 조회·재구성하지 못하게 하는 것이다. literal scan `0`을 유지한다. 공개 issuer/fact provenance나 공개 DB fact answer의 암호학적 비밀성은 요구하거나 주장하지 않으며, finite public corpus에서 hashed group/source identity를 대조할 수 있는 잔여 가능성이 있다. pre-paraphrase/public-fact reconstruction은 evaluator가 보관하는 exact private holdout 원문이 아니다. 이 round에서는 suite를 재설계하거나 provenance ID를 제거하지 않았다.
 - review fix round 2 최종 검증: V2 focused `19 passed`; V2+legacy 300/856 `43 passed`; 전체 Python `572 passed, 2 skipped, 58 warnings, 74 subtests passed`; Web `12/12`; compileall/diff 통과. legacy guarded diff, actual private question literal leak, private rubric literal leak은 모두 `0`이다. suite SHA-256은 `47664c91b6d241288ab4cd928955321eae301658de5681b06a40665054125a87`로 유지됐다.
 - 상태: suite 구축과 report contract만 완료했으므로 tracked summary는 의도적으로 `status=NOT_RUN`이다. Task 3 입력 정규화/분해부터 Task 7 실제 실행까지 통과하기 전에는 Judge Stress V2 품질 PASS를 주장하지 않으며, Task 8 promotion도 진행하지 않는다.
+
+## 2026-09-03 — Judge Stress V2 Task 3 input and routing hardening
+
+- 범위와 기준선: 요청된 `agent/judge-stress-v2` linked worktree의 `ab143611f000279ff8f8e2bd099dcdbbc7829272`에서 시작했다. 첫 focused 실행은 editable install이 없어 `ModuleNotFoundError: disclosure_db`로 collection 중단됐고, repository 지침대로 process-local `PYTHONPATH=src`만 지정한 재실행은 `96 passed, 26 subtests`였다. D-drive/live/NCP, credential, `.env`, PEM, 보안·배포 설정은 접근하거나 변경하지 않았다.
+- TDD RED/GREEN: 공개 질문 길이와 alias/normalization RED는 `9 failed, 2 passed` 후 GREEN `8 passed, 3 subtests`; 다중 metric·잘못된 날짜·충돌 조건 RED는 `10 failed, 2 passed` 후 GREEN `7 passed, 5 subtests`; encoded/multilingual injection RED는 Function Calling/agent가 provider·search 경로에 진입하는 실패를 재현한 뒤 GREEN `4 passed, 2 subtests`가 됐다. 중간의 중복 연도 1건 실패는 기존 기간 연산 표지에 `차이`가 빠진 동일 원인으로 진단해 최소 수정했다.
+- 입력 계약: 공통 NFKC, Unicode 공백 축약, zero-width/format character 제거를 적용한다. 회사 alias는 고정 `data/derived/financial_company_universe.json`의 issuer/listed/alias/stock-code와 검토된 `config/company_aliases.json`만 사용하고 case-insensitive하게 정규화한다. `SM엔터테인먼트 → 에스엠`, `Samsung Electronics → 삼성전자`, `005930 → 삼성전자`를 회귀로 고정했으며 catalog 밖 `Samsung`과 둘 이상 후보가 있는 한 글자 오타는 추론하지 않는다.
+- routing 계약: 여러 회사·연도·structured metric을 독립 Cartesian 요구사항으로 만들고 모든 요구사항의 근거가 있을 때만 complete로 처리한다. 잘못된 달력 날짜, 연결/별도 충돌, 의미를 바꾸는 중복 비교 연도는 stable reason code로 Tool/provider 호출 전에 clarification한다. 공개 `as_of`도 모양뿐 아니라 실제 달력 날짜를 검증한다.
+- 공개·보안 계약: 모든 공개 question-bearing FastAPI schema의 `maxLength`는 정확히 `2000`이고 2,000/2,001 경계를 실제 endpoint에서 확인했다. Dense `/search` 내부 한도는 유지했다. URL/percent, Base64, Unicode/공백, 다국어 prompt-injection은 2,000자 bounded detector에서 탐지만 하며 decoded 문자열을 반환·전달하지 않는다. 기존 추천 거부가 injection 거부보다 먼저 적용되는 정책과 public Tool 5개/기존 필드는 유지했다.
+- 검증: 확대 focused suite `159 passed, 36 subtests`; 전체 Python `591 passed, 2 skipped, 72 warnings, 84 subtests`; Web `12/12`; public Tool exact-five focused `2 passed`; `compileall src scripts`와 `git diff --check`가 통과했다. 경고는 기존 FastAPI/Dense `on_event` deprecation이고 skip은 기존 optional 환경 항목이다. 600-case 앱 평가, Docker/image, Dense 품질, live/provider/NCP 평가는 실행하지 않았고 PASS를 주장하지 않는다.
+
+### 2026-09-03T03:44:52+09:00 — Task 3 독립 리뷰 수정
+
+- 독립 리뷰에서 URL/Base64를 두 번 중첩하면 detector를 통과하고, 직접 `DisclosureAgent`·routerless HCX가 2,001자/잘못된 날짜/연결·별도 모순을 provider 또는 search까지 전달하며, fact 조회 API 일부가 존재하지 않는 `as_of` 날짜를 받는 우회 경로를 확인했다. 전각·zero-width English 회사 alias가 public answer 경로에서 canonical 회사명으로 전달되지 않는 문제도 재현했다.
+- TDD RED는 우회 13건 실패로 시작했다. 공통 preflight가 원문 길이를 정규화 전에 검사하고 NFKC/format-character/공백 정리, 달력 날짜, scope 모순, 의미를 바꾸는 중복 비교 기간을 단일 reason code로 판정하도록 수정했다. encoded injection은 최대 깊이 2·decode 시도 16회·각 view 2,000자로 제한해 nested URL/Base64 조합을 탐지하되 decoded payload를 응답·로그·도구에 전달하지 않는다.
+- `plan_query`, 직접 agent, router 유무와 무관한 HCX, 모든 public question model, GET `/answer`, financial/event fact `as_of`가 같은 경계를 사용한다. config에 명시된 `Samsung Electronics → 삼성전자` alias는 public planner/answer에도 적용하며 catalog 밖 alias는 추가하지 않았다. 기존 5개 public Tool과 응답 필드는 유지했다.
+- 수정 focused 회귀는 `142 passed, 86 subtests`, 전체 Python은 `610 passed, 2 skipped, 86 warnings, 134 subtests`, Web은 `12/12`였다. `npm test`는 이 저장소에 package manifest가 없어 검증 명령이 아니며 실제 Web gate는 기존 방식인 `node --test tests/*.test.mjs`로 실행했다. 경고는 기존 FastAPI/Dense `on_event` deprecation이다. credential, `.env`, PEM, D-drive/live/NCP 데이터와 보안 설정은 접근·변경하지 않았다.
+
+### 2026-09-03 — Task 3 독립 리뷰 수정 2
+
+- 재검토에서 16개의 무해한 Base64 token으로 decode budget을 먼저 소진하는 입력, 공백을 끼운 Base64, public planner가 universe의 종목코드 alias를 읽지 않는 경로, `당기순이익` 안의 `순이익`을 두 metric으로 세어 중복 기간 검사를 건너뛰는 네 재현을 확보했다. 구현 전 신규 테스트는 정확히 `4 failed`였다.
+- decoder는 전체 candidate가 남은 16회 예산보다 많으면 모호한 public input으로 fail-closed하고, bounded spaced-Base64 candidate도 검사한다. decode 호출 수와 깊이/길이 제한은 그대로다. planner alias는 기존 고정 universe manifest와 검토된 config만 합쳐 사용하며 `005930 → 삼성전자`를 public answer까지 보존한다. metric count는 긴 canonical 명칭에 포함된 짧은 alias를 중복 계산하지 않는다.
+- 수정 focused gate는 `140 passed, 86 subtests`, Web은 `12/12`였다. 전체 회귀와 최종 독립 승인은 이 수정 커밋 직전/직후 별도 검증 결과로 기록한다.
+
+### 2026-09-03 — Task 3 독립 리뷰 수정 3
+
+- 재검토에서 `2024-12-31과 2024-12-31` 비교가 중복 기간 검사를 통과하고, 서로 다른 ISO 날짜 두 개도 planner가 첫 날짜만 보존하는 문제를 확인했다. 두 회귀는 구현 전에 `2 failed`였다.
+- 공통 preflight는 유효성이 확인된 ISO 날짜 mention도 중복 비교 대상으로 삼는다. planner는 명시한 모든 달력 날짜를 독립 `target_periods`로 보존하며 손익계정은 각 연도 시작일부터 해당 날짜까지, 재무상태계정은 각 instant로 표현한다. 따라서 계산·비교 경로가 두 번째 기간을 조용히 버릴 수 없다.
+- 수정 focused gate는 `142 passed, 86 subtests`다. 최종 전체 회귀와 새 독립 승인 전까지 Task 3 완료를 주장하지 않는다.
+
+### 2026-09-03 — Task 3 독립 리뷰 수정 4
+
+- 세 번째 재검토에서 planner가 보존한 ISO 날짜를 router가 다시 연도 네 자리로 축약해 같은 연도의 서로 다른 날짜를 하나로 합치고, HCX executor가 날짜 경계를 연말로 바꾸는 downstream 결함을 확인했다.
+- router는 연간 기간만 기존 `YYYY` label/계약으로 유지하고, 부분기간·instant는 전체 날짜와 명시적 `start_date`/`end_date`/`instant_date`를 requirement별로 보존한다. HCX 비교 실행기는 각 requirement의 정확한 경계를 Tool 요청에 전달한다. 기존 연간 multi-axis 응답 형식은 그대로다.
+- exact-boundary route/dispatch 회귀를 먼저 추가하고 수정 후 ISO focused `10 passed, 5 subtests`, Task 3 확대 focused `144 passed, 86 subtests`를 확인했다. 전체 회귀와 새 독립 승인 전에는 완료로 표시하지 않는다.
