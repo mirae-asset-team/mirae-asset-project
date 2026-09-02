@@ -170,6 +170,55 @@ Hybrid CLI는 base/Gold/overlay/attestation/search/seed와 두 output 경로의 
 base/overlay/search attestation 및 search SQLite fatal reason이 bundle에 반환되면 hybrid
 status는 `failed_closed`, recall은 `null`이며 sparse fallback을 hybrid 통과로 계산하지 않는다.
 
+### BGE-M3 Dense Smoke와 RRF Hybrid retrieval v1
+
+`src/disclosure_db/hybrid_retrieval.py`는 기존 에이전트나 Tool Registry에 연결하지 않은 retrieval
+모듈이다. `SparseRetriever`는 attested read-only `SafeSearchIndex.search()`를 그대로 호출하므로
+Unicode/trigram FTS, 기존 내부 RRF, 회사·공시·시점·정정 정책을 중복 구현하거나 완화하지 않는다.
+`DenseFaissRetriever`는 `BAAI/bge-m3`로 질문을 embedding하고 L2 정규화한 다음, L2 정규화가
+검증된 `IndexFlatIP`에 inner-product 검색을 수행한다. `HybridRetriever`는 sparse와 dense 순위에
+각각 `1 / (60 + rank)`를 더하는 RRF를 적용한다. 중복 키는 `chunk_id`가 있으면 이를 우선하고,
+없을 때만 `evidence_id`를 사용한다.
+
+현재 dense 산출물 계약은 **정확히 100개 chunk만 포함한 `smoke_only` index**다. 로드 시 index
+개수와 metadata 행 수, 0부터 증가하는 `vector_id`, 차원, 모든 저장 벡터의 L2 norm을 검증한다.
+이는 파일 연결·필터·fallback 검증용이며 전체 corpus recall, latency 또는 검색 품질을 증명하지
+않는다. 기본 파일은 `data/derived/bge_m3_dense_pilot/index.faiss`와
+`chunk_metadata.jsonl`이고 Git에 포함하지 않는다.
+
+| 환경변수 | 기본값/의미 |
+|---|---|
+| `DISCLOSURE_DENSE_INDEX` | Smoke `index.faiss` 경로 |
+| `DISCLOSURE_DENSE_METADATA` | Smoke `chunk_metadata.jsonl` 경로 |
+| `DISCLOSURE_DENSE_MODEL` | `BAAI/bge-m3`; 로컬 모델 디렉터리로 교체 가능 |
+| `DISCLOSURE_DENSE_MODEL_REVISION` | 선택적 Hugging Face revision |
+| `DISCLOSURE_DENSE_MAX_LENGTH` | `1024` |
+| `DISCLOSURE_DENSE_CORPUS_STATUS` | 현재 `smoke_only` |
+| `DISCLOSURE_DENSE_EXPECTED_CORPUS_SIZE` | 현재 `100`; `none`이면 개수 고정 해제 |
+
+Dense metadata에 요청된 회사, `filing_id`, `filed_at`, `as_of` 또는 정정 계보 필드가 없으면 해당
+필터는 추정하지 않고 dense 결과를 제외한다. Dense 파일 부재, FAISS/metadata 검증 실패, 모델·검색
+오류, 또는 필터 후 결과 0건이면 Hybrid는 이미 실행된 Sparse 결과를 `sparse_fallback`으로
+반환한다. Dense 예외가 `SafeSearchIndex` 결과를 폐기하지 않는다. 반환값은 `hits` 외에
+`dense_status`, `dense_corpus_size`, `fallback_used`, `retrieval_mode`, `smoke_only`를 포함한다.
+정상 Smoke 결합은 `dense_status=smoke_only`, `retrieval_mode=hybrid_rrf`이며, 필터 후 0건은
+`dense_status=smoke_only_no_filtered_results`, `retrieval_mode=sparse_fallback`이다.
+
+```powershell
+$env:PYTHONPATH=(Resolve-Path 'src').Path
+$env:DISCLOSURE_DENSE_INDEX='D:\mirae-asset-project\runs\dense-smoke\index.faiss'
+$env:DISCLOSURE_DENSE_METADATA='D:\mirae-asset-project\runs\dense-smoke\chunk_metadata.jsonl'
+$env:DISCLOSURE_DENSE_CORPUS_STATUS='smoke_only'
+$env:DISCLOSURE_DENSE_EXPECTED_CORPUS_SIZE='100'
+python -m unittest discover -s tests -p 'test_hybrid_retrieval.py' -v
+python -m unittest discover -s tests -p 'test_search_index.py' -v
+```
+
+전체 Dense index로 교체할 때는 chunk-v1 전체 corpus로 새 출력 디렉터리를 생성·검증한 뒤 두 경로를
+함께 바꾸고, `DISCLOSURE_DENSE_CORPUS_STATUS=full_corpus`와 실제 검증 개수를 설정한다. 그 후 별도의
+전체 corpus retrieval 평가와 latency gate를 통과하기 전에는 성능 개선을 주장하거나 production
+기본 경로로 승격하지 않는다.
+
 ## Provider-required 300-case gate
 
 기본 300문항 실행은 `--provider-mode disabled`이며 비용 없이 결정론적 회귀를 검증한다.

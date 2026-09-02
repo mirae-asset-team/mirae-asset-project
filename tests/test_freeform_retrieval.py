@@ -305,6 +305,179 @@ def test_structured_slot_forwards_its_filing_date_to_the_audited_route() -> None
     assert service.search.call_args.args[0].filing_date == "2024-05-15"
 
 
+def test_profitability_financial_slots_request_two_periods_from_the_audited_route() -> None:
+    plan = plan_analysis(
+        "삼성전자 최근 수익성과 재무건전성이 개선됐는지 공시로 판단해줘",
+        company_candidates=["삼성전자"],
+    )
+    service = EvidenceService(Path("base.sqlite"))
+    service.search = Mock(return_value=EvidenceBundle(question="route", answerable=False))
+
+    financial_slots = [slot for slot in plan.required_evidence_slots if slot.domain == "financial"]
+    for slot in financial_slots:
+        service._search_structured_slot(plan, slot, (slot.search_concepts[0],))
+        query = service.search.call_args.args[0]
+        assert query.latest_period_count == 2, slot.slot_id
+
+
+def test_structured_slots_preserve_one_period_lookup_and_explicit_three_year_intent() -> None:
+    service = EvidenceService(Path("base.sqlite"))
+    service.search = Mock(return_value=EvidenceBundle(question="route", answerable=False))
+
+    latest = _structured_plan(correction_policy="current", as_of="2024-06-30")
+    service._search_structured_slot(latest, latest.required_evidence_slots[0], ("매출액",))
+    assert service.search.call_args.args[0].latest_period_count == 1
+
+    history = plan_analysis(
+        "삼성전자 최근 3개년 수익성과 재무건전성이 개선됐는지 공시로 판단해줘",
+        company_candidates=["삼성전자"],
+    )
+    income_slot = next(slot for slot in history.required_evidence_slots if slot.slot_id == "income_trend")
+    service._search_structured_slot(history, income_slot, ("매출액",))
+    assert service.search.call_args.args[0].latest_period_count == 3
+
+
+def test_structured_financial_slot_collects_distinct_periods_per_account_concept() -> None:
+    slot = EvidenceSlot(
+        "income_trend", "financial", issuer="삼성전자",
+        search_concepts=("매출액", "영업이익"), min_periods=2,
+        min_evidence=2, max_evidence=4,
+    )
+    plan = AnalysisPlan(
+        question="삼성전자 수익성 분석", analysis_mode="judgment",
+        policy=PolicyDecision("allow_analysis"),
+        base_plan=QueryPlanSnapshot("삼성전자 수익성 분석", company="삼성전자"),
+        required_evidence_slots=(slot,), max_evidence=4,
+    )
+    service = EvidenceService(Path("base.sqlite"))
+
+    def audited_search(query, *, limit):
+        terms = tuple(query.account_terms)
+        periods = (
+            (("2025-01-01", "2025-12-31"), ("2024-01-01", "2024-12-31"))
+            if len(terms) == 1
+            else (("2025-01-01", "2025-12-31"), ("2025-01-01", "2025-12-31"))
+        )
+        account = terms[0] if len(terms) == 1 else "combined"
+        evidence = [_ref(f"{account}-{index}") for index in range(len(periods))]
+        facts = [
+            {
+                "financial_fact_id": f"{account}-{index}",
+                "account_name_raw": account,
+                "period_start": start,
+                "period_end": end,
+                "instant_date": None,
+                "evidence_ids": [evidence[index].evidence_id],
+            }
+            for index, (start, end) in enumerate(periods)
+        ]
+        return EvidenceBundle(question=query.question, evidence=evidence, financial_facts=facts, answerable=True)
+
+    service.search = Mock(side_effect=audited_search)
+    refs, facts, _events, _diagnostics = service._search_structured_slot(plan, slot, ("매출액",))
+
+    assert {tuple(call.args[0].account_terms) for call in service.search.call_args_list} == {
+        ("매출액",), ("영업이익",),
+    }
+    assert {
+        (fact["period_start"], fact["period_end"], fact["instant_date"])
+        for fact in facts
+    } == {
+        ("2025-01-01", "2025-12-31", None),
+        ("2024-01-01", "2024-12-31", None),
+    }
+    assert len(refs) == len(facts) == 4
+
+
+def test_structured_financial_slot_queries_later_concepts_when_first_fills_cap() -> None:
+    slot = EvidenceSlot(
+        "income_trend", "financial", issuer="삼성전자",
+        search_concepts=("매출액", "영업이익"), min_periods=2,
+        min_evidence=2, max_evidence=4,
+    )
+    plan = AnalysisPlan(
+        question="삼성전자 수익성 분석", analysis_mode="judgment",
+        policy=PolicyDecision("allow_analysis"),
+        base_plan=QueryPlanSnapshot("삼성전자 수익성 분석", company="삼성전자"),
+        required_evidence_slots=(slot,), max_evidence=4,
+    )
+    service = EvidenceService(Path("base.sqlite"))
+
+    def audited_search(query, *, limit):
+        account = query.account_terms[0]
+        evidence = [_ref(f"{account}-{index}") for index in range(limit)]
+        facts = [{
+            "financial_fact_id": ref.evidence_id,
+            "account_id": account,
+            "period_end": f"{2025 - index}-12-31",
+            "evidence_ids": [ref.evidence_id],
+        } for index, ref in enumerate(evidence)]
+        return EvidenceBundle(question=query.question, evidence=evidence, financial_facts=facts, answerable=True)
+
+    service.search = Mock(side_effect=audited_search)
+    refs, _facts, _events, diagnostics = service._search_structured_slot(plan, slot, ("매출액",))
+
+    assert [call.args[0].account_terms for call in service.search.call_args_list] == [["매출액"], ["영업이익"]]
+    assert {ref.evidence_id.split("-")[0] for ref in refs} == {"매출액", "영업이익"}
+    assert diagnostics["variant_ids"] == [0, 1]
+
+
+def test_financial_slot_requires_same_account_across_distinct_periods_to_complete() -> None:
+    slot = EvidenceSlot(
+        "income_trend", "financial", issuer="삼성전자", search_concepts=("매출액",),
+        min_periods=2, min_evidence=2, max_evidence=4,
+    )
+    plan = AnalysisPlan(
+        question="삼성전자 수익성 분석", analysis_mode="judgment",
+        policy=PolicyDecision("allow_analysis"),
+        base_plan=QueryPlanSnapshot("삼성전자 수익성 분석", company="삼성전자"),
+        required_evidence_slots=(slot,), max_evidence=4,
+    )
+    service = EvidenceService(Path("base.sqlite"))
+    evidence = [_ref("revenue-2025"), _ref("income-2025")]
+    service.search = Mock(return_value=EvidenceBundle(
+        question="route", evidence=evidence, answerable=True,
+        financial_facts=(
+            {"financial_fact_id": "ff-revenue", "account_id": "revenue", "period_end": "2025-12-31", "evidence_ids": ["revenue-2025"]},
+            {"financial_fact_id": "ff-income", "account_id": "operating_income", "period_end": "2025-12-31", "evidence_ids": ["income-2025"]},
+        ),
+    ))
+
+    result = service.search_analysis(plan)
+
+    assert result.complete is False
+    assert result.slots[0].complete is False
+    assert result.reason_codes == ("required_slot_missing:income_trend",)
+
+
+def test_structured_financial_slots_do_not_inherit_cross_slot_statement_type() -> None:
+    slots = (
+        EvidenceSlot(
+            "income_trend", "financial", issuer="삼성전자",
+            search_concepts=("매출액",), min_periods=2, min_evidence=2, max_evidence=2,
+        ),
+        EvidenceSlot(
+            "balance_sheet", "financial", issuer="삼성전자",
+            search_concepts=("자산총계",), min_periods=2, min_evidence=2, max_evidence=2,
+        ),
+    )
+    plan = AnalysisPlan(
+        question="삼성전자 수익성과 재무건전성 분석", analysis_mode="judgment",
+        policy=PolicyDecision("allow_analysis"),
+        base_plan=QueryPlanSnapshot(
+            "삼성전자 수익성과 재무건전성 분석", company="삼성전자", statement_type="IS",
+        ),
+        required_evidence_slots=slots, max_evidence=4,
+    )
+    service = EvidenceService(Path("base.sqlite"))
+    service.search = Mock(return_value=EvidenceBundle(question="route", answerable=False))
+
+    for slot in slots:
+        service._search_structured_slot(plan, slot, (slot.search_concepts[0],))
+
+    assert [call.args[0].statement_type for call in service.search.call_args_list] == [None, None]
+
+
 def test_structured_facts_are_removed_when_final_evidence_is_not_admitted() -> None:
     slot = EvidenceSlot(
         "income_trend", "financial", issuer="삼성전자", search_concepts=("매출액",),

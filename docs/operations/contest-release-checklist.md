@@ -1,9 +1,10 @@
 # Contest server release checklist
 
-Last updated: 2026-08-21 KST
+Last updated: 2026-09-02 KST
 
 This checklist records binary evidence without credentials or raw provider responses. `BLOCKED_EXTERNAL` means the local gate is defined but the required external resource is unavailable; it is not treated as a pass.
 `BLOCKED_LOCAL_RUNTIME` means a local runtime limitation prevented evidence collection; it is not treated as a pass.
+`BLOCKED_ENVIRONMENT` means the required local service or engine was unavailable; static or unit evidence must not be reported as image/runtime validation.
 
 | Item | Status | Evidence |
 |---|---|---|
@@ -15,17 +16,21 @@ This checklist records binary evidence without credentials or raw provider respo
 | Validated financial-fact seed coverage | PASS_SCOPE_LIMITED | Strict seed-to-audited-Gold match `8/8`, all trust tier `agent_audited`; exact question/fact ID, filing, value, scale, and evidence set; `corpus_wide_complete=false` |
 | Sparse retrieval Recall@20 | PASS_RECORDED | Existing FTS+RRF metric preserved at `13/17 = 0.7647058824`; complete-question recall `0.75`; MRR `0.3449449856`; no threshold was reduced |
 | Hybrid evidence retrieval | PASS | Requested K `20`, effective safe-bundle K `8`; same 17 targets recovered `17/17`; complete-question recall `1.0`; routes financial `8`, event `7`, text `2`; service errors, dependency failures, and residual targets `0` |
-| Dense embedding/vector pilot | DEFERRED_NO_EVIDENCE | Residual text targets `0`; no paid embedding call or dense manifest was created because the current Gold gate shows no eligible miss |
+| Main `[agent]` NumPy boundary | PASS_LOCAL_CONTRACT / BLOCKED_ENVIRONMENT | `agent` extra has no NumPy declaration and the main `Dockerfile` installs only `.[agent]`; Dense alone pins `numpy==2.5.2`. Focused artifact tests pass, but Docker engine was unavailable, so no Task 1 image package inventory was measured. |
+| Dense runtime identity contract | PASS_LOCAL_CONTRACT / BLOCKED_ENVIRONMENT | Startup hashes FAISS/metadata, verifies FAISS type/metric and every vector L2 norm, and hashes every mounted model file. Staging identity is issued only after byte-match with the exact pinned local Hugging Face snapshot. Local cache authenticity remains a documented supply-chain trust boundary. No new Dense image or deployed health response was validated. |
+| Current Task 1 compose/image/container measurement | BLOCKED_ENVIRONMENT | On 2026-09-02 the Docker Desktop Linux engine was unavailable. Docker was not retried in fix round 1, so the current Task 1 compose render, main/Dense image inventories, container startup, Dense runtime manifest, and container `/health` remain unmeasured. Historical rows below do not validate the current branch. |
+| Dense embedding/vector adoption | UNVERIFIED | Compose declares `2,571,506` vectors and prior staging observations reported full-corpus Dense use, but Task 1 did not remeasure artifact identity, Recall@20 gain, wrong issuer/version count, or p95. Dense is not release-adopted on configuration evidence alone. |
+| Sparse fallback | PASS_LOCAL_QUERY / UNVERIFIED_COLD_START | Missing index, invalid index, empty filtered result, and unavailable sidecar all preserve Sparse results in four focused tests. Compose still gates agent cold start on Dense `service_healthy`; restart/cold-start fallback is not yet demonstrated. |
 | PostgreSQL/pgvector/OpenSearch serving | DEFERRED_NO_EVIDENCE | SQLite remains attested SSOT/rollback; no serving sidecar or OpenSearch resource is justified by current residual evidence, provisioned, or claimed complete |
 | 300-case manifest | PASS | SHA-256 `1b014f0bfca75c8db6f6306dcdab80fff4cafb80dfb3709bf1e9d3bb8d8dd2a0`; fresh final provider-disabled run `20260819T174202Z-1b014f0bfca7`; `300/300` pass; evaluator error and all hard counters `0`; all four quality metrics `1.0`; p95 `5193.46ms`; failures `0` bytes; summary SHA-256 `3ab5b0a5823112157a4be4219883bcdba46f4f859d47f5fc2c65b8a0d73230ce` |
-| Full local regression | PASS | corpus-wide final run `304 passed, 1 skipped, 19 subtests passed`; compileall passed |
-| Frontend logic regression | PASS | history/API suites `16/16` passed with the bundled Node runtime |
+| Full local regression | PASS | Judge Stress V2 Task 1 handoff run `553 passed, 2 skipped, 58 warnings, 74 subtests passed`; warnings are existing FastAPI `on_event` deprecations. |
+| Frontend logic regression | PASS | Current history/API suites `12/12` passed with Node `v24.14.0`. |
 | Wheel web assets | PASS | wheel SHA-256 `78056aee8b9d800dae964ae4624848ec05622a0adb922ff15afbe50f2e2e58f2`; `index.html`, `app.css`, `app.js`, `history.js`, `api.js` present (`5/5`) |
-| Local Docker image/UI smoke | PASS | Docker Engine `29.7.2`; image `sha256:c0adf3adcc07dfb09e2e0fdb8f235b973c1036592c5cc262d3760b6ac1721cd9`; container healthy; web/CSP and three query probes passed |
-| Local Docker request IDs | PASS | health `3029125d830a488ca62743bc4e0f71a3`; verified `84799fc1e0304306a9ee230d68ace408`; abstention `d5838369907941b4b0bb520eaea6e0b6`; injection `104d496d9b014b328720d37fe174b9ee` |
-| Local Docker bind-mount latency | PASS_WITH_WARNING | internal query latency `192174.44–207511.27ms` on Windows Docker Desktop D-drive bind mounts; direct local runtime remained `4.78–4.89s`; functional gate passed but this setup is not a performance reference |
-| Browser desktop/360px/XSS | PASS | verified answer and evidence card, abstention, search `2→0→3`, three delete controls, no horizontal overflow, mobile menu/focus return; literal `<img src=x onerror=alert(1)>` rendered as exact text with `img=0`, dialog `false`, console errors `0` |
-| Immutable artifacts after Docker | PASS | base/overlay/search size, UTC mtime and SHA-256 matched the pre-Docker values; container mounts reported base/agent/attestation `rw=false`, runtime `rw=true` |
+| Local Docker image/UI smoke | PASS_HISTORICAL | Historical evidence from 2026-08-20 at release commit `dcf44b8`: Docker Engine `29.7.2`; image `sha256:c0adf3adcc07dfb09e2e0fdb8f235b973c1036592c5cc262d3760b6ac1721cd9`; container healthy; web/CSP and three query probes passed. This is not current Task 1 image evidence. |
+| Local Docker request IDs | PASS_HISTORICAL | Historical evidence from 2026-08-20 at release commit `dcf44b8`: health `3029125d830a488ca62743bc4e0f71a3`; verified `84799fc1e0304306a9ee230d68ace408`; abstention `d5838369907941b4b0bb520eaea6e0b6`; injection `104d496d9b014b328720d37fe174b9ee`. |
+| Local Docker bind-mount latency | PASS_HISTORICAL_WITH_WARNING | Historical evidence from 2026-08-20 at release commit `dcf44b8`: internal query latency `192174.44–207511.27ms` on Windows Docker Desktop D-drive bind mounts; direct local runtime remained `4.78–4.89s`; this setup is not a performance reference. |
+| Browser desktop/360px/XSS | PASS_HISTORICAL | Historical evidence from 2026-08-20 at release commit `dcf44b8`: verified answer/evidence, abstention, history controls, responsive layout, and literal XSS-string rendering passed. |
+| Immutable artifacts after Docker | PASS_HISTORICAL | Historical evidence from 2026-08-20 at release commit `dcf44b8`: base/overlay/search size, UTC mtime, and SHA-256 matched pre-Docker values; container mounts reported base/agent/attestation `rw=false`, runtime `rw=true`. |
 | Provider configured on NCP | PASS_CONFIGURED | `/health.provider_configured=true`; credential value and `.env` contents were not printed or committed; configuration alone is not provider-quality evidence |
 | Provider HTTP smoke | PASS | HyperCLOVA endpoint returned HTTP 200; response body redacted |
 | Provider adapter schema smoke | FAIL_CLOSED | Parser now accepts exactly one prose-wrapped JSON object and rejects ambiguity; the prior live text response still did not satisfy the exact schema, and no current credential is available for re-smoke |
@@ -34,10 +39,10 @@ This checklist records binary evidence without credentials or raw provider respo
 | Official example `GET /answer` | PASS_LOCAL | Five-field response contract, bounded public context/trace, abstention and anonymous request limiting passed focused tests; public NCP deployment is not yet performed |
 | Technical proposal source/PDF | PASS | Korean Markdown plus visually inspected 12-page A4 PDF; all required sections, tables and architecture diagram present; invariant build reproduced identical SHA-256 twice: `b238a7d75a5604ea73207dc04c095e4d92ebf5d42750c98a233ba415f17cd0cc` |
 | Evaluation API server specification | PASS_PUBLIC | Standalone request/response/error/limit/health/deployment contract for `GET /answer` and `POST /query`; the public no-login deployment returned the exact five-field official response and the detailed verified response |
-| Compose config hash | PASS | `compose.yaml` SHA-256 `eebdcf5a7604ae904fe8ffbb049f508a2f3abe9194bdfad510392e636c4886d1`; anonymous limits render as `120/4/8` |
-| NCP Docker image build/start | PASS | corpus release `corpus-d3e909a`; image `sha256:9ab930b8bf84ad2c54fdbadb5e9ed2b0a41dd545ae8addf759edde53602117bea`; container healthy before and after explicit restart |
-| NCP Docker `/health` | PASS | HTTP 200; ready/base-attested/overlay-attested/search-ready all true; `company_count=76`; provider configured; post-restart request `70cb5e5e99404f8f882b86a909b3198c` |
-| NCP Docker `/query` smoke | PASS | Exact numeric returned 2 verified values/2 citations; textual returned 1 citation; out-of-scope and injection returned no values/citations; 1.66–1.71s internally |
+| Compose config hash | PASS_HISTORICAL | Historical evidence from 2026-08-20 at release commit `dcf44b8`: `compose.yaml` SHA-256 `eebdcf5a7604ae904fe8ffbb049f508a2f3abe9194bdfad510392e636c4886d1`; anonymous limits rendered as `120/4/8`. This does not validate the current Task 1 compose. |
+| NCP Docker image build/start | PASS_HISTORICAL | Historical evidence from 2026-08-21 at corpus release commit `d3e909a`: image `sha256:9ab930b8bf84ad2c54fdbadb5e9ed2b0a41dd545ae8addf759edde53602117bea`; container healthy before and after explicit restart. This is not current Task 1 image evidence. |
+| NCP Docker `/health` | PASS_HISTORICAL | Historical evidence from 2026-08-21 at corpus release commit `d3e909a`: HTTP 200; ready/base-attested/overlay-attested/search-ready true; `company_count=76`; post-restart request `70cb5e5e99404f8f882b86a909b3198c`. |
+| NCP Docker `/query` smoke | PASS_HISTORICAL | Historical evidence from 2026-08-21 at corpus release commit `d3e909a`: exact numeric/textual/out-of-scope/injection probes passed at `1.66–1.71s` internally. |
 | NCP server/public IP/ACG | PASS | Operational 2-vCPU/8GB server with public IP; inbound current-admin `/32` TCP 22 and public TCP 8000 only; outbound TCP 443; stale SSH `/32` removed |
 | Current public API reachability | PASS | Fresh Windows-network probe on 2026-08-20: TCP 22 and 8000 open; `/health` HTTP 200 with ready/base/overlay/search true and provider false; q005 HTTP 200, verified/answerable, both expected values present, two evidence records, about 2.09s |
 | Anonymous public web root | PASS | Public `GET /`, CSS and JS returned HTTP 200 with CSP; no login required. Browser showed the sidebar, search, new conversation, verified answer, two evidence cards, and persisted history. |
@@ -76,3 +81,5 @@ The previous local live overlay is preserved at `D:\mirae-asset-project\db\agent
 Local deterministic and corpus-wide financial hard gates: GO. Local and NCP atomic promotion: GO. Public API/UI, post-restart recovery, immutable-hash re-attestation, and GitHub publication: GO.
 
 Final contest submission: NO-GO until a rotated HyperCLOVA X credential passes the bounded schema/provider 300 gate. The public UI/`GET /answer`/restart checks, technical proposal, and API specification are complete; no external gate was relaxed.
+
+Judge Stress V2 Task 1: local dependency, manifest, health, and query-time fallback contracts are ready; Docker image/runtime validation is `BLOCKED_ENVIRONMENT` and remains a release gate.

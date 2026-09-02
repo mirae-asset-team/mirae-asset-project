@@ -1,8 +1,8 @@
 # Loop 1 자유형 공시 검색 핸드오프
 
-> **중요:** Loop 1은 완료 또는 GO가 아니다. 구조화 기간 수 차단은 2026-08-21 TDD로 고쳤고, 유효 Gold 재생성은 attested D드라이브가 없는 환경에서 `BLOCKED_LOCAL_RUNTIME`이다. 기존 `Recall@20=0.007936...`과 임베딩 적격 판정은 독립 검토에서 무효화됐으므로 품질 근거나 모델 도입 근거로 사용하면 안 된다.
+> **2026-08-22 완료 갱신:** Loop 1 Task 3 구현·평가는 완료됐고 품질 판정은 `NO-GO / BLOCKED_EXTERNAL`이다. 검색 top-20과 독립적으로 만든 120개 Gold에서 Recall@20 `0.487179...`를 두 번 재현했다. embedding pilot은 적격이지만 실제 provider gain·p95 측정 전이다. 기존 `0.007936...`과 순환 Gold에서 나온 `1.0`은 모두 품질 근거로 사용하면 안 된다.
 
-이 문서는 `agent/disclosure-db-foundation` 브랜치에서 Task 1·2와 구조화 기간 수 수정을 이어받고, Task 3의 유효한 Loop 1 평가를 재실행하기 위한 인수인계다.
+이 문서는 `agent/disclosure-db-foundation` 브랜치에서 완료된 Loop 1의 원인·수정·검증 결과와, 다음 작업자가 Task 4부터 시작할 경계를 인수인계한다.
 
 ## 현재 상태
 
@@ -12,14 +12,26 @@
 | Task 2 슬롯 검색·RRF | 구현 및 독립 재검토 PASS | `598855c`, `016cd19` |
 | 정정 원본/현재 검색 | TDD 구현됨 | `24368cf` |
 | 실제 DB에 맞춘 자금조달·지배구조 슬롯 | 구현됨 | `24368cf` |
-| 구조화 slot 기간 수 | TDD 수정됨. 수익성 `min_periods=2`를 QueryPlan에 전달 | 로컬 미커밋 작업; 일반 lookup 1·3개년 3 유지 |
-| serving-admitted Gold 빌더·dense 계약 | 슬롯 기간 합산 선택으로 보강 | `74cc2a4` + 기간 합산 수정 |
-| 유효한 120건 Gold | 차단됨 | attested D드라이브 부재. 이전 `0/12` serving 원인은 코드에서 제거 |
-| 유효 sparse Recall@20 | 없음 | 이전 수치는 invalid denominator |
-| 임베딩 도입 결정 | 없음 | dense gate를 실행할 유효 residual이 없음 |
+| serving-admitted Gold 빌더·dense 계약 | 다음 작업용 WIP로 보존 | `74cc2a4` |
+| 유효한 120건 Gold | 완료 | 19 source records, 36 unique targets |
+| 유효 sparse Recall@20 | `0.487179...` | 95% gate 미달, 두 번 재현 |
+| 임베딩 도입 결정 | `BLOCKED_EXTERNAL` | pilot 적격, 채택·gain 미측정 |
 | 운영 배포 | 이번 작업에서 수행하지 않음 | 공개 서버는 이전 corpus release 상태 |
 
-브랜치의 기준 커밋은 `74cc2a4440e2571de5d3b32dce4a23784dcaac3d`이다. 이 커밋은 의도적으로 `wip:`이며 완료 주장이 아니다.
+이 완료 기록은 기존 WIP 기준 커밋 `74cc2a4440e2571de5d3b32dce4a23784dcaac3d` 이후의 Task 3 수정을 대체한다. 정확한 최신 커밋은 브랜치의 `git log -1`로 확인한다.
+
+## 완료 결과와 다음 시작점
+
+- `income_trend`와 `balance_sheet`는 dimension 계약의 `min_periods=2`를 요청한다.
+- 일반 최신값 lookup은 1개 기간, 명시적 3개년 질문은 3개 기간을 유지한다.
+- financial slot은 account concept가 자체 검색 경계를 가지므로 질문 전체의 IS/BS 분류를 상속하지 않는다. 이 분리로 손익계산서 질문 분류가 재무상태표 자산·부채를 차단하던 원인을 제거했다.
+- 각 계정 concept를 모두 독립 조회하고, serving 완료도 같은 canonical account의 서로 다른 기간을 요구한다.
+- Gold target은 serving top-20 결과가 아니라 검증된 overlay/search 원장을 독립 열거해 선택한다.
+- Gold를 두 번 생성해 content SHA `9a0b21a429db7f1ea3fa41c9e040f67d9f8146ecc143a725ee02cd4fbf8940be`를 재현했다.
+- sparse 평가를 두 번 실행해 semantic SHA `1a7a030ef29aeca5ed9dfdf597628638074302cc74241314b4d27a3db4d64baf`를 재현했다.
+- 최종 지표는 Recall@5 `0.3589743590`, Recall@20 `0.4871794872`, MRR `0.225`, slot completeness `1.0`, query `480`, candidate `3,696`, residual case `96`이다. wrong issuer/version·hard failure는 0이다.
+- Gold 생성은 base attestation과 일치하는 overlay/search index만 열거하며, 원본 정정공시는 비현재 `root`로 제한한다. manifest에는 세 artifact SHA-256을 모두 남긴다.
+- 다음 작업은 residual text 36건 dense pilot이다. 전체 동일 분모 +5%p, 안전성 0건, p95 2초 이하를 측정하기 전에는 Task 4나 NCP 재배포로 넘어가지 않는다.
 
 ## 시작하기
 
@@ -42,7 +54,7 @@ $env:PYTHONPATH = $null
 
 `.superpowers/sdd`는 로컬 진행 기록이며 Git에서 제외된다. 핵심 상태는 이 핸드오프와 커밋 기록에도 중복 보존했다.
 
-## 정확한 차단 원인
+## 해결된 차단 원인 (과거 기록)
 
 `profitability_financial_health`는 `income_trend`와 `balance_sheet` 두 필수 financial slot에서 각각 최소 2개 기간이 필요하다. 그러나 `EvidenceService.search_analysis`가 만드는 구조화 하위 질의는 `QueryPlan.latest_period_count=1`을 유지한다.
 
@@ -56,11 +68,18 @@ balance_sheet: serving 결과에 서로 다른 기간 2개 이상
 
 빌더는 `dimension_source_coverage_missing:profitability_financial_health:0<3`으로 fail-closed 종료했다. Gold와 평가 산출물을 덮어쓰지 않았으며, 수치를 꾸며내지 않았다.
 
-## 다음 작업 순서
+## Loop 1에서 실행한 작업 순서 (완료 기록)
 
-### 1. 구조화 slot 기간 수 — 완료, 재실행하지 말 것
+### 1. 구조화 slot 기간 수를 TDD로 수정하기
 
-`config/analysis_dimensions.json`의 `min_periods`를 structured `QueryPlan.latest_period_count`로 전달한다. 수익성 financial slot은 2, 일반 최신값 lookup은 1, 명시적 3개년은 3이다. Gold는 슬롯 serving 결과의 기간 합이 2 이상이면 인정한다. 이 단계는 테스트로 고정됐으므로 되풀이하지 않는다.
+먼저 `tests/test_freeform_retrieval.py` 또는 `tests/test_evidence_service.py`에 실패 테스트를 추가한다.
+
+- 수익성·재무건전성 judgment의 `income_trend`, `balance_sheet`는 최소 2개 기간을 요청한다.
+- 일반 최신값 lookup은 계속 1개 기간만 요청한다.
+- 명시적 3개년 질문은 기존 3개 기간 동작을 유지한다.
+- issuer, `as_of`, correction policy, filing date, evidence binding을 유지한다.
+
+가장 작은 수정 위치는 `src/disclosure_db/evidence_service.py`의 structured slot용 `QueryPlan` 생성 경계다. dimension별 필요 기간을 코드에 중복 하드코딩하기보다 `config/analysis_dimensions.json`의 slot 계약에서 읽을 수 있는 형태를 우선 검토한다.
 
 ### 2. 유효 Gold를 재생성하기
 
@@ -119,7 +138,9 @@ balance_sheet: serving 결과에 서로 다른 기간 2개 이상
 | serving-path 수정 묶음 | 91 passed, 8 subtests | `24368cf` 직전 검증 |
 | WIP Gold/dense 계약 묶음 | 38 passed | `74cc2a4` 직전 검증 |
 | compileall·diff check | PASS | 두 커밋 모두 기록됨 |
-| 전체 pytest | 최신 WIP 이후 미실행 | 기간 차단 해소 후 반드시 실행 |
+| 전체 pytest | 409 passed, 1 skipped, 19 subtests | 38 existing warnings |
+| Node web | 16/16 passed | public UI/API history regression |
+| 최종 compileall·diff check | PASS | temporary bytecode prefix 사용 |
 | D드라이브 pre/post | 동일 | 읽기 전용 유지 |
 
 D드라이브 identity는 다음과 같다.
@@ -161,13 +182,13 @@ D드라이브 identity는 다음과 같다.
 - title: 수익성 judgment가 필요한 2개 기간을 serving하지 못함
 - severity: high
 - category: design
-- status: validated
+- status: resolved
 - evidence_ids: [E-001, E-002]
 - location: `src/disclosure_db/evidence_service.py`
 - impact: answer-safe 7-dimension Gold 120건과 유효 Recall/embedding gate를 만들 수 없다.
 - confidence: high
 - repro_steps: Task 3 Gold 빌더를 실제 read-only DB 세 개로 실행하고 profitability coverage 오류를 확인한다.
-- remediation: dimension slot 계약의 최소 기간 수를 structured subquery에 전달하고 current lookup 회귀를 고정한다.
+- remediation: 완료. dimension slot 계약의 최소 기간 수를 전달하고, account concept별 독립 조회와 cross-slot statement-type 분리를 회귀로 고정했다.
 
 ### P-001
 
@@ -194,4 +215,4 @@ D드라이브 identity는 다음과 같다.
 
 ## Loop 1 이후
 
-Loop 1이 유효한 GO 또는 근거 있는 NO-GO로 확정된 뒤에만 계획의 Task 4 `EvidenceGraph`부터 진행한다. 현재 사용자 요청에 따라 Task 4~10과 NCP 재배포는 시작하지 않았다.
+Loop 1 sparse 품질은 유효한 NO-GO이며 dense pilot은 `BLOCKED_EXTERNAL`이다. 다음 작업자는 먼저 residual text 36건에 대한 승인된 provider 비용 실행을 수행한다. 채택 gate를 통과해 Loop 1이 GO가 된 뒤 계획의 Task 4 `EvidenceGraph`로 진행한다. 이번 완료 범위에서는 Task 4~10과 NCP 재배포를 시작하지 않았다.

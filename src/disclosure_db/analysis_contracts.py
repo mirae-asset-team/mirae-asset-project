@@ -60,6 +60,8 @@ class EvidenceSlot:
     def __post_init__(self) -> None:
         object.__setattr__(self, "report_types", _normalized_string_tuple(self.report_types, "report_types"))
         object.__setattr__(self, "search_concepts", _normalized_string_tuple(self.search_concepts, "search_concepts"))
+        if type(self.min_periods) is not int or self.min_periods <= 0:
+            raise ValueError("min_periods must be a positive integer")
 
 
 def _normalized_evidence_slots(value: object) -> tuple[EvidenceSlot, ...]:
@@ -92,6 +94,14 @@ class QueryPlanSnapshot:
     requires_complete_evidence_set: bool = False
     filing_date: str | None = None
     account_id: str | None = None
+    account_status: str = "unknown"
+    account_match_type: str | None = None
+    account_support_level: str | None = None
+    account_retrieval_route: str | None = None
+    account_candidates: tuple[str, ...] = ()
+    account_warning: str | None = None
+    required_account_ids: tuple[str, ...] = ()
+    account_formula: Mapping[str, object] | None = None
     latest_period_count: int = 1
     threshold_value: Decimal | None = None
     threshold_inclusive: bool = False
@@ -102,6 +112,12 @@ class QueryPlanSnapshot:
         object.__setattr__(self, "reason_codes", _normalized_string_tuple(self.reason_codes, "reason_codes"))
         object.__setattr__(self, "predicate_terms", _normalized_string_tuple(self.predicate_terms, "predicate_terms"))
         object.__setattr__(self, "target_periods", _normalized_target_periods(self.target_periods))
+        object.__setattr__(self, "account_candidates", _normalized_string_tuple(self.account_candidates, "account_candidates"))
+        object.__setattr__(self, "required_account_ids", _normalized_string_tuple(self.required_account_ids, "required_account_ids"))
+        if self.account_formula is not None:
+            if not isinstance(self.account_formula, Mapping):
+                raise ValueError("account_formula must be a mapping or None")
+            object.__setattr__(self, "account_formula", MappingProxyType(dict(self.account_formula)))
 
     @classmethod
     def from_query_plan(cls, plan: QueryPlan) -> "QueryPlanSnapshot":
@@ -129,6 +145,14 @@ class QueryPlanSnapshot:
             requires_complete_evidence_set=plan.requires_complete_evidence_set,
             filing_date=plan.filing_date,
             account_id=plan.account_id,
+            account_status=plan.account_status,
+            account_match_type=plan.account_match_type,
+            account_support_level=plan.account_support_level,
+            account_retrieval_route=plan.account_retrieval_route,
+            account_candidates=tuple(plan.account_candidates),
+            account_warning=plan.account_warning,
+            required_account_ids=tuple(plan.required_account_ids),
+            account_formula=dict(plan.account_formula) if plan.account_formula is not None else None,
             latest_period_count=plan.latest_period_count,
             threshold_value=plan.threshold_value,
             threshold_inclusive=plan.threshold_inclusive,

@@ -1,29 +1,34 @@
 {
   "artifact": "freeform_gold.agent_audited.jsonl",
-  "case_count": 126,
-  "content_sha256": "01290ef5833eb1a6b1838ca92abf4fad1f9b5a4ab7b92ec93ebf67e174d86f57",
-  "contract_sha256": "e72d62a170d40bf0f859d751fd4918acaaa54cb1126f0aa297769446f11bbd6e",
+  "case_count": 120,
+  "content_sha256": "9a0b21a429db7f1ea3fa41c9e040f67d9f8146ecc143a725ee02cd4fbf8940be",
+  "contract_sha256": "a5b2edaa6db165916fbb87f12c9238e4ed7c7929f5f78fd42ee9c132f435983e",
   "database_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563",
   "dimension_counts": {
     "business_risk": 18,
     "contract_change": 18,
-    "correction_materiality": 18,
+    "correction_materiality": 12,
     "financing_pressure": 18,
-    "governance_signal": 18,
-    "management_discussion": 18,
+    "governance_signal": 24,
+    "management_discussion": 12,
     "profitability_financial_health": 18
   },
+  "overlay_sha256": "a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55",
   "review_status": "agent_audited",
   "route_counts": {
-    "event": 54,
-    "financial": 18,
+    "event": 18,
+    "mixed": 48,
     "text": 54
   },
   "schema_version": "1.0.0",
+  "search_index_sha256": "e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793",
   "source_gold_sha256": "04377097c8aa0f159b87c26c787d0d0bf84a1579cf5e07d6f94fd9cfc9e2d681",
+  "source_record_count": 19,
   "split_counts": {
-    "test": 126
+    "test": 120
   },
-  "target_count": 126,
-  "templates_sha256": "6f405c4fb96978bfe73ee047ede69e0b962fc1983be819db6127c097eea29dd7"
+  "target_count": 234,
+  "target_selection": "independent_ledger_enumeration",
+  "templates_sha256": "d621e953ae90a05b02e49891d14cc1123983593d5c6aaa98e13a4718feaefc3e",
+  "unique_target_count": 36
 }

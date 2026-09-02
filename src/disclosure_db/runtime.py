@@ -8,6 +8,15 @@ from pathlib import Path
 from typing import Mapping
 
 from .agent import AgentSettings, DisclosureAgent
+from .dense_client import EvidenceServiceDenseRetriever
+from .disclosure_tools import HybridSearch, build_tool_registry
+from .hcx_function_calling import (
+    HcxFunctionCallingService,
+    HcxFunctionClient,
+    HyperClovaFunctionClient,
+)
+from .hybrid_retrieval import HybridRetriever, SparseRetriever
+from .question_routing import DeterministicQuestionRouter
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,3 +69,76 @@ class RuntimeConfig:
 def build_agent(config: RuntimeConfig) -> DisclosureAgent:
     config.validate()
     return DisclosureAgent(config.to_agent_settings())
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeServices:
+    """Fully composed serving dependencies for the existing and HCX routes."""
+
+    agent: DisclosureAgent
+    function_calling: HcxFunctionCallingService
+
+
+def build_function_calling_service(
+    agent: DisclosureAgent,
+    *,
+    client: HcxFunctionClient | None = None,
+    hybrid_retriever: HybridSearch | None = None,
+) -> HcxFunctionCallingService:
+    """Wire ToolRegistry to the agent's attested read-only serving inputs."""
+
+    evidence_service = agent.evidence_service
+    if hybrid_retriever is None:
+        search_database = getattr(evidence_service, "search_database", None)
+        attestation = getattr(evidence_service, "attestation", None)
+        if search_database is None:
+            raise ValueError("function_calling_search_database_not_configured")
+        if attestation is None:
+            raise ValueError("function_calling_attestation_not_configured")
+        sparse = SparseRetriever.open(
+            search_database,
+            base_sha256=attestation.sha256,
+            expected_base_size=attestation.size_bytes,
+        )
+        remote_dense = (
+            EvidenceServiceDenseRetriever(evidence_service)
+            if getattr(evidence_service, "dense_client", None) is not None
+            else None
+        )
+        hybrid_retriever = HybridRetriever(sparse, remote_dense)  # type: ignore[arg-type]
+    registry = build_tool_registry(
+        hybrid_retriever=hybrid_retriever,  # type: ignore[arg-type]
+        evidence_service=evidence_service,
+        base_database=Path(evidence_service.base_database),
+    )
+    candidate_loader = getattr(evidence_service, "company_candidates", None)
+    router = DeterministicQuestionRouter(candidate_loader()) if callable(candidate_loader) else None
+    return HcxFunctionCallingService(
+        registry,
+        client if client is not None else HyperClovaFunctionClient(),
+        router=router,
+    )
+
+
+def build_runtime_services(
+    settings: AgentSettings,
+    *,
+    client: HcxFunctionClient | None = None,
+    hybrid_retriever: HybridSearch | None = None,
+) -> RuntimeServices:
+    """Build the existing agent and the separate HCX Function Calling path."""
+
+    agent = DisclosureAgent(settings)
+    function_calling = build_function_calling_service(
+        agent, client=client, hybrid_retriever=hybrid_retriever,
+    )
+    return RuntimeServices(agent, function_calling)
+
+
+__all__ = [
+    "RuntimeConfig",
+    "RuntimeServices",
+    "build_agent",
+    "build_function_calling_service",
+    "build_runtime_services",
+]

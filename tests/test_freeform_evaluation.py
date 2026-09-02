@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 import sqlite3
@@ -17,22 +18,14 @@ from disclosure_db.freeform_evaluation import (
     derive_freeform_source_records,
     evaluation_exclusion_reason,
     score_freeform_case,
-    select_items_covering_periods,
+    select_period_covered_financial_candidates,
     semantic_summary_sha256,
+    text_candidate_version_is_admitted,
     text_target_is_answer_safe,
+    validate_freeform_ledger_identities,
     validate_case_plan,
     validate_freeform_gold,
 )
-
-
-def test_select_items_covering_periods_uses_serving_result_union() -> None:
-    first = {"evidence_id": "ev-2024", "periods": (("2024-01-01", "2024-12-31", None),)}
-    second = {"evidence_id": "ev-2023", "periods": (("2023-01-01", "2023-12-31", None),)}
-    same_year = {"evidence_id": "ev-opinc", "periods": (("2024-01-01", "2024-12-31", None),)}
-
-    assert select_items_covering_periods([first], minimum=2) == []
-    assert select_items_covering_periods([first, same_year], minimum=2) == []
-    assert select_items_covering_periods([first, second], minimum=2) == [first, second]
 
 
 DIMENSIONS = (
@@ -306,13 +299,85 @@ def test_manifest_contains_hashes_and_counts_but_no_content_or_credentials() -> 
         contract_sha256="b" * 64,
         templates_sha256="c" * 64,
         database_sha256="d" * 64,
+        overlay_sha256="e" * 64,
+        search_index_sha256="f" * 64,
     )
     rendered = json.dumps(manifest, ensure_ascii=False).lower()
 
     assert manifest["case_count"] == 2
+    assert manifest["source_record_count"] == 1
+    assert manifest["unique_target_count"] == 1
+    assert manifest["target_selection"] == "independent_ledger_enumeration"
+    assert manifest["overlay_sha256"] == "e" * 64
+    assert manifest["search_index_sha256"] == "f" * 64
     assert manifest["content_sha256"] == canonical_sha256(rows)
     for forbidden in ("question", "answer", "excerpt", "credential", "secret", "api_key"):
         assert forbidden not in rendered
+
+
+def test_source_record_derivation_does_not_select_targets_from_serving_top_twenty() -> None:
+    source = inspect.getsource(derive_freeform_source_records)
+
+    assert ".search_analysis(" not in source
+
+
+@pytest.mark.parametrize(
+    ("slot_id", "is_current", "lineage_status", "expected"),
+    [
+        ("original_disclosure", False, "root", True),
+        ("original_disclosure", False, "resolved", False),
+        ("original_disclosure", True, "root", False),
+        ("effective_correction", True, "resolved", True),
+        ("effective_correction", True, "root", True),
+        ("effective_correction", False, "resolved", False),
+        ("disclosed_risk_factors", True, "root", True),
+        ("disclosed_risk_factors", False, "root", False),
+    ],
+)
+def test_text_candidate_version_admission_is_root_strict_for_original(
+    slot_id: str, is_current: bool, lineage_status: str, expected: bool,
+) -> None:
+    assert text_candidate_version_is_admitted(
+        slot_id, is_current=is_current, lineage_status=lineage_status,
+    ) is expected
+
+
+def test_freeform_ledger_identity_validation_fails_closed_on_overlay_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "disclosure_db.freeform_evaluation.overlay_matches_base",
+        lambda *_args, **_kwargs: False,
+    )
+
+    with pytest.raises(ValueError, match="overlay_base_attestation_mismatch"):
+        validate_freeform_ledger_identities(
+            Path("base.sqlite"), Path("overlay.sqlite"), Path("search.sqlite"),
+            type("Attestation", (), {"sha256": "a" * 64, "size_bytes": 123})(),
+        )
+
+
+def test_freeform_ledger_identity_validation_fails_closed_on_search_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "disclosure_db.freeform_evaluation.overlay_matches_base",
+        lambda *_args, **_kwargs: True,
+    )
+
+    class RejectingSearchIndex:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            raise ValueError("search index base attestation mismatch")
+
+    monkeypatch.setattr(
+        "disclosure_db.freeform_evaluation.SafeSearchIndex", RejectingSearchIndex,
+    )
+
+    with pytest.raises(ValueError, match="search_index_attestation_mismatch"):
+        validate_freeform_ledger_identities(
+            Path("base.sqlite"), Path("overlay.sqlite"), Path("search.sqlite"),
+            type("Attestation", (), {"sha256": "a" * 64, "size_bytes": 123})(),
+        )
 
 
 def test_validation_rejects_human_verified_and_duplicate_case_ids() -> None:
@@ -475,6 +540,53 @@ def test_source_record_derivation_refuses_missing_serving_identity_databases() -
             derive_freeform_source_records(audited_gold, Path("unused.sqlite"), contract)
     finally:
         connection.close()
+
+
+def test_financial_source_selection_uses_same_account_across_distinct_periods() -> None:
+    candidates = [
+        {
+            "evidence_id": "revenue-2025", "filing_id": "filing-current",
+            "financial_points": [{"account_id": "revenue", "period": ("2025-01-01", "2025-12-31", None)}],
+        },
+        {
+            "evidence_id": "operating-income-2025", "filing_id": "filing-current",
+            "financial_points": [{"account_id": "operating_income", "period": ("2025-01-01", "2025-12-31", None)}],
+        },
+        {
+            "evidence_id": "revenue-2024", "filing_id": "filing-current",
+            "financial_points": [{"account_id": "revenue", "period": ("2024-01-01", "2024-12-31", None)}],
+        },
+    ]
+
+    selected = select_period_covered_financial_candidates(candidates, minimum_periods=2)
+
+    assert [item["evidence_id"] for item in selected] == ["revenue-2025", "revenue-2024"]
+
+
+def test_financial_source_selection_is_order_independent_and_preserves_account_period_pairs() -> None:
+    candidates = [
+        {
+            "evidence_id": "revenue-2024", "filing_id": "filing-current",
+            "financial_points": [{"account_id": "revenue", "period": ("2024-01-01", "2024-12-31", None)}],
+        },
+        {
+            "evidence_id": "mixed", "filing_id": "filing-current",
+            "financial_points": [
+                {"account_id": "revenue", "period": ("2025-01-01", "2025-12-31", None)},
+                {"account_id": "operating_income", "period": ("2023-01-01", "2023-12-31", None)},
+            ],
+        },
+        {
+            "evidence_id": "income-2025", "filing_id": "filing-current",
+            "financial_points": [{"account_id": "operating_income", "period": ("2025-01-01", "2025-12-31", None)}],
+        },
+    ]
+
+    forward = select_period_covered_financial_candidates(candidates, minimum_periods=2)
+    reverse = select_period_covered_financial_candidates(list(reversed(candidates)), minimum_periods=2)
+
+    assert [item["evidence_id"] for item in forward] == ["income-2025", "mixed"]
+    assert [item["evidence_id"] for item in reverse] == ["income-2025", "mixed"]
 
 
 def test_semantic_summary_hash_ignores_only_measurement_fields() -> None:

@@ -1,16 +1,13 @@
 import {
   answerText,
   askDisclosure,
+  blockedReason,
+  citationTitle,
   classifyAnswer,
   dartUrl,
-  evidenceLabel,
-  fetchFinancialCoverage,
-  financialFactLabel,
-  financialValueLabel,
-  healthLabel,
-  locatorLabel,
-  metricCoverageRows,
-  providerLabel,
+  evidenceStatus,
+  evidenceStatusLabel,
+  loadingLabel,
 } from "/static/api.js";
 import {
   appendMessage,
@@ -22,14 +19,9 @@ import {
   searchConversations,
 } from "/static/history.js";
 
-const STORAGE_KEY = "mirae-disclosure-agent-history-v1";
-const REQUEST_TIMEOUT_MS = 30_000;
+const STORAGE_KEY = "mirae-disclosure-hcx-history-v1";
+const REQUEST_TIMEOUT_MS = 60_000;
 
-const status = document.querySelector("#service-status");
-const providerMode = document.querySelector("#provider-mode");
-const corpusRevision = document.querySelector("#corpus-revision");
-const legalCompanyCount = document.querySelector("#legal-company-count");
-const financialCoverageList = document.querySelector("#financial-coverage-list");
 const appShell = document.querySelector("#app-shell");
 const sidebar = document.querySelector("#sidebar");
 const sidebarToggle = document.querySelector("#sidebar-toggle");
@@ -42,14 +34,14 @@ const messages = document.querySelector("#messages");
 const questionForm = document.querySelector("#question-form");
 const questionInput = document.querySelector("#question-input");
 const sendQuestion = document.querySelector("#send-question");
+const sendLabel = document.querySelector(".send-label");
+const serviceStatus = document.querySelector("#service-status");
 const exampleButtons = document.querySelectorAll("[data-example]");
 
 let store = loadStore();
 let selectedConversationId = store.conversations[0]?.id ?? null;
 let transientFailure = null;
 let requestPending = false;
-let healthSnapshot = null;
-let coverageSnapshot = null;
 
 function loadStore() {
   try {
@@ -64,8 +56,7 @@ function saveStore() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
   } catch {
-    status.textContent = "이 브라우저에서는 대화 기록을 저장할 수 없습니다.";
-    status.dataset.state = "warning";
+    setServiceStatus("기록 저장 불가", "error");
   }
 }
 
@@ -73,9 +64,15 @@ function selectedConversation() {
   return store.conversations.find(({id}) => id === selectedConversationId) ?? null;
 }
 
+function isMobile() {
+  return window.matchMedia("(max-width: 48rem)").matches;
+}
+
 function closeSidebar(returnFocus = false) {
   sidebar.classList.remove("sidebar-open");
-  appShell.classList.add("sidebar-collapsed");
+  if (!isMobile()) {
+    appShell.classList.add("sidebar-collapsed");
+  }
   sidebarToggle.setAttribute("aria-expanded", "false");
   if (returnFocus && sidebarToggle.offsetParent !== null) {
     sidebarToggle.focus();
@@ -83,164 +80,198 @@ function closeSidebar(returnFocus = false) {
 }
 
 function setSidebarOpen(open) {
-  const mobile = window.matchMedia("(max-width: 44rem)").matches;
-  sidebar.classList.toggle("sidebar-open", mobile && open);
-  appShell.classList.toggle("sidebar-collapsed", !mobile && !open);
+  sidebar.classList.toggle("sidebar-open", isMobile() && open);
+  appShell.classList.toggle("sidebar-collapsed", !isMobile() && !open);
   sidebarToggle.setAttribute("aria-expanded", String(open));
+}
+
+function setServiceStatus(text, state) {
+  serviceStatus.replaceChildren();
+  const dot = document.createElement("span");
+  dot.className = "status-dot";
+  dot.setAttribute("aria-hidden", "true");
+  serviceStatus.append(dot, document.createTextNode(text));
+  serviceStatus.dataset.state = state;
 }
 
 function addText(parent, tagName, className, text) {
   const element = document.createElement(tagName);
-  element.className = className;
+  if (className) {
+    element.className = className;
+  }
   element.textContent = text;
   parent.append(element);
   return element;
 }
 
-function renderEvidence(parent, evidence) {
-  if (!Array.isArray(evidence) || evidence.length === 0) {
+function renderCitation(citation, index) {
+  const item = document.createElement("li");
+  item.className = "citation-card";
+
+  const header = document.createElement("div");
+  header.className = "citation-card-header";
+  addText(header, "span", "citation-index", String(index + 1).padStart(2, "0"));
+  const title = document.createElement("p");
+  title.className = "citation-title";
+  title.textContent = citationTitle(citation) || "DART 공시 근거";
+  if (typeof citation.filed_at === "string" && citation.filed_at) {
+    addText(title, "span", "citation-date", citation.filed_at);
+  }
+  header.append(title);
+  item.append(header);
+
+  if (typeof citation.rcept_no === "string" && citation.rcept_no) {
+    const receipt = document.createElement("div");
+    receipt.className = "receipt-row";
+    addText(receipt, "span", "", "접수번호");
+    addText(receipt, "code", "", citation.rcept_no);
+    item.append(receipt);
+  }
+
+  const filingUrl = dartUrl(citation.rcept_no);
+  if (filingUrl) {
+    const link = document.createElement("a");
+    link.className = "dart-link";
+    link.href = filingUrl;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "DART 원문 열기 ↗";
+    item.append(link);
+  }
+  return item;
+}
+
+function renderCitations(parent, citations) {
+  if (!Array.isArray(citations) || citations.length === 0) {
     return;
   }
-  const section = document.createElement("details");
-  section.className = "evidence-section";
-  addText(section, "summary", "evidence-heading", `공시 근거 ${evidence.length}건`);
+  const section = document.createElement("section");
+  section.className = "citation-section";
+  const heading = document.createElement("div");
+  heading.className = "citation-heading";
+  addText(heading, "h4", "", "근거 공시");
+  addText(heading, "span", "", `${citations.length}건의 검증된 citation`);
+  section.append(heading);
 
   const list = document.createElement("ol");
-  list.className = "evidence-list";
-  for (const item of evidence) {
-    const evidenceItem = document.createElement("li");
-    addText(evidenceItem, "strong", "evidence-label", evidenceLabel(item) || "공시 근거");
-    if (typeof item.excerpt === "string" && item.excerpt.trim()) {
-      addText(evidenceItem, "p", "evidence-excerpt", item.excerpt.trim());
-    }
-    const location = locatorLabel(item.locator);
-    if (location) {
-      addText(evidenceItem, "p", "evidence-meta", location);
-    }
-    const filingUrl = dartUrl(item.receipt_no);
-    if (filingUrl) {
-      const link = document.createElement("a");
-      link.className = "evidence-link";
-      link.href = filingUrl;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      link.textContent = "DART 원문 열기";
-      evidenceItem.append(link);
-    }
-    list.append(evidenceItem);
-  }
+  list.className = "citation-list";
+  citations.forEach((citation, index) => list.append(renderCitation(citation, index)));
   section.append(list);
   parent.append(section);
 }
 
-function renderFinancialFacts(parent, financialFacts, evidence) {
-  if (!Array.isArray(financialFacts) || financialFacts.length === 0) {
-    return;
-  }
-  const section = document.createElement("details");
-  section.className = "financial-facts-section";
-  section.open = financialFacts.length <= 3;
-  addText(section, "summary", "financial-facts-heading", `재무 수치·근거 ${financialFacts.length}건`);
-  const list = document.createElement("div");
-  list.className = "financial-facts-list";
-  for (const fact of financialFacts) {
-    const card = document.createElement("article");
-    card.className = "financial-fact-card";
-    addText(card, "p", "financial-fact-label", financialFactLabel(fact));
-    addText(card, "strong", "financial-fact-value", financialValueLabel(fact));
-    const filingName = fact.report_name_raw || "사업보고서";
-    const filingMeta = [filingName, fact.filed_at, fact.filing_id].filter(Boolean).join(" · ");
-    if (filingMeta) {
-      addText(card, "p", "financial-fact-filing", filingMeta);
-    }
-    const evidenceIds = Array.isArray(fact.evidence_ids) ? fact.evidence_ids : [];
-    const matching = Array.isArray(evidence)
-      ? evidence.filter((item) => evidenceIds.includes(item.evidence_id))
-      : [];
-    const excerpts = matching.length > 0
-      ? matching
-      : (Array.isArray(fact.evidence_texts)
-        ? fact.evidence_texts.map((excerpt) => ({excerpt}))
-        : []);
-    if (excerpts.length > 0) {
-      const source = document.createElement("details");
-      source.className = "financial-fact-source";
-      addText(source, "summary", "", "근거 표 셀 보기");
-      for (const item of excerpts) {
-        if (typeof item.excerpt === "string" && item.excerpt.trim()) {
-          addText(source, "p", "evidence-excerpt", item.excerpt.trim());
-        }
-        const location = locatorLabel(item.locator);
-        if (location) {
-          addText(source, "p", "evidence-meta", location);
-        }
-      }
-      card.append(source);
-    }
-    list.append(card);
-  }
-  section.append(list);
-  parent.append(section);
-}
-
-function renderMessageCoverage(parent, coverage) {
-  const rows = metricCoverageRows(coverage);
-  if (rows.length === 0) {
-    return;
-  }
-  const details = document.createElement("details");
-  details.className = "message-coverage";
-  addText(details, "summary", "", "전체 데이터 검증 현황");
-  const list = document.createElement("ul");
-  for (const row of rows) {
-    addText(
-      list,
-      "li",
-      row.complete ? "coverage-complete" : "coverage-incomplete",
-      `${row.label} ${row.validated}/${row.expected}개 법인`,
-    );
-  }
-  details.append(list);
-  parent.append(details);
-}
-
-function renderResponseDetails(parent, message) {
+function renderMeta(parent, message) {
   const values = [
-    ["요청 ID", message.request_id],
     ["응답 시간", typeof message.latency_ms === "number" ? `${message.latency_ms} ms` : null],
-    ["판정 코드", Array.isArray(message.reason_codes) ? message.reason_codes.join(", ") : null],
-  ].filter(([, value]) => value);
+  ].filter(([, value]) => value !== null && value !== undefined && value !== "");
   if (values.length === 0) {
     return;
   }
-
-  const details = document.createElement("details");
-  details.className = "response-details";
-  addText(details, "summary", "", "응답 정보");
-  const list = document.createElement("dl");
+  const strip = document.createElement("div");
+  strip.className = "meta-strip";
   for (const [label, value] of values) {
-    addText(list, "dt", "", label);
-    addText(list, "dd", "", value);
+    const row = document.createElement("span");
+    row.append(document.createTextNode(`${label} `));
+    addText(row, "code", "", String(value));
+    strip.append(row);
   }
-  details.append(list);
-  parent.append(details);
+  parent.append(strip);
+}
+
+function renderAssistant(message) {
+  const item = document.createElement("li");
+  item.className = "message message-assistant";
+  const answered = message.answer_state === "answered";
+  const currentEvidenceStatus = message.evidence_status || "unknown";
+
+  const header = document.createElement("div");
+  header.className = "answer-header";
+  const blockedTitle = message.recommended_action === "ask_clarification"
+    ? "질문을 조금 더 구체적으로 알려주세요"
+    : message.unavailable
+      ? "현재 제공 범위 밖의 질문입니다"
+      : "답변을 제공할 수 없습니다";
+  addText(header, "h3", "", answered ? "공시 기반 답변" : blockedTitle);
+  addText(
+    header,
+    "span",
+    `answer-badge ${answered ? "is-answered" : "is-blocked"}`,
+    answered ? "답변 허용" : "답변 불가",
+  );
+  addText(
+    header,
+    "span",
+    `evidence-badge is-${currentEvidenceStatus}`,
+    evidenceStatusLabel(currentEvidenceStatus),
+  );
+  item.append(header);
+
+  if (answered) {
+    const body = document.createElement("div");
+    body.className = "answer-body";
+    addText(body, "p", "", message.text);
+    item.append(body);
+  } else {
+    const panel = document.createElement("div");
+    panel.className = "blocked-panel";
+    addText(
+      panel,
+      "strong",
+      "",
+      message.recommended_action === "ask_clarification"
+        ? "확인할 계정을 선택해 주세요."
+        : message.unavailable
+          ? "지원 가능한 공시 범위를 안내합니다."
+          : "근거 검증 단계에서 답변이 차단되었습니다.",
+    );
+    addText(panel, "p", "", message.blocked_reason || message.text);
+    item.append(panel);
+  }
+
+  renderCitations(item, message.citations);
+  renderMeta(item, message);
+  return item;
 }
 
 function renderMessage(message) {
+  if (message.role === "assistant") {
+    return renderAssistant(message);
+  }
   const item = document.createElement("li");
-  item.className = `message message-${message.role}`;
-  if (message.role === "assistant") {
-    const badgeText = message.answer_state === "verified" ? "근거 확인됨" : "답변 보류";
-    addText(item, "span", `answer-badge answer-${message.answer_state || "abstained"}`, badgeText);
-  }
-  addText(item, "p", "message-text", message.text);
-  if (message.role === "assistant") {
-    renderFinancialFacts(item, message.financial_facts, message.evidence);
-    renderMessageCoverage(item, message.coverage);
-    renderEvidence(item, message.evidence);
-    renderResponseDetails(item, message);
-  }
+  item.className = "message message-user";
+  addText(item, "p", "", message.text);
   return item;
+}
+
+function renderEmptyState() {
+  const item = document.createElement("li");
+  item.className = "empty-state";
+  addText(item, "div", "empty-icon", "D");
+  addText(item, "h2", "", "공시에서 확인하고 싶은 내용을 질문하세요");
+  addText(
+    item,
+    "p",
+    "",
+    "회사명, 기간, 재무계정 또는 공시 유형을 함께 입력하면 더 정확하게 찾을 수 있습니다.",
+  );
+  messages.append(item);
+}
+
+function renderLoading() {
+  if (!requestPending || !selectedConversationId) {
+    return;
+  }
+  const item = document.createElement("li");
+  item.className = "loading-card";
+  item.setAttribute("role", "status");
+  const dots = document.createElement("span");
+  dots.className = "loading-dots";
+  for (let index = 0; index < 3; index += 1) {
+    dots.append(document.createElement("span"));
+  }
+  dots.setAttribute("aria-hidden", "true");
+  item.append(dots, document.createTextNode("공시와 재무 근거를 확인하고 답변을 작성하고 있습니다."));
+  messages.append(item);
 }
 
 function renderFailure() {
@@ -250,7 +281,8 @@ function renderFailure() {
   const item = document.createElement("li");
   item.className = "message message-error";
   item.setAttribute("role", "alert");
-  addText(item, "p", "message-text", transientFailure.error.message);
+  addText(item, "p", "error-title", "요청을 완료하지 못했습니다.");
+  addText(item, "p", "", transientFailure.error.message);
   if (transientFailure.error.retryable) {
     const retry = document.createElement("button");
     retry.type = "button";
@@ -260,38 +292,6 @@ function renderFailure() {
     retry.addEventListener("click", () => submitQuestion(transientFailure.question, false));
     item.append(retry);
   }
-  messages.append(item);
-}
-
-function renderEmptyState() {
-  const item = document.createElement("li");
-  item.className = "empty-message";
-  addText(item, "p", "empty-kicker", "DISCLOSURE RESEARCH");
-  addText(item, "h2", "", "기업 공시를 근거와 함께 살펴보세요");
-  addText(
-    item,
-    "p",
-    "",
-    "회사명과 궁금한 항목을 함께 입력하면 검증 가능한 공시만 찾아 답합니다.",
-  );
-  const facts = document.createElement("div");
-  facts.id = "corpus-facts";
-  facts.className = "corpus-facts";
-  facts.setAttribute("aria-label", "공시 데이터 특징");
-  const companyFact = addText(
-    facts,
-    "span",
-    "",
-    coverageSnapshot?.snapshot
-      ? `${healthSnapshot?.company_count ?? coverageSnapshot.snapshot.searchable_alias_count ?? 0}개 검색 대상 · ${coverageSnapshot.snapshot.source_company_count ?? 0}개 법인`
-      : healthSnapshot?.ready === true
-        ? `${healthSnapshot.company_count ?? 0}개 검색명`
-      : "검색 가능한 기업 확인 중",
-  );
-  companyFact.id = "company-count-fact";
-  addText(facts, "span", "", "정정 공시 계보 확인");
-  addText(facts, "span", "", "인용 근거 열람");
-  item.append(facts);
   messages.append(item);
 }
 
@@ -305,8 +305,11 @@ function renderMessages() {
   for (const message of conversation.messages) {
     messages.append(renderMessage(message));
   }
+  renderLoading();
   renderFailure();
-  messages.scrollTop = messages.scrollHeight;
+  window.requestAnimationFrame(() => {
+    messages.lastElementChild?.scrollIntoView({behavior: "auto", block: "nearest"});
+  });
 }
 
 function renderConversations() {
@@ -315,24 +318,26 @@ function renderConversations() {
     const item = document.createElement("li");
     item.className = "conversation-row";
 
-    const selectButton = document.createElement("button");
-    selectButton.type = "button";
-    selectButton.className = "conversation-select";
-    selectButton.textContent = conversation.title || "제목 없는 대화";
-    selectButton.setAttribute("aria-current", String(conversation.id === selectedConversationId));
-    selectButton.addEventListener("click", () => {
+    const select = document.createElement("button");
+    select.type = "button";
+    select.className = "conversation-select";
+    select.textContent = conversation.title || "제목 없는 질문";
+    select.setAttribute("aria-current", String(conversation.id === selectedConversationId));
+    select.addEventListener("click", () => {
       selectedConversationId = conversation.id;
       transientFailure = null;
-      closeSidebar(true);
+      if (isMobile()) {
+        closeSidebar(true);
+      }
       render();
     });
 
-    const deleteButton = document.createElement("button");
-    deleteButton.type = "button";
-    deleteButton.className = "conversation-delete";
-    deleteButton.textContent = "삭제";
-    deleteButton.setAttribute("aria-label", `${conversation.title || "제목 없는 대화"} 삭제`);
-    deleteButton.addEventListener("click", () => {
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "conversation-delete";
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `${conversation.title || "제목 없는 질문"} 삭제`);
+    remove.addEventListener("click", () => {
       store = deleteConversation(store, conversation.id);
       if (selectedConversationId === conversation.id) {
         selectedConversationId = store.conversations[0]?.id ?? null;
@@ -341,8 +346,7 @@ function renderConversations() {
       saveStore();
       render();
     });
-
-    item.append(selectButton, deleteButton);
+    item.append(select, remove);
     conversationList.append(item);
   }
 }
@@ -358,7 +362,8 @@ function setPending(pending) {
   questionInput.disabled = pending;
   questionForm.setAttribute("aria-busy", String(pending));
   messages.setAttribute("aria-busy", String(pending));
-  sendQuestion.textContent = pending ? "확인 중…" : "질문하기";
+  sendLabel.textContent = pending ? "확인 중" : "질문하기";
+  setServiceStatus(loadingLabel(pending), pending ? "busy" : "idle");
 }
 
 async function submitQuestion(question, appendUser = true) {
@@ -378,30 +383,31 @@ async function submitQuestion(question, appendUser = true) {
     saveStore();
   }
   const conversationId = selectedConversationId;
-
   transientFailure = null;
   setPending(true);
   render();
+
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const body = await askDisclosure(text, {signal: controller.signal});
+    const answerState = classifyAnswer(body);
     store = appendMessage(store, conversationId, {
       role: "assistant",
       text: answerText(body),
       created_at: new Date().toISOString(),
-      answer_state: classifyAnswer(body),
-      evidence: Array.isArray(body.evidence) ? body.evidence : [],
-      financial_facts: Array.isArray(body.financial_facts) ? body.financial_facts : [],
-      coverage: body.coverage && typeof body.coverage === "object" ? body.coverage : {},
-      aggregate_result: body.aggregate_result && typeof body.aggregate_result === "object"
-        ? body.aggregate_result
-        : {},
-      request_id: body.request_id,
-      latency_ms: body.latency_ms,
-      reason_codes: Array.isArray(body.reason_codes) ? body.reason_codes : [],
+      answer_state: answerState,
+      status: body.status,
+      answer_allowed: body.answer_allowed,
+      evidence_status: evidenceStatus(body),
+      blocked_reason: answerState === "blocked" ? blockedReason(body) : null,
+      recommended_action: body.recommended_action,
+      unavailable: Array.isArray(body.warnings) && body.warnings.includes("deterministic_unavailable"),
+      citations: Array.isArray(body.citations) ? body.citations : [],
+      latency_ms: typeof body.latency_ms === "number" ? body.latency_ms : null,
     });
     saveStore();
+    setServiceStatus(answerState === "answered" ? "답변 완료" : "근거 부족", "ready");
   } catch (error) {
     const safeError = error
       && typeof error.message === "string"
@@ -409,70 +415,17 @@ async function submitQuestion(question, appendUser = true) {
       ? error
       : {kind: "client_error", message: "응답을 처리하지 못했습니다.", retryable: true};
     transientFailure = {conversationId, question: text, error: safeError};
+    setServiceStatus("요청 오류", "error");
   } finally {
     window.clearTimeout(timeout);
-    setPending(false);
+    requestPending = false;
+    sendQuestion.disabled = false;
+    questionInput.disabled = false;
+    questionForm.setAttribute("aria-busy", "false");
+    messages.setAttribute("aria-busy", "false");
+    sendLabel.textContent = "질문하기";
     render();
     questionInput.focus();
-  }
-}
-
-function renderCoverageStatus() {
-  const snapshot = coverageSnapshot?.snapshot;
-  const rows = metricCoverageRows(coverageSnapshot);
-  if (!snapshot || rows.length === 0) {
-    legalCompanyCount.textContent = "재무 DB 법인 수 확인 불가";
-    financialCoverageList.replaceChildren();
-    addText(financialCoverageList, "li", "coverage-incomplete", "검증 현황 확인 불가");
-    return;
-  }
-  legalCompanyCount.textContent = [
-    `${healthSnapshot?.company_count ?? snapshot.searchable_alias_count ?? 0}개 검색 대상`,
-    `${snapshot.source_company_count ?? 0}개 법인`,
-    `${snapshot.selected_filing_company_count ?? 0}개 사업보고서 선택`,
-  ].join(" · ");
-  financialCoverageList.replaceChildren();
-  for (const row of rows) {
-    addText(
-      financialCoverageList,
-      "li",
-      row.complete ? "coverage-complete" : "coverage-incomplete",
-      `${row.label} ${row.validated}/${row.expected}`,
-    );
-  }
-}
-
-async function refreshCoverage() {
-  try {
-    coverageSnapshot = await fetchFinancialCoverage();
-  } catch {
-    coverageSnapshot = null;
-  }
-  renderCoverageStatus();
-  if (!selectedConversation()) {
-    renderMessages();
-  }
-}
-
-async function refreshHealth() {
-  try {
-    const response = await fetch("/health", {headers: {Accept: "application/json"}});
-    const body = response.ok ? await response.json() : {};
-    healthSnapshot = body;
-    status.textContent = healthLabel(body);
-    status.dataset.state = body.ready === true ? "ready" : "waiting";
-    providerMode.textContent = providerLabel(body.provider_configured === true);
-    corpusRevision.textContent = typeof body.corpus_revision === "string"
-      ? body.corpus_revision
-      : "확인 불가";
-    if (!selectedConversation()) {
-      renderMessages();
-    }
-  } catch {
-    status.textContent = "상태 확인 불가";
-    status.dataset.state = "warning";
-    providerMode.textContent = "답변 엔진 상태 확인 불가";
-    corpusRevision.textContent = "확인 불가";
   }
 }
 
@@ -480,7 +433,10 @@ newChat.addEventListener("click", () => {
   selectedConversationId = null;
   transientFailure = null;
   questionInput.value = "";
-  closeSidebar(true);
+  setServiceStatus("질문 준비됨", "idle");
+  if (isMobile()) {
+    closeSidebar(true);
+  }
   render();
   questionInput.focus();
 });
@@ -488,7 +444,7 @@ newChat.addEventListener("click", () => {
 historySearch.addEventListener("input", renderConversations);
 
 clearHistory.addEventListener("click", () => {
-  if (!window.confirm("이 브라우저에 저장된 모든 대화 기록을 삭제할까요?")) {
+  if (!window.confirm("이 브라우저에 저장된 질문 기록을 모두 삭제할까요?")) {
     return;
   }
   store = clearConversations();
@@ -499,17 +455,10 @@ clearHistory.addEventListener("click", () => {
 });
 
 sidebarToggle.addEventListener("click", () => {
-  const mobile = window.matchMedia("(max-width: 44rem)").matches;
-  const isOpen = mobile
-    ? sidebar.classList.contains("sidebar-open")
-    : !appShell.classList.contains("sidebar-collapsed");
-  const willOpen = !isOpen;
-  setSidebarOpen(willOpen);
-  if (willOpen) {
-    newChat.focus();
-  } else {
-    sidebarToggle.focus();
-  }
+  const open = isMobile()
+    ? !sidebar.classList.contains("sidebar-open")
+    : appShell.classList.contains("sidebar-collapsed");
+  setSidebarOpen(open);
 });
 
 sidebarClose.addEventListener("click", () => closeSidebar(true));
@@ -522,7 +471,7 @@ document.addEventListener("keydown", (event) => {
 
 for (const button of exampleButtons) {
   button.addEventListener("click", () => {
-    questionInput.value = button.dataset.example;
+    questionInput.value = button.dataset.example || "";
     questionInput.focus();
   });
 }
@@ -545,5 +494,3 @@ questionForm.addEventListener("submit", (event) => {
 });
 
 render();
-refreshHealth();
-refreshCoverage();

@@ -177,10 +177,18 @@ def agent_main() -> None:
             import uvicorn
         except ImportError as exc:
             raise SystemExit("serve requires: pip install 'miraeasset-disclosure-db[agent]'") from exc
-        from .agent import DisclosureAgent
         from .api import create_app
+        from .runtime import build_runtime_services
         settings, host, port = _serving_settings(args)
-        uvicorn.run(create_app(DisclosureAgent(settings)), host=host, port=port)
+        services = build_runtime_services(settings)
+        uvicorn.run(
+            create_app(
+                services.agent,
+                function_calling_service=services.function_calling,
+            ),
+            host=host,
+            port=port,
+        )
         return
     print(json.dumps(to_jsonable(result) if args.command in {"build-financial-overlay", "build-agent-overlay", "build-search-index"} else result, ensure_ascii=False, indent=2))
 

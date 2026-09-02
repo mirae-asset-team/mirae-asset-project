@@ -32,7 +32,7 @@ test("creates a normalized title and finds assistant message text", () => {
 });
 
 
-test("preserves structured financial evidence in saved assistant messages", () => {
+test("preserves Function Calling evidence in saved assistant messages", () => {
   let store = createConversation(
     emptyStore(),
     "삼성전자 매출액",
@@ -43,16 +43,25 @@ test("preserves structured financial evidence in saved assistant messages", () =
     role: "assistant",
     text: "검증된 답변",
     created_at: "2026-08-20T00:00:01.000Z",
-    financial_facts: [{account_id: "revenue", fiscal_year: 2025}],
-    coverage: {snapshot: {source_company_count: 70}},
-    aggregate_result: {operation: "count_above"},
+    status: "answered",
+    answer_allowed: true,
+    evidence_status: "sufficient",
+    tool_name: "get_financial_facts",
+    latency_ms: 842,
+    citations: [{
+      evidence_id: "ev-1",
+      rcept_no: "20250318000001",
+      report_name: "사업보고서",
+    }],
   });
 
   const saved = normalizeStore(JSON.parse(JSON.stringify(store)));
   const assistant = saved.conversations[0].messages[1];
-  assert.equal(assistant.financial_facts[0].account_id, "revenue");
-  assert.equal(assistant.coverage.snapshot.source_company_count, 70);
-  assert.equal(assistant.aggregate_result.operation, "count_above");
+  assert.equal(assistant.answer_allowed, true);
+  assert.equal(assistant.evidence_status, "sufficient");
+  assert.equal(assistant.tool_name, "get_financial_facts");
+  assert.equal(assistant.latency_ms, 842);
+  assert.equal(assistant.citations[0].rcept_no, "20250318000001");
 });
 
 

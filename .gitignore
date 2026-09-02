@@ -11,6 +11,7 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
+*.egg-info/
 
 # Notebooks
 .ipynb_checkpoints/
@@ -33,6 +34,7 @@ logs/
 tmp/
 *.log
 *.verification-failure.png
+eval/qa_results/
 
 # Official contest dataset (large local artifacts)
 data/public/official_dataset/raw/
@@ -42,6 +44,8 @@ data/public/official_dataset/source_archives/
 data/derived/*.sqlite
 data/derived/*.sqlite-*
 data/derived/*.sqlite.*
+data/derived/embedding_chunk_v1/
+data/derived/bge_m3_dense_pilot/
 
 # Downloaded source archives
 references/official/source_archives/

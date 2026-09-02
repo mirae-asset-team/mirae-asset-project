@@ -12,6 +12,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from .financial_accounts import load_financial_account_catalog, normalize_account_text
+
 
 _NOTE_RE = re.compile(r"[\(\[]\s*주[^\)\]]*[\)\]]")
 _ROMAN_PREFIX_RE = re.compile(r"^(?:[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩⅪⅫ]+|[IVX]+)[\.\s]*", re.IGNORECASE)
@@ -19,19 +21,8 @@ _NUMBER_PREFIX_RE = re.compile(r"^\(?\d+\)?[\.\s]+")
 _TERM_RE = re.compile(r"제\s*(\d+)\s*기")
 _YEAR_RE = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
 _ACCOUNT_ALIASES = {
-    "revenue": {"매출", "매출액", "수익(매출액)", "영업수익", "보험영업수익"},
-    "operating_income": {"영업이익", "영업이익(손실)", "영업손익", "영업손실"},
-    "net_income": {
-        "당기순이익",
-        "당기순이익(손실)",
-        "당기순손익",
-        "당기순손실",
-        "연결당기순이익",
-        "연결당기순이익(손실)",
-    },
-    "total_assets": {"자산총계", "자산합계"},
-    "total_liabilities": {"부채총계", "부채합계"},
-    "total_equity": {"자본총계"},
+    account_id: set(aliases)
+    for account_id, aliases in load_financial_account_catalog().structured_extraction_aliases().items()
 }
 _ACCOUNT_ORDER = {name: index for index, name in enumerate(_ACCOUNT_ALIASES)}
 _UNITS = (
@@ -46,11 +37,11 @@ def _normalized_label(raw: str) -> str:
     value = _NOTE_RE.sub("", str(raw)).strip()
     value = _ROMAN_PREFIX_RE.sub("", value)
     value = _NUMBER_PREFIX_RE.sub("", value)
-    return re.sub(r"\s+", "", value)
+    return normalize_account_text(value)
 
 
 def canonical_account_id(raw: str) -> str | None:
-    """Map an exact primary-statement label to the six canonical metrics."""
+    """Map an exact primary-statement label to a catalog-backed structured metric."""
 
     label = _normalized_label(raw)
     for account_id, aliases in _ACCOUNT_ALIASES.items():

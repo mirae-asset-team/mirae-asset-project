@@ -90,6 +90,26 @@ class DisclosureAgent:
             return verify_answer(bundle, self.generator.generate(bundle))  # type: ignore[union-attr]
         candidates = self.evidence_service.company_candidates()
         query_plan = plan_query(question, company_candidates=candidates, company_hint=company, as_of=as_of)
+        if (
+            query_plan.account_status in {"ambiguous", "unsupported"}
+            or "financial_account_unknown" in query_plan.reason_codes
+            or query_plan.fact_domain == "financial_derived"
+        ):
+            reason = (
+                "financial_account_clarification_required"
+                if query_plan.account_status == "ambiguous"
+                else "financial_account_unsupported"
+                if query_plan.account_status == "unsupported"
+                else "financial_account_unknown"
+                if "financial_account_unknown" in query_plan.reason_codes
+                else "derived_metric_calculation_not_implemented"
+            )
+            bundle = EvidenceBundle(
+                question=question,
+                answerable=False,
+                reason_codes=list(dict.fromkeys([*query_plan.reason_codes, reason])),
+            )
+            return verify_answer(bundle, DeterministicGenerator().generate(bundle))
         bundle = self.evidence_service.search(query_plan, limit=limit)
         self._attach_calculation(bundle, query_plan.operation)
         if query_plan.operation in {"growth_rate", "difference", "ratio", "sum"} and bundle.calculation is None:

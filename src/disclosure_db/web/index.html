@@ -3,71 +3,101 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>미래에셋 공시 에이전트</title>
+    <meta name="theme-color" content="#0b2a52">
+    <title>미래에셋 공시 Q&amp;A</title>
     <link rel="stylesheet" href="/static/app.css">
   </head>
   <body>
     <div id="app-shell" class="app-shell">
-      <aside id="sidebar" class="sidebar" aria-label="대화 기록">
+      <aside id="sidebar" class="sidebar" aria-label="질문 기록">
         <div class="sidebar-brand">
           <span class="brand-mark" aria-hidden="true">M</span>
-          <span aria-hidden="true">공시 리서치</span>
-          <button id="sidebar-close" class="sidebar-close" type="button" aria-label="대화 목록 닫기">×</button>
-        </div>
-        <button id="new-chat" class="new-chat" type="button"><span aria-hidden="true">＋</span> 새 대화</button>
-        <label class="sr-only" for="history-search">대화 검색</label>
-        <div class="search-wrap">
-          <span aria-hidden="true">⌕</span>
-          <input id="history-search" type="search" autocomplete="off" placeholder="대화 검색">
-        </div>
-        <p class="history-label">최근 대화</p>
-        <ol id="conversation-list"></ol>
-        <button id="clear-history" class="secondary-button" type="button">기록 전체 삭제</button>
-      </aside>
-      <main class="chat" aria-labelledby="app-title">
-        <header class="chat-header">
-          <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="대화 목록 열기">☰</button>
-          <h1 id="app-title">미래에셋 공시 에이전트</h1>
-          <div class="service-cluster">
-            <p id="service-status" role="status" aria-live="polite">공시 DB 확인 중</p>
-            <details id="service-info" class="service-info">
-              <summary>서비스 정보</summary>
-              <div class="service-popover">
-                <p id="provider-mode">답변 엔진 확인 중</p>
-                <p>데이터 버전 <span id="corpus-revision">확인 중</span></p>
-                <p id="legal-company-count">재무 DB 법인 수 확인 중</p>
-                <p class="coverage-title">최신 연도 검증 현황</p>
-                <ul id="financial-coverage-list" class="financial-coverage-list">
-                  <li>확인 중</li>
-                </ul>
-              </div>
-            </details>
+          <div>
+            <strong>공시 Q&amp;A</strong>
+            <span>DART Research</span>
           </div>
+          <button id="sidebar-close" class="icon-button sidebar-close" type="button" aria-label="질문 기록 닫기">×</button>
+        </div>
+
+        <button id="new-chat" class="new-chat" type="button">
+          <span aria-hidden="true">＋</span> 새 질문
+        </button>
+
+        <label class="sr-only" for="history-search">질문 기록 검색</label>
+        <div class="history-search-wrap">
+          <span aria-hidden="true">⌕</span>
+          <input id="history-search" type="search" autocomplete="off" placeholder="질문 기록 검색">
+        </div>
+
+        <p class="history-label">최근 질문</p>
+        <ol id="conversation-list" class="conversation-list"></ol>
+
+        <div class="sidebar-note">
+          <strong>안전한 서버 연결</strong>
+          <p>브라우저는 공시 Q&amp;A API만 호출합니다. HCX 자격증명과 원본 DB는 서버 내부에 유지됩니다.</p>
+        </div>
+        <button id="clear-history" class="clear-history" type="button">이 브라우저의 기록 삭제</button>
+      </aside>
+
+      <main class="workspace" aria-labelledby="app-title">
+        <header class="topbar">
+          <button id="sidebar-toggle" class="icon-button sidebar-toggle" type="button" aria-controls="sidebar" aria-expanded="true" aria-label="질문 기록 열기">☰</button>
+          <div class="topbar-title">
+            <span class="eyebrow">MIRAE ASSET DISCLOSURE RESEARCH</span>
+            <h1 id="app-title">미래에셋 공시 Q&amp;A</h1>
+          </div>
+          <span id="service-status" class="service-status" data-state="idle" role="status" aria-live="polite">
+            <span class="status-dot" aria-hidden="true"></span>
+            질문 준비됨
+          </span>
         </header>
-        <section class="examples" aria-label="질문 예시">
-          <span>예시 질문</span>
-          <button type="button" data-example="삼성전자의 최근 사업보고서 기준 매출액을 알려줘">최근 매출액</button>
-          <button type="button" data-example="삼성전자의 최근 공시에서 정정 전후 수치를 비교해줘">정정 전후 비교</button>
+
+        <section class="intro" aria-label="서비스 소개">
+          <div>
+            <p class="intro-kicker">HCX-005 DISCLOSURE AGENT</p>
+            <h2>DART 공시 근거를 찾아<br>검증 가능한 답변을 제공합니다.</h2>
+            <p>재무 수치, 일반 공시, 트렌드, 정정 이력을 질문하세요. 근거가 충분하지 않으면 답변을 만들지 않습니다.</p>
+          </div>
+          <div class="trust-card" aria-label="답변 원칙">
+            <span>01</span><p>공시 Tool과 read-only 데이터만 조회</p>
+            <span>02</span><p>Evidence 충분성 확인 후 답변</p>
+            <span>03</span><p>실제 DART 접수번호를 근거로 표시</p>
+          </div>
         </section>
-        <ol id="messages" class="messages" aria-live="polite">
-          <li class="empty-message">
-            <p class="empty-kicker">DISCLOSURE RESEARCH</p>
-            <h2>기업 공시를 근거와 함께 살펴보세요</h2>
-            <p>회사명과 궁금한 항목을 함께 입력하면 검증 가능한 공시만 찾아 답합니다.</p>
-            <div id="corpus-facts" class="corpus-facts" aria-label="공시 데이터 특징">
-              <span id="company-count-fact">검색명·법인 수 확인 중</span>
-              <span>정정 공시 계보 확인</span>
-              <span>인용 근거 열람</span>
-            </div>
+
+        <section class="example-section" aria-labelledby="example-title">
+          <p id="example-title">이렇게 질문해 보세요</p>
+          <div class="example-list">
+            <button type="button" class="example-chip" data-example="삼성전자 2024년 매출액은?">삼성전자 2024년 매출액</button>
+            <button type="button" class="example-chip" data-example="SK하이닉스 최근 3년 매출액은?">SK하이닉스 3년 매출액</button>
+            <button type="button" class="example-chip" data-example="삼성전자 2026년 공시 트렌드는?">2026년 공시 트렌드</button>
+            <button type="button" class="example-chip" data-example="삼성전자 반도체 투자 공시 찾아줘">반도체 투자 공시</button>
+            <button type="button" class="example-chip" data-example="삼성전자 최초 공시와 정정공시 차이는?">최초·정정공시 차이</button>
+            <button type="button" class="example-chip" data-example="삼성전자 최근 투자 관련 공시를 요약해줘">투자 공시 요약</button>
+          </div>
+        </section>
+
+        <ol id="messages" class="messages" aria-live="polite" aria-label="질문과 답변">
+          <li class="empty-state">
+            <div class="empty-icon" aria-hidden="true">D</div>
+            <h2>공시에서 확인하고 싶은 내용을 질문하세요</h2>
+            <p>회사명, 기간, 재무계정 또는 공시 유형을 함께 입력하면 더 정확하게 찾을 수 있습니다.</p>
           </li>
         </ol>
+
         <form id="question-form" class="question-form">
-          <label class="sr-only" for="question-input">공시 질문</label>
+          <label for="question-input">공시 질문</label>
           <div class="composer">
-            <textarea id="question-input" maxlength="4000" required placeholder="회사명과 궁금한 공시 내용을 입력하세요."></textarea>
-            <button id="send-question" type="submit">질문하기 <span aria-hidden="true">↑</span></button>
+            <textarea id="question-input" maxlength="2000" rows="2" required placeholder="예: 삼성전자의 2024년 연결 기준 매출액은 얼마인가?"></textarea>
+            <button id="send-question" type="submit">
+              <span class="send-label">질문하기</span>
+              <span class="send-icon" aria-hidden="true">→</span>
+            </button>
           </div>
-          <p class="composer-note">공시에서 확인할 수 없는 내용은 답변을 보류합니다.</p>
+          <div class="composer-footer">
+            <span>Enter로 전송 · Shift+Enter로 줄바꿈</span>
+            <span>공시 근거가 부족하면 답변을 보류합니다.</span>
+          </div>
         </form>
       </main>
     </div>
