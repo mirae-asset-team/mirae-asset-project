@@ -17,11 +17,22 @@ from disclosure_db.freeform_evaluation import (
     derive_freeform_source_records,
     evaluation_exclusion_reason,
     score_freeform_case,
+    select_items_covering_periods,
     semantic_summary_sha256,
     text_target_is_answer_safe,
     validate_case_plan,
     validate_freeform_gold,
 )
+
+
+def test_select_items_covering_periods_uses_serving_result_union() -> None:
+    first = {"evidence_id": "ev-2024", "periods": (("2024-01-01", "2024-12-31", None),)}
+    second = {"evidence_id": "ev-2023", "periods": (("2023-01-01", "2023-12-31", None),)}
+    same_year = {"evidence_id": "ev-opinc", "periods": (("2024-01-01", "2024-12-31", None),)}
+
+    assert select_items_covering_periods([first], minimum=2) == []
+    assert select_items_covering_periods([first, same_year], minimum=2) == []
+    assert select_items_covering_periods([first, second], minimum=2) == [first, second]
 
 
 DIMENSIONS = (

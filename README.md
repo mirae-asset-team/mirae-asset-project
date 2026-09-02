@@ -6,18 +6,19 @@
 
 ## 현재 개발 상태와 인수인계
 
-> **2026-08-21 기준:** Loop 1은 완료가 아니라 `BLOCKED_SERVING_PATH` 상태입니다. Task 1·2는 완료됐지만 Task 3의 유효 Gold 생성이 차단됐으며, 이번 브랜치 변경은 운영 서버에 배포하지 않았습니다. 기존 `Recall@20=0.007936...`과 이를 바탕으로 한 임베딩 적격 판정은 무효이므로 품질 근거나 모델 도입 근거로 사용하지 마세요.
+> **2026-08-21 기준:** Loop 1은 완료가 아닙니다. 구조화 financial slot 기간 수 차단은 코드에서 고쳤고, 유효 Gold 재생성은 이 작업 환경에 attested D드라이브 DB가 없어 `BLOCKED_LOCAL_RUNTIME`입니다. 기존 `Recall@20=0.007936...`과 이를 바탕으로 한 임베딩 적격 판정은 무효이므로 품질 근거나 모델 도입 근거로 사용하지 마세요. 이번 브랜치 변경은 운영 서버에 배포하지 않았습니다.
 
 | 항목 | 현재 상태 | 다음 판단 |
 |---|---|---|
 | 작업 브랜치 | `agent/disclosure-db-foundation` | 이 브랜치에서 계속 작업 |
 | Task 1 정책·AnalysisPlan | 구현 및 검증 완료 | 보수적 정책 경계 유지 |
 | Task 2 슬롯 검색·RRF | 구현 및 독립 재검토 PASS | 회귀 테스트 유지 |
-| Task 3 자유형 Gold·검색 평가 | `BLOCKED_SERVING_PATH` | 구조화 financial slot 기간 수 수정 |
+| 구조화 slot 기간 수 | TDD 수정 완료 | 수익성 2기간, 최신값 1, 3개년 3 유지 |
+| Task 3 자유형 Gold·검색 평가 | `BLOCKED_LOCAL_RUNTIME` | attested D드라이브에서 Gold 재생성·이중 평가 |
 | 임베딩·vector index | 도입 결정 없음 | 유효 text residual 평가 후에만 판정 |
 | 운영 배포 | 이번 Loop 1 변경 미배포 | 유효 GO/NO-GO와 전체 검증 뒤 별도 진행 |
 
-정확한 차단 원인은 수익성·재무건전성 판단에 `income_trend`와 `balance_sheet` 각각 최소 2개 기간이 필요한데, 구조화 하위 질의가 `QueryPlan.latest_period_count=1`을 유지하는 것입니다. 실제 audited issuer 12개에서 이 조건을 만족한 기업은 `0/12`였고, 빌더는 `dimension_source_coverage_missing:profitability_financial_health:0<3`으로 fail-closed 종료했습니다.
+수익성·재무건전성 판단의 `income_trend`와 `balance_sheet`는 카탈로그 `min_periods=2`를 structured `QueryPlan.latest_period_count`로 전달합니다. 일반 최신값 lookup은 계속 1개 기간, 명시적 3개년 질문은 3개 기간입니다. 이전 차단(`dimension_source_coverage_missing:profitability_financial_health:0<3`)의 serving 원인 수정은 테스트로 고정했고, 실제 120건 Gold와 Recall은 아직 다시 만들지 않았습니다.
 
 다음 작업자는 아래 순서로 시작합니다.
 
@@ -26,17 +27,18 @@ git fetch origin
 git switch agent/disclosure-db-foundation
 git pull --ff-only
 $env:PYTHONPATH = 'src'
-python -m pytest tests/test_freeform_evaluation.py tests/test_dense_retrieval.py tests/test_search_index.py tests/test_analysis_planner.py -q
+python -m pytest tests/test_freeform_evaluation.py tests/test_freeform_retrieval.py tests/test_dense_retrieval.py tests/test_search_index.py tests/test_analysis_planner.py -q
 ```
 
 1. [Loop 1 핸드오프](docs/handoffs/2026-08-21-loop1-freeform-retrieval-handoff.md)를 전부 읽습니다.
 2. [설계 문서](docs/superpowers/specs/2026-08-21-freeform-judgment-agent-design.md)와 [구현 계획](docs/superpowers/plans/2026-08-21-freeform-judgment-agent.md)을 확인합니다.
-3. 실패 테스트를 먼저 추가해 judgment financial slot은 2개 기간, 일반 최신값 lookup은 1개 기간, 명시적 3개년 질문은 3개 기간을 유지하도록 고정합니다.
-4. `src/disclosure_db/evidence_service.py`의 structured slot용 `QueryPlan` 생성 경계를 최소 수정합니다.
-5. serving-admitted Gold를 다시 만들고 동일 입력으로 평가를 두 번 실행해 산출물 hash와 지표를 검증합니다.
-6. 유효한 text residual이 확인된 뒤에만 sparse 대비 dense 개선 폭으로 임베딩 도입 여부를 판단합니다.
+3. attested D드라이브 base·overlay·search를 읽기 전용으로 두고 serving-admitted Gold를 다시 만듭니다.
+4. 동일 입력으로 평가를 두 번 실행해 산출물 hash와 지표를 검증합니다.
+5. 유효한 text residual이 확인된 뒤에만 sparse 대비 dense 개선 폭으로 임베딩 도입 여부를 판단합니다.
 
 작업 판단과 검증 결과는 [개발 로그](docs/development-log.md)에 기록합니다. D드라이브의 base DB, live overlay, live search index는 읽기 전용이며 staging 산출물만 새로 만듭니다. credential, 서버 `.env`, provider 원문 응답, 대용량 DB는 Git에 올리지 않습니다. Task 3이 유효한 GO 또는 근거 있는 NO-GO가 되기 전에는 Task 4 이후나 NCP 재배포를 시작하지 않습니다.
+
+팀 QA는 공개 질문 화면(`/`)이 아니라 [검수 데스크](docs/operations/qa-lab.md) `/lab`를 사용합니다. 검수 판정, 성능 측정, 발전 과정을 공유 SQLite에 쌓고 HTML 원장으로 내려받습니다. 암호는 없고 기록에 이름만 남깁니다.
 
 ## 공식 제약
 

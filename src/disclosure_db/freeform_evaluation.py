@@ -105,6 +105,28 @@ def evaluation_exclusion_reason(
     return None
 
 
+def select_items_covering_periods(
+    items: Sequence[Mapping[str, object]],
+    *,
+    minimum: int,
+) -> list[Mapping[str, object]]:
+    """Take the shortest serving-order prefix whose distinct periods meet ``minimum``."""
+
+    selected: list[Mapping[str, object]] = []
+    seen: set[tuple[object, ...]] = set()
+    for item in items:
+        periods = item.get("periods", ())
+        if not isinstance(periods, (list, tuple)):
+            continue
+        selected.append(item)
+        for period in periods:
+            if isinstance(period, (list, tuple)):
+                seen.add(tuple(period))
+        if len(seen) >= minimum:
+            return selected
+    return []
+
+
 def _string_list(value: object, field: str) -> list[str]:
     if not isinstance(value, (list, tuple)) or not value or any(not isinstance(item, str) or not item for item in value):
         raise ValueError(f"{field}_invalid")
@@ -500,13 +522,15 @@ def derive_freeform_source_records(
                             facts = financial_links.get(evidence_id, ())
                             if not facts:
                                 continue
+                            periods = tuple(sorted({
+                                (fact.get("period_start"), fact.get("period_end"), fact.get("instant_date"))
+                                for fact in facts
+                            }))
                             candidates_by_slot[slot.slot_id].append({
                                 "evidence_id": evidence_id, "filing_id": filing_id,
                                 "fact_ids": sorted(str(fact["financial_fact_id"]) for fact in facts),
-                                "period_count": len({
-                                    (fact.get("period_start"), fact.get("period_end"), fact.get("instant_date"))
-                                    for fact in facts
-                                }),
+                                "periods": periods,
+                                "period_count": len(periods),
                             })
                         elif planned_slot.domain == "event":
                             facts = event_links.get(evidence_id, ())
@@ -542,9 +566,9 @@ def derive_freeform_source_records(
                 version_pair: dict[str, object] | None = None
                 if dimension == "profitability_financial_health":
                     for slot_id in ("income_trend", "balance_sheet"):
-                        eligible = [item for item in candidates_by_slot[slot_id] if int(item.get("period_count", 0)) >= 2]
-                        if eligible:
-                            chosen[slot_id] = eligible[:1]
+                        selected = select_items_covering_periods(candidates_by_slot[slot_id], minimum=2)
+                        if selected:
+                            chosen[slot_id] = selected
                 elif dimension == "contract_change":
                     eligible = candidates_by_slot["contract_current"]
                     filing_order: list[str] = []

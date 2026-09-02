@@ -1,0 +1,110 @@
+:root {
+  --ink: #12141a;
+  --muted: #4b5563;
+  --line: #d5dbe6;
+  --bg: #eef1f6;
+  --panel: #ffffff;
+  --accent: #1d4ed8;
+  --good: #166534;
+  --bad: #9f1239;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  color: var(--ink);
+  background: var(--bg);
+  font-family: "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+}
+
+body { min-width: 20rem; }
+
+main {
+  width: min(72rem, calc(100% - 2rem));
+  margin: 0 auto 3rem;
+}
+
+.top {
+  padding: 1.4rem 0 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.top p { margin: 0.35rem 0 0; color: var(--muted); max-width: 46rem; }
+
+h1, h2 { margin: 0; font-size: 1.35rem; }
+
+h2 { font-size: 1.05rem; margin-bottom: 0.7rem; }
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.6rem;
+  margin: 1rem 0 1.4rem;
+}
+
+.stats div, .card, .item {
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.stats div { padding: 0.75rem 0.85rem; }
+
+.stats dt { color: var(--muted); font-size: 0.85rem; }
+.stats dd { margin: 0.2rem 0 0; font-size: 1.3rem; }
+
+form, .list { display: grid; gap: 0.75rem; }
+
+label { display: grid; gap: 0.3rem; }
+
+input, textarea, select, button {
+  font: inherit;
+}
+
+input, textarea, select {
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+textarea { min-height: 11rem; resize: vertical; }
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+button {
+  justify-self: start;
+  padding: 0.55rem 1rem;
+  color: #fff;
+  background: var(--accent);
+  border: 0;
+  cursor: pointer;
+}
+
+.status { color: var(--muted); }
+
+.item { padding: 0.9rem 1rem; display: grid; gap: 0.45rem; }
+
+.meta { color: var(--muted); font-size: 0.88rem; }
+
+.transcript {
+  white-space: pre-wrap;
+  margin: 0;
+  max-height: 12rem;
+  overflow: auto;
+}
+
+.good { color: var(--good); }
+.bad { color: var(--bad); }
+
+.links { display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; }
+.links a { color: var(--accent); }
+
+@media (max-width: 720px) {
+  .row { grid-template-columns: 1fr; }
+}

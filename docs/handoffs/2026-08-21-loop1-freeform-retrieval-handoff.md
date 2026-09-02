@@ -1,8 +1,8 @@
 # Loop 1 자유형 공시 검색 핸드오프
 
-> **중요:** Loop 1은 완료 또는 GO가 아니라 `BLOCKED_SERVING_PATH` 상태다. 기존 `Recall@20=0.007936...`과 임베딩 적격 판정은 독립 검토에서 무효화됐으므로 품질 근거나 모델 도입 근거로 사용하면 안 된다.
+> **중요:** Loop 1은 완료 또는 GO가 아니다. 구조화 기간 수 차단은 2026-08-21 TDD로 고쳤고, 유효 Gold 재생성은 attested D드라이브가 없는 환경에서 `BLOCKED_LOCAL_RUNTIME`이다. 기존 `Recall@20=0.007936...`과 임베딩 적격 판정은 독립 검토에서 무효화됐으므로 품질 근거나 모델 도입 근거로 사용하면 안 된다.
 
-이 문서는 `agent/disclosure-db-foundation` 브랜치에서 Task 1·2를 이어받고, Task 3의 마지막 구조화 기간 검색 차단을 해소한 뒤 유효한 Loop 1 평가를 재실행하기 위한 인수인계다.
+이 문서는 `agent/disclosure-db-foundation` 브랜치에서 Task 1·2와 구조화 기간 수 수정을 이어받고, Task 3의 유효한 Loop 1 평가를 재실행하기 위한 인수인계다.
 
 ## 현재 상태
 
@@ -12,8 +12,9 @@
 | Task 2 슬롯 검색·RRF | 구현 및 독립 재검토 PASS | `598855c`, `016cd19` |
 | 정정 원본/현재 검색 | TDD 구현됨 | `24368cf` |
 | 실제 DB에 맞춘 자금조달·지배구조 슬롯 | 구현됨 | `24368cf` |
-| serving-admitted Gold 빌더·dense 계약 | 다음 작업용 WIP로 보존 | `74cc2a4` |
-| 유효한 120건 Gold | 차단됨 | 수익성 dimension 답변 가능 기업 `0/12` |
+| 구조화 slot 기간 수 | TDD 수정됨. 수익성 `min_periods=2`를 QueryPlan에 전달 | 로컬 미커밋 작업; 일반 lookup 1·3개년 3 유지 |
+| serving-admitted Gold 빌더·dense 계약 | 슬롯 기간 합산 선택으로 보강 | `74cc2a4` + 기간 합산 수정 |
+| 유효한 120건 Gold | 차단됨 | attested D드라이브 부재. 이전 `0/12` serving 원인은 코드에서 제거 |
 | 유효 sparse Recall@20 | 없음 | 이전 수치는 invalid denominator |
 | 임베딩 도입 결정 | 없음 | dense gate를 실행할 유효 residual이 없음 |
 | 운영 배포 | 이번 작업에서 수행하지 않음 | 공개 서버는 이전 corpus release 상태 |
@@ -57,16 +58,9 @@ balance_sheet: serving 결과에 서로 다른 기간 2개 이상
 
 ## 다음 작업 순서
 
-### 1. 구조화 slot 기간 수를 TDD로 수정하기
+### 1. 구조화 slot 기간 수 — 완료, 재실행하지 말 것
 
-먼저 `tests/test_freeform_retrieval.py` 또는 `tests/test_evidence_service.py`에 실패 테스트를 추가한다.
-
-- 수익성·재무건전성 judgment의 `income_trend`, `balance_sheet`는 최소 2개 기간을 요청한다.
-- 일반 최신값 lookup은 계속 1개 기간만 요청한다.
-- 명시적 3개년 질문은 기존 3개 기간 동작을 유지한다.
-- issuer, `as_of`, correction policy, filing date, evidence binding을 유지한다.
-
-가장 작은 수정 위치는 `src/disclosure_db/evidence_service.py`의 structured slot용 `QueryPlan` 생성 경계다. dimension별 필요 기간을 코드에 중복 하드코딩하기보다 `config/analysis_dimensions.json`의 slot 계약에서 읽을 수 있는 형태를 우선 검토한다.
+`config/analysis_dimensions.json`의 `min_periods`를 structured `QueryPlan.latest_period_count`로 전달한다. 수익성 financial slot은 2, 일반 최신값 lookup은 1, 명시적 3개년은 3이다. Gold는 슬롯 serving 결과의 기간 합이 2 이상이면 인정한다. 이 단계는 테스트로 고정됐으므로 되풀이하지 않는다.
 
 ### 2. 유효 Gold를 재생성하기
 

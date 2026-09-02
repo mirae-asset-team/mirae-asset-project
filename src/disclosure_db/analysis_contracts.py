@@ -55,6 +55,7 @@ class EvidenceSlot:
     max_evidence: int = 4
     mandatory: bool = True
     absence_reason_code: str = "required_evidence_missing"
+    min_periods: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "report_types", _normalized_string_tuple(self.report_types, "report_types"))

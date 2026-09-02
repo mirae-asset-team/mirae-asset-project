@@ -14,6 +14,7 @@ from typing import Iterable
 from .attestation import CorpusAttestation, verify_fast_identity
 from .agent_contracts import CalculationResult, EvidenceBundle, EvidenceRef, QueryPlan
 from .analysis_contracts import AnalysisPlan, EvidenceSlot
+from .dense_client import DenseSearchClient, flatten_evidence_ids
 from .freeform_retrieval import (
     AnalysisRetrieval,
     MAX_CANDIDATES_PER_VARIANT,
@@ -28,6 +29,7 @@ from .financial_overlay import fetch_event_facts, fetch_financial_coverage, fetc
 from .pipeline import query_database
 from .retrieval_evaluation import compile_retrieval_query, retrieval_tokens
 from .reranker import ClovaReranker
+from .search_index import rrf_fuse
 
 
 _PROMPT_INJECTION_MARKERS = (
@@ -58,6 +60,7 @@ class EvidenceService:
         attestation: CorpusAttestation | None = None,
         search_database: Path | None = None,
         reranker: ClovaReranker | None = None,
+        dense_client: DenseSearchClient | None = None,
     ):
         self.base_database = Path(base_database)
         self.overlay_database = Path(overlay_database) if overlay_database else None
@@ -65,6 +68,8 @@ class EvidenceService:
         self.attestation = attestation
         self.search_database = Path(search_database) if search_database else None
         self.reranker = reranker
+        self.dense_client = dense_client if dense_client is not None else DenseSearchClient.from_environment()
+        self._dense_filings_by_company: dict[str, tuple[str, ...]] = {}
         if (self.overlay_database is not None or self.search_database is not None) and attestation is None:
             raise ValueError("attestation is required when runtime overlay/search is configured")
         self._companies: list[str] | None = None
@@ -92,6 +97,13 @@ class EvidenceService:
             self.event_predicate_aliases = {}
 
     @staticmethod
+    def _overlay_fact_limit(plan: QueryPlan, limit: int, account_terms: list[str]) -> int:
+        requested = max(plan.latest_period_count, 2 if plan.operation in {"growth_rate", "difference", "ratio"} else 1)
+        if plan.account_id is None and account_terms:
+            requested = max(requested, plan.latest_period_count * max(len(plan.account_terms), 1))
+        return max(1, min(limit, requested))
+
+    @staticmethod
     def _slot_version_as_of(plan: AnalysisPlan) -> str | None:
         base = plan.base_plan
         return base.as_of if base.as_of_source == "api" else (
@@ -106,6 +118,99 @@ class EvidenceService:
     def _matches_slot_issuer(ref: EvidenceRef, slot: EvidenceSlot) -> bool:
         issuer = ref.locator.get("analysis_issuer") if isinstance(ref.locator, dict) else None
         return issuer is None or slot.issuer is None or issuer == slot.issuer
+
+    @staticmethod
+    def _fuse_refs(rankings: list[list[EvidenceRef]], *, limit: int) -> list[EvidenceRef]:
+        rows = [[{"evidence_id": ref.evidence_id, "ref": ref} for ref in ranking] for ranking in rankings]
+        return [
+            row["ref"]
+            for row in rrf_fuse(rows, limit=limit)
+            if isinstance(row.get("ref"), EvidenceRef)
+        ]
+
+    def _company_dense_filings(self, company: str | None) -> list[str]:
+        if not company:
+            return []
+        cached = self._dense_filings_by_company.get(company)
+        if cached is not None:
+            return list(cached)
+        with closing(_readonly_connection(self.base_database)) as connection:
+            columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(filing)")}
+            company_fields = [
+                name
+                for name in ("issuer_name", "listed_name", "reporter_name", "stock_code", "issuer_corp_code")
+                if name in columns
+            ]
+            if not company_fields:
+                self._dense_filings_by_company[company] = ()
+                return []
+            rows = connection.execute(
+                f"SELECT filing_id FROM filing WHERE {' OR '.join(f'{name}=?' for name in company_fields)} "
+                "ORDER BY filing_id",
+                [company] * len(company_fields),
+            ).fetchall()
+        filings = tuple(dict.fromkeys(str(row[0]) for row in rows))
+        self._dense_filings_by_company[company] = filings
+        return list(filings)
+
+    def _search_dense(
+        self,
+        question: str,
+        *,
+        company: str | None,
+        as_of: str | None,
+        filed_at: str | None,
+        correction_policy: str,
+        limit: int = 40,
+    ) -> tuple[list[EvidenceRef], dict[str, object]]:
+        if self.dense_client is None:
+            return [], {"dense_configured": False, "dense_used": False}
+        started = time.perf_counter()
+        diagnostics: dict[str, object] = {"dense_configured": True, "dense_used": False}
+        try:
+            filing_ids = self._company_dense_filings(company)
+            if company and not filing_ids:
+                diagnostics["dense_reason_code"] = "dense_company_filings_unavailable"
+                return [], diagnostics
+            hits = self.dense_client.search(question, limit=limit, filing_ids=filing_ids)
+            allowed_filings = set(filing_ids)
+            if allowed_filings:
+                hits = [hit for hit in hits if hit.filing_id in allowed_filings]
+            ordered_ids = flatten_evidence_ids(hits)
+            hydrated = self._hydrate_ids(
+                ordered_ids,
+                as_of=as_of,
+                correction_policy=correction_policy,
+            )
+            if filed_at is not None:
+                hydrated = [ref for ref in hydrated if ref.filed_at == filed_at]
+            by_id = {ref.evidence_id: ref for ref in hydrated}
+            score_by_id: dict[str, float] = {}
+            for hit in hits:
+                for evidence_id in hit.evidence_ids:
+                    score_by_id.setdefault(evidence_id, hit.score)
+            ordered = [by_id[evidence_id] for evidence_id in ordered_ids if evidence_id in by_id]
+            safe_ordered = [
+                ref for ref in ordered
+                if not any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS)
+            ]
+            for ref in ordered:
+                ref.score = float(score_by_id.get(ref.evidence_id, 0.0))
+                ref.locator["dense_score"] = ref.score
+                ref.locator["retrieval_source"] = "bge-m3-dense"
+            diagnostics.update({
+                "dense_used": bool(safe_ordered),
+                "dense_chunk_count": len(hits),
+                "dense_allowed_filing_count": len(filing_ids),
+                "dense_evidence_count": len(safe_ordered),
+                "dense_excluded_prompt_injection_count": len(ordered) - len(safe_ordered),
+            })
+            return safe_ordered, diagnostics
+        except (RuntimeError, ValueError, OSError, sqlite3.Error):
+            diagnostics["dense_reason_code"] = "dense_service_unavailable"
+            return [], diagnostics
+        finally:
+            diagnostics["dense_latency_ms"] = int(round((time.perf_counter() - started) * 1000))
 
     def _search_text_slot(
         self,
@@ -175,6 +280,19 @@ class EvidenceService:
                         continue
                     safe_refs.append(ref)
                 rankings.append(safe_refs)
+            dense_refs, dense_diagnostics = self._search_dense(
+                variants[0],
+                company=slot.issuer or plan.base_plan.company,
+                as_of=version_as_of,
+                filed_at=slot.filing_date,
+                correction_policy=plan.base_plan.correction_policy,
+            )
+            for ref in dense_refs:
+                ref.locator["analysis_issuer"] = slot.issuer or plan.base_plan.company
+                ref.locator["analysis_version_admitted"] = True
+            if dense_refs:
+                rankings.append(dense_refs)
+            diagnostics.update(dense_diagnostics)
             result = fuse_slot_results(rankings, limit=min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT))
         except ValueError:
             diagnostics["reason_code"] = "search_index_attestation_mismatch"
@@ -194,6 +312,8 @@ class EvidenceService:
         started = time.perf_counter()
         base = plan.base_plan
         query = variants[0] if variants else ""
+        period_count = max(int(slot.min_periods or 1), int(base.latest_period_count or 1))
+        concept_count = max(len(slot.search_concepts), 1) if slot.domain == "financial" else 1
         slot_plan = QueryPlan(
             question=query,
             company=slot.issuer or base.company,
@@ -209,8 +329,10 @@ class EvidenceService:
             fact_domain=slot.domain,
             account_terms=list(slot.search_concepts) if slot.domain == "financial" else [],
             predicate_terms=list(slot.search_concepts) if slot.domain == "event" else [],
+            latest_period_count=period_count,
         )
-        bundle = self.search(slot_plan, limit=min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT))
+        row_limit = min(MAX_EVIDENCE_PER_SLOT, max(slot.max_evidence, period_count * concept_count))
+        bundle = self.search(slot_plan, limit=row_limit)
         for ref in bundle.evidence:
             ref.locator["analysis_issuer"] = slot.issuer or base.company
             ref.locator["analysis_version_admitted"] = True
@@ -448,6 +570,7 @@ class EvidenceService:
         refs: list[EvidenceRef] = []
         financial_facts: list[dict[str, object]] = []
         event_facts: list[dict[str, object]] = []
+        dense_diagnostics: dict[str, object] = {"dense_configured": self.dense_client is not None, "dense_used": False}
         account_terms = list(plan.account_terms)
         for term in plan.account_terms:
             account_terms.extend(self.account_aliases.get(term, []))
@@ -485,7 +608,7 @@ class EvidenceService:
                 statement_type=None if plan.account_id else plan.statement_type,
                 scope=plan.scope,
                 correction_policy=plan.correction_policy,
-                limit=min(limit, max(plan.latest_period_count, 2 if plan.operation in {"growth_rate", "difference", "ratio"} else 1)),
+                limit=min(limit, self._overlay_fact_limit(plan, limit, account_terms)),
                 attestation=self.attestation,
             )
             financial_facts, structured_refs = self._hydrate_facts(
@@ -542,7 +665,18 @@ class EvidenceService:
                         except ValueError:
                             plan.reason_codes.append("empty_search_query")
                         else:
-                            refs.extend(self._fragment_refs(rows))
+                            sparse_refs = self._fragment_refs(rows)
+                            dense_refs, dense_diagnostics = self._search_dense(
+                                plan.question,
+                                company=plan.company,
+                                as_of=version_as_of,
+                                filed_at=filing_date,
+                                correction_policy=plan.correction_policy,
+                            )
+                            refs.extend(
+                                self._fuse_refs([sparse_refs, dense_refs], limit=30)
+                                if dense_refs else sparse_refs
+                            )
                         index_used = True
                     except ValueError:
                         plan.reason_codes.append("search_index_attestation_mismatch")
@@ -580,23 +714,23 @@ class EvidenceService:
                 seen.add(ref.evidence_id)
                 unique.append(ref)
         final_limit = max(0, min(limit, 8))
-        retrieval_diagnostics: dict[str, object] = {}
+        retrieval_diagnostics: dict[str, object] = dict(dense_diagnostics)
         ordered = unique
         if self.reranker is not None:
             if structured_domain:
-                retrieval_diagnostics = {
+                retrieval_diagnostics.update({
                     "reranker_used_provider": False,
                     "reranker_reason_codes": ["reranker_structured_bypass"],
-                }
+                })
             else:
                 rerank_result = self.reranker.rerank(plan.question, unique[:30], limit=final_limit)
                 by_id = {ref.evidence_id: ref for ref in unique}
                 reranked = [by_id[evidence_id] for evidence_id in rerank_result.evidence_ids if evidence_id in by_id]
                 ordered = reranked or unique
-                retrieval_diagnostics = {
+                retrieval_diagnostics.update({
                     "reranker_used_provider": rerank_result.used_provider,
                     "reranker_reason_codes": list(rerank_result.reason_codes),
-                }
+                })
         final_evidence = ordered[:final_limit]
         final_ids = {ref.evidence_id for ref in final_evidence}
         financial_facts = self._facts_with_final_evidence(financial_facts, final_ids)

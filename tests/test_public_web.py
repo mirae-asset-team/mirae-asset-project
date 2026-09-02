@@ -85,6 +85,11 @@ def test_public_assets_have_security_headers_and_local_sources(ready_agent) -> N
     assert "javascript" in client.get("/static/app.js").headers["content-type"]
     assert "javascript" in client.get("/static/api.js").headers["content-type"]
     assert "javascript" in client.get("/static/history.js").headers["content-type"]
+    assert client.get("/lab").status_code == 200
+    assert client.get("/static/lab.css").headers["content-type"].startswith("text/css")
+    assert "javascript" in client.get("/static/lab.js").headers["content-type"]
+    assert "http://" not in client.get("/lab").text
+    assert "https://" not in client.get("/lab").text
 
     for font_name in (
         "KoPubWorld-Dotum-Bold.woff2",

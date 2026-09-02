@@ -202,6 +202,78 @@ def _structured_plan(*, correction_policy: str, as_of: str, filing_date: str | N
     )
 
 
+def test_profitability_financial_slots_request_two_latest_periods() -> None:
+    plan = plan_analysis(
+        "삼성전자 최근 수익성과 재무건전성이 개선됐는지 공시로 판단해줘",
+        company_candidates=["삼성전자"],
+    )
+    service = EvidenceService(Path("base.sqlite"))
+    captured: list[object] = []
+
+    def capture(query, limit=20):
+        captured.append(query)
+        index = len(captured)
+        return EvidenceBundle(
+            question=query.question,
+            evidence=[_ref(f"ev-{index}-a"), _ref(f"ev-{index}-b")],
+            answerable=True,
+        )
+
+    service.search = capture  # type: ignore[method-assign]
+    result = service.search_analysis(plan)
+
+    financial = [query for query in captured if query.fact_domain == "financial"]
+    assert [query.company for query in financial] == ["삼성전자", "삼성전자"]
+    assert [query.latest_period_count for query in financial] == [2, 2]
+    assert [query.correction_policy for query in financial] == ["current", "current"]
+    assert result.complete is True
+
+
+def test_financing_pressure_financial_slot_keeps_single_period_lookup() -> None:
+    plan = plan_analysis(
+        "삼성전자 차입과 자금조달 공시 위험을 분석해줘",
+        company_candidates=["삼성전자"],
+    )
+    service = EvidenceService(Path("base.sqlite"))
+    captured: list[object] = []
+
+    def capture(query, limit=20):
+        captured.append(query)
+        return EvidenceBundle(question=query.question, evidence=[_ref(f"ev-{len(captured)}")], answerable=True)
+
+    service.search = capture  # type: ignore[method-assign]
+    service.search_analysis(plan)
+
+    financial = [query for query in captured if query.fact_domain == "financial"]
+    assert financial
+    assert all(query.latest_period_count == 1 for query in financial)
+
+
+def test_structured_slot_keeps_explicit_three_year_period_count() -> None:
+    slot = EvidenceSlot(
+        "income_trend", "financial", issuer="삼성전자", search_concepts=("매출액",),
+        min_evidence=2, max_evidence=4, min_periods=2,
+    )
+    plan = AnalysisPlan(
+        question="삼성전자 최근 3개년 공시 분석",
+        analysis_mode="judgment",
+        policy=PolicyDecision("allow_analysis"),
+        base_plan=QueryPlanSnapshot(
+            "삼성전자 최근 3개년 공시 분석", company="삼성전자", latest_period_count=3,
+        ),
+        required_evidence_slots=(slot,),
+        max_evidence=20,
+    )
+    service = EvidenceService(Path("base.sqlite"))
+    service.search = Mock(return_value=EvidenceBundle(question="route", evidence=[_ref("ev-3y")], answerable=True))
+
+    service.search_analysis(plan)
+
+    query = service.search.call_args.args[0]
+    assert query.latest_period_count == 3
+    assert query.company == "삼성전자"
+
+
 def test_structured_slots_preserve_audited_historical_original_and_both_versions() -> None:
     for correction_policy in ("current", "original", "both"):
         plan = _structured_plan(correction_policy=correction_policy, as_of="2024-06-30")

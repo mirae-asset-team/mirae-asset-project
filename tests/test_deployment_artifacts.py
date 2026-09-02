@@ -18,9 +18,28 @@ class DeploymentArtifactTests(unittest.TestCase):
             "DISCLOSURE_PUBLIC_PER_IP_CONCURRENCY": "4",
             "DISCLOSURE_PUBLIC_GLOBAL_CONCURRENCY": "8",
         }
+        self.assertIn("DISCLOSURE_QA_DB: /runtime/qa_lab.sqlite", compose)
+        self.assertIn("DISCLOSURE_QA_DB=/runtime/qa_lab.sqlite", example)
+        self.assertNotIn("DISCLOSURE_QA_TOKEN", compose)
+        self.assertNotIn("DISCLOSURE_QA_TOKEN", example)
         for name, value in expected.items():
             self.assertIn(f"{name}: ${{{name}:-{value}}}", compose)
             self.assertIn(f"{name}={value}", example)
+
+    def test_team_qa_compose_keeps_data_read_only_and_uses_nonpublic_port(self):
+        compose = Path("compose.team-qa.yaml").read_text(encoding="utf-8")
+        caddyfile = Path("Caddyfile.team-qa").read_text(encoding="utf-8")
+        self.assertNotIn("8001:8000", compose)
+        self.assertIn('"80:80"', compose)
+        self.assertIn('"443:443"', compose)
+        self.assertIn("DISCLOSURE_QA_PASSWORD_HASH", compose)
+        self.assertIn("basic_auth", caddyfile)
+        self.assertIn("reverse_proxy team-qa:8000", caddyfile)
+        self.assertIn("DISCLOSURE_QA_DB: /runtime/qa_lab.sqlite", compose)
+        self.assertIn("${DISCLOSURE_BASE_DB_HOST}:/data/base/disclosure.sqlite:ro", compose)
+        self.assertIn("${DISCLOSURE_AGENT_DB_DIR_HOST}:/data/agent:ro", compose)
+        self.assertIn("${DISCLOSURE_ATTESTATION_HOST}:/data/attestation.json:ro", compose)
+        self.assertNotIn("0.0.0.0/0", compose)
 
     def test_dockerfile_does_not_copy_local_data(self):
         self.assertIn("data/", Path(".dockerignore").read_text(encoding="utf-8"))
