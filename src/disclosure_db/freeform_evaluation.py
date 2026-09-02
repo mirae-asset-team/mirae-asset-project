@@ -1070,8 +1070,16 @@ def decide_embedding_pilot(
 
     target_count = int(summary.get("target_count", 0))
     sparse_recall = float(summary.get("target_recall_at_20", 0))
+    minimum_recall = float(minimum_recall)
+    minimum_gain = float(minimum_gain)
     if target_count <= 0:
         raise ValueError("target_count_must_be_positive")
+    if not math.isfinite(sparse_recall) or not 0 <= sparse_recall <= 1:
+        raise ValueError("sparse_recall_invalid")
+    if not math.isfinite(minimum_recall) or not 0 <= minimum_recall <= 1:
+        raise ValueError("minimum_recall_invalid")
+    if not math.isfinite(minimum_gain) or not 0 <= minimum_gain <= 1:
+        raise ValueError("minimum_gain_invalid")
     base = {
         "minimum_recall": minimum_recall,
         "minimum_gain": minimum_gain,

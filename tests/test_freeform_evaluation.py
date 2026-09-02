@@ -511,6 +511,23 @@ def test_dense_decision_rejects_non_finite_or_invalid_adoption_metrics(
         decide_embedding_pilot(summary)
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_dense_decision_rejects_non_finite_sparse_recall_and_gate_thresholds(value: float) -> None:
+    summary = {
+        "target_count": 100,
+        "target_recall_at_20": value,
+        "residual_misses": [],
+        "wrong_issuer_count": 0,
+        "wrong_version_count": 0,
+    }
+    with pytest.raises(ValueError, match="sparse_recall_invalid"):
+        decide_embedding_pilot(summary)
+    with pytest.raises(ValueError, match="minimum_recall_invalid"):
+        decide_embedding_pilot({**summary, "target_recall_at_20": 0.8}, minimum_recall=value)
+    with pytest.raises(ValueError, match="minimum_gain_invalid"):
+        decide_embedding_pilot({**summary, "target_recall_at_20": 0.8}, minimum_gain=value)
+
+
 def test_source_record_derivation_refuses_missing_serving_identity_databases() -> None:
     connection = sqlite3.connect(":memory:")
     connection.executescript(

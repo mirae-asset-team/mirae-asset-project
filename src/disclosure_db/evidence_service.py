@@ -7,6 +7,7 @@ import math
 import os
 import sqlite3
 import time
+import unicodedata
 from contextlib import closing
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -46,8 +47,18 @@ _INSTRUCTION_LIKE_EVIDENCE_MARKERS = (
 def evidence_text_is_admitted(text: object) -> bool:
     """Reject instruction-like corpus text before it reaches any public model context."""
 
-    normalized = " ".join(str(text or "").split()).casefold()
-    return not any(marker in normalized for marker in _INSTRUCTION_LIKE_EVIDENCE_MARKERS)
+    normalized = unicodedata.normalize("NFKC", str(text or ""))
+    normalized = "".join(
+        character
+        for character in normalized
+        if unicodedata.category(character) not in {"Cc", "Cf"}
+    )
+    normalized = " ".join(normalized.split()).casefold()
+    compact = "".join(normalized.split())
+    return not any(
+        marker in normalized or "".join(marker.split()) in compact
+        for marker in _INSTRUCTION_LIKE_EVIDENCE_MARKERS
+    )
 
 
 def _readonly_connection(database: Path) -> sqlite3.Connection:
@@ -261,6 +272,14 @@ class EvidenceService:
                 correction_policy=correction_policy,
             )
             hydrated = [ref for ref in hydrated if ref.filing_id in allowed_filings]
+            declared_filings_by_evidence: dict[str, set[str]] = {}
+            for hit in hits:
+                for evidence_id in hit.evidence_ids:
+                    declared_filings_by_evidence.setdefault(evidence_id, set()).add(hit.filing_id)
+            hydrated = [
+                ref for ref in hydrated
+                if declared_filings_by_evidence.get(ref.evidence_id) == {ref.filing_id}
+            ]
             if filed_at is not None:
                 hydrated = [ref for ref in hydrated if ref.filed_at == filed_at]
             by_id = {ref.evidence_id: ref for ref in hydrated}
@@ -357,6 +376,8 @@ class EvidenceService:
                     company=slot.issuer or plan.base_plan.company,
                     as_of=version_as_of,
                     filed_at=slot.filing_date,
+                    start_date=slot.period_start,
+                    end_date=slot.period_end,
                     limit=MAX_CANDIDATES_PER_VARIANT,
                     correction_policy=plan.base_plan.correction_policy,
                 )
@@ -394,6 +415,8 @@ class EvidenceService:
                 company=slot.issuer or plan.base_plan.company,
                 as_of=version_as_of,
                 filed_at=slot.filing_date,
+                start_date=slot.period_start,
+                end_date=slot.period_end,
                 correction_policy=plan.base_plan.correction_policy,
             )
             for ref in dense_refs:

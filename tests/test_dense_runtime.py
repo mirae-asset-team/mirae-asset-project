@@ -79,6 +79,10 @@ _EXPECTED_RUNTIME_IDENTITY = {
     "index_type": "IndexFlatIP",
     "metric": "inner_product",
     "normalized": True,
+    "dense_manifest_sha256": "a" * 64,
+    "faiss_index_sha256": "b" * 64,
+    "chunk_metadata_sha256": "c" * 64,
+    "model_identity_sha256": "d" * 64,
 }
 
 _DENSE_MODEL = "BAAI/bge-m3"
@@ -288,6 +292,18 @@ class DenseRuntimeIdentityTests(unittest.TestCase):
                 self.assertEqual(identity["index_type"], "IndexFlatIP")
                 self.assertEqual(identity["metric"], "inner_product")
                 self.assertTrue(identity["normalized"])
+                self.assertEqual(identity["dense_manifest_sha256"], hashlib.sha256(
+                    paths["manifest_path"].read_bytes(),
+                ).hexdigest())
+                self.assertEqual(identity["faiss_index_sha256"], hashlib.sha256(
+                    paths["index_path"].read_bytes(),
+                ).hexdigest())
+                self.assertEqual(identity["chunk_metadata_sha256"], hashlib.sha256(
+                    paths["metadata_path"].read_bytes(),
+                ).hexdigest())
+                self.assertEqual(identity["model_identity_sha256"], hashlib.sha256(
+                    (paths["model_path"] / "model_identity.json").read_bytes(),
+                ).hexdigest())
             finally:
                 runtime.metadata.close()
 

@@ -2,7 +2,19 @@
 
 ## 결론
 
-`agent/judge-stress-v2` 브랜치에서 Task 1~3을 로컬 구현·검증했다. Task 2는 독립 600건 suite와 안전한 JSON/HTML report contract까지만 완료했으며 실제 앱 평가는 `NOT_RUN`이다. Task 4~8과 8001/8000 배포는 미완료다. 다음 작업은 Task 4 bounded analysis executor다.
+`agent/judge-stress-v2` 브랜치에서 Task 1~5를 로컬 구현·검증했다. Task 2는 독립 600건 suite와 안전한 JSON/HTML report contract까지만 완료했으며 실제 앱 평가는 `NOT_RUN`이다. Task 6~8과 8001/8000 배포는 미완료다. 다음 작업은 Task 6 claim-level verification이다.
+
+> 2026-09-03 갱신: Task 5 첫 커밋은 독립 리뷰에서 거절되었고 후속 fixup에서 다섯 blocker와 Docker build-context 결함을 TDD로 수정했다. 현재 tracked 평가 결과가 ADOPTED가 아니므로 Dense는 의도적으로 비활성이고 Sparse가 안전 경로다. Task 6의 claim-level verification은 별도 미추적 작업으로 분리되어 있으며 이 Task 5 fixup에 포함하지 않는다.
+
+## Task 5 fixup 경계
+
+- Dense 채택은 `dense-adoption-v2`, Git에 고정된 evaluator summary SHA-256, 재계산한 semantic hash/decision, 평가 당시 runtime identity, 실제 sidecar `/health` identity가 모두 같아야 한다.
+- sidecar identity는 시작 시 검증한 Dense build manifest, FAISS index, chunk metadata, model identity manifest SHA-256을 노출한다. health가 닿지 않거나 하나라도 다르면 agent는 Dense client를 만들지 않는다.
+- Dense hit의 `filing_id`와 각 hydrated evidence의 실제 `filing_id`가 정확히 1:1로 같아야 한다. 같은 evidence ID가 서로 다른 filing을 선언하는 충돌도 폐기한다.
+- text evidence slot의 `period_start`와 `period_end`를 Sparse/Dense 선필터에 전달한다.
+- 공시 text는 NFKC, zero-width/control 제거, 공백 축약과 compact marker 비교를 통과해야 Tool 결과와 summary context에 들어간다.
+- 현재 `data/derived/freeform_retrieval_summary.json`은 Dense ADOPTED 평가가 아니므로 운영 상태는 계속 Sparse다. 새 평가를 통과했을 때만 tracked summary와 코드의 trust-anchor hash를 같은 리뷰 커밋에서 갱신한다.
+- `.dockerignore`는 `data` 전체를 계속 제외하되 위 tracked evaluator summary 한 파일만 agent image build context에 허용한다. 이 예외가 사라지면 배포 artifact test가 실패한다.
 
 ## Git 기준점
 
@@ -15,6 +27,9 @@
   - `1dc6178 fix: attest dense model revision provenance`
 - Task 2는 별도 `feat: add independent judge stress v2 suite` 커밋으로 끝낸다. 이 문서는 해당 커밋에 포함되며 정확한 hash는 `git log -1 --oneline`이 기준이다.
 - Task 3는 별도 `feat: harden public input routing` 커밋으로 끝낸다. 이 문서는 해당 커밋에 포함되며 정확한 hash는 `git log -1 --oneline`이 기준이다.
+- Task 4: `d6b3f9d feat: add bounded disclosure analysis executor`
+- Task 5 최초 구현: `3748871 feat: fail closed on dense retrieval adoption`
+- Task 5 review fixup은 이 인수인계와 함께 단일 `fix:` 커밋으로 끝내며 정확한 hash는 `git log -1 --oneline`이 기준이다.
 
 ## Task 1 완료 범위
 
@@ -66,18 +81,18 @@ python -m pytest -q tests/test_judge_stress_v2.py
 
 ```powershell
 $env:PYTHONPATH = (Resolve-Path -LiteralPath 'src').Path
-python -m pytest -q tests/test_judge_stress_v2.py tests/test_agent_stress.py tests/test_financial_release_evaluation.py
-python -m pytest -q
-node --test tests/web_history.test.mjs tests/web_api.test.mjs
+$trackedTests = git ls-files 'tests/test_*.py'
+python -m pytest -q $trackedTests
+node --test tests/*.test.mjs
 python -m compileall -q src scripts
 git diff --check
 ```
 
-- V2 focused: `19 passed`
-- V2 + legacy stress/financial release focused: `43 passed`
-- Python 전체: `572 passed, 2 skipped, 58 warnings, 74 subtests passed`
+- Task 5 expanded focused: `237 passed, 1 skipped, 34 warnings, 31 subtests passed`
+- Git 추적 Python 전체: `666 passed, 2 skipped, 86 warnings, 146 subtests passed`
 - Web: `12/12 passed`
-- compileall/diff check: pass
+- compileall/diff/Compose static config: pass
+- 문자 그대로의 `python -m pytest -q`는 별도 작업자의 미완성·미추적 Task 6 테스트 1개에서만 `11 failed`이고 나머지 `666 passed, 2 skipped`다. 위 재현 명령은 Git 추적 suite 전체를 실행해 Task 6 작업물을 명시적으로 제외한다.
 - 경고는 기존 FastAPI `on_event` deprecation이다.
 
 ## 환경상 미검증·차단
@@ -91,11 +106,9 @@ git diff --check
 
 ## 다음 작업 — 반드시 이 순서
 
-1. **Task 4:** 평가 전용 `plan_analysis → search_analysis`를 공개 Function Calling 내부 `BoundedAnalysisExecutor`에 연결한다. 공개 Tool은 5개를 유지한다.
-2. **Task 5:** issuer/공시버전/기간 선필터 후 Sparse+Dense gate를 평가한다. 기준 미달이면 Sparse로 되돌린다.
-3. **Task 6:** 주장별 citation·Decimal 숫자 검증과 결정론적 fallback을 구현한다.
-4. **Task 7:** 공격·metamorphic·장애·20동시 요청 평가를 실행하고 V2 JSON/HTML을 실제 결과로 갱신한다.
-5. **Task 8:** 모든 hard gate 통과 후에만 8001 staging → 동일 image 8000 승격을 수행한다.
+1. **Task 6:** 주장별 citation·Decimal 숫자 검증과 결정론적 fallback을 구현한다. 현재 미추적 두 파일은 Task 5 커밋과 분리한다.
+2. **Task 7:** 공격·metamorphic·장애·20동시 요청 평가를 실행하고 V2 JSON/HTML을 실제 결과로 갱신한다.
+3. **Task 8:** 모든 hard gate 통과 후에만 8001 staging → 동일 image 8000 승격을 수행한다.
 
 각 Task는 `실패 테스트 → 최소 구현 → 관련 테스트 → 전체 회귀 → 보고서 → 독립 커밋`을 지킨다. Plan의 기준이나 read-only 제약을 낮추지 않는다.
 

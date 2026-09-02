@@ -40,6 +40,27 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn('CMD ["disclosure-dense"]', dense_dockerfile)
         self.assertIn('HF_HUB_OFFLINE=1', dense_dockerfile)
 
+    def test_agent_image_binds_dense_adoption_to_tracked_evaluation(self):
+        compose = Path("compose.yaml").read_text(encoding="utf-8")
+        dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+        dockerignore = Path(".dockerignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn(
+            "COPY data/derived/freeform_retrieval_summary.json /app/data/derived/freeform_retrieval_summary.json",
+            dockerfile,
+        )
+        self.assertIn("data/*", dockerignore)
+        self.assertIn("!data/derived/", dockerignore)
+        self.assertIn("data/derived/*", dockerignore)
+        self.assertIn("!data/derived/freeform_retrieval_summary.json", dockerignore)
+        self.assertEqual(
+            compose.count("DISCLOSURE_DENSE_EVALUATION_SUMMARY: /app/data/derived/freeform_retrieval_summary.json"),
+            2,
+        )
+        self.assertEqual(
+            compose.count("DISCLOSURE_DENSE_ADOPTION_ARTIFACT: /runtime/dense_adoption.json"),
+            2,
+        )
+
     def test_dense_model_identity_has_a_reproducible_staging_builder(self):
         script = Path("scripts/build_dense_model_identity.py")
         self.assertTrue(script.is_file())

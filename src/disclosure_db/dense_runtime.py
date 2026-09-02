@@ -34,6 +34,10 @@ RUNTIME_IDENTITY_FIELDS = (
     "index_type",
     "metric",
     "normalized",
+    "dense_manifest_sha256",
+    "faiss_index_sha256",
+    "chunk_metadata_sha256",
+    "model_identity_sha256",
 )
 
 
@@ -426,6 +430,10 @@ class DenseRuntime:
             "index_type": str(index_type),
             "metric": str(metric),
             "normalized": normalized,
+            "dense_manifest_sha256": _sha256_file(Path(manifest_path)),
+            "faiss_index_sha256": str(manifest["outputs"]["faiss_index"]["sha256"]).casefold(),
+            "chunk_metadata_sha256": str(manifest["outputs"]["chunk_metadata"]["sha256"]).casefold(),
+            "model_identity_sha256": _sha256_file(model_identity_path),
         }
         self._lock = threading.Lock()
 
