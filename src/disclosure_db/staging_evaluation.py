@@ -607,6 +607,7 @@ class StagingJudgeRuntime:
         | None = None,
         _security_counts: dict[str, int] | None = None,
         _security_observations: list[dict[str, object]] | None = None,
+        _latency_observations: list[dict[str, object]] | None = None,
         _security_lock: Lock | None = None,
     ) -> None:
         self._client = client
@@ -616,6 +617,9 @@ class StagingJudgeRuntime:
         }
         self._security_observations = (
             _security_observations if _security_observations is not None else []
+        )
+        self._latency_observations = (
+            _latency_observations if _latency_observations is not None else []
         )
         self._security_lock = _security_lock or Lock()
 
@@ -635,6 +639,7 @@ class StagingJudgeRuntime:
             oracle_resolver=self._oracle_resolver,
             _security_counts=self._security_counts,
             _security_observations=self._security_observations,
+            _latency_observations=self._latency_observations,
             _security_lock=self._security_lock,
         )
 
@@ -647,6 +652,9 @@ class StagingJudgeRuntime:
             result["security_observations"] = [
                 dict(observation) for observation in self._security_observations
             ]
+            result["latency_observations"] = [
+                dict(observation) for observation in self._latency_observations
+            ]
         return result
 
     def execute(
@@ -658,6 +666,28 @@ class StagingJudgeRuntime:
         began = perf_counter()
         response = self._client.answer(question, provider=lane == "provider_answer")
         latency_ms = max(0.001, (perf_counter() - began) * 1_000)
+        metadata = _mapping(response.get("metadata"))
+        provider_configured = metadata.get("provider_configured") is True
+        final_generation_called = metadata.get("final_generation_called") is True
+        provider_used = provider_configured and final_generation_called
+        source_lane = (
+            "concurrency"
+            if str(case.get("category", "")) == "api_concurrency"
+            else lane
+        )
+        if source_lane in {"provider_answer", "concurrency"}:
+            with self._security_lock:
+                self._latency_observations.append(
+                    {
+                        "case_id": str(case.get("case_id", "")),
+                        "probe_id": str(getattr(probe, "probe_id", "")),
+                        "lane": source_lane,
+                        "provider_configured": provider_configured,
+                        "final_generation_called": final_generation_called,
+                        "provider_used": provider_used,
+                        "latency_ms": latency_ms,
+                    }
+                )
         oracle_kind = str(_mapping(case.get("oracle")).get("kind", ""))
         expected_answer = lane not in {"policy_guard", "fault_injection"} and oracle_kind not in {
             "safe_abstention",
@@ -665,7 +695,6 @@ class StagingJudgeRuntime:
         }
         if not _response_succeeded(response, expected_answer=expected_answer):
             raise StagingEvaluationError("staging response was unsuccessful")
-        metadata = _mapping(response.get("metadata"))
         oracle = (
             self._oracle_resolver(case, probe)
             if self._oracle_resolver is not None
@@ -709,7 +738,7 @@ class StagingJudgeRuntime:
             if metadata.get("conclusion") is not None
             else None,
             citation_ids=citation_ids,
-            provider_used=lane == "provider_answer",
+            provider_used=provider_used,
             latency_ms=latency_ms,
             **{field: inspection[field] for field in _SECURITY_COUNTER_FIELDS},
         )
@@ -731,15 +760,72 @@ def run_staging_suite(
         manifest=manifest,
     )
     raw_results = [sanitize_result(result) for result in execution.results]
-    passed = sum(result.passed for result in execution.results)
+    runtime_observations = runtime.run_summary().get("latency_observations", [])
+    provider_calls_by_case: dict[str, int] = {}
+    provider_rows_by_case: dict[str, int] = {}
+    provider_latencies: list[float] = []
+    concurrency_latencies: list[float] = []
+    if isinstance(runtime_observations, list):
+        for observation in runtime_observations:
+            if not isinstance(observation, Mapping):
+                continue
+            latency = observation.get("latency_ms")
+            if isinstance(latency, bool) or not isinstance(latency, (int, float)):
+                continue
+            latency_number = float(latency)
+            if not math.isfinite(latency_number) or latency_number < 0:
+                continue
+            if observation.get("lane") == "concurrency":
+                concurrency_latencies.append(latency_number)
+                continue
+            if observation.get("lane") != "provider_answer":
+                continue
+            provider_latencies.append(latency_number)
+            case_id = str(observation.get("case_id", ""))
+            provider_rows_by_case[case_id] = provider_rows_by_case.get(case_id, 0) + 1
+            provider_calls_by_case[case_id] = provider_calls_by_case.get(case_id, 0) + int(
+                observation.get("provider_configured") is True
+                and observation.get("final_generation_called") is True
+            )
+    for raw_result in raw_results:
+        if raw_result.get("lane") != "provider_answer":
+            continue
+        case_id = str(raw_result.get("case_id", ""))
+        expected = raw_result.get("probe_count")
+        observed = provider_rows_by_case.get(case_id, 0)
+        provider_calls = provider_calls_by_case.get(case_id, 0)
+        raw_result["provider_call_count"] = provider_calls
+        if type(expected) is not int or observed != expected or provider_calls != expected:
+            raw_result["passed"] = False
+            raw_result["failure_category"] = raw_result.get("failure_category") or "runtime"
+            failure_codes = raw_result.get("failure_codes")
+            codes = list(failure_codes) if isinstance(failure_codes, list) else []
+            if "provider_generation_not_observed" not in codes:
+                codes.append("provider_generation_not_observed")
+            raw_result["failure_codes"] = codes
+    passed = sum(raw_result.get("passed") is True for raw_result in raw_results)
+    concurrency_wave_sizes = {
+        result.concurrency_request_count
+        for result in execution.results
+        if result.lane == "concurrency"
+    }
     summary = {
         **execution.summary_metadata,
         "case_count": len(raw_results),
         "evaluated_count": len(raw_results),
         "pass_count": passed,
         "failure_count": len(raw_results) - passed,
-        "concurrency_request_count": sum(
-            result.concurrency_request_count for result in execution.results
+        "provider_call_count": sum(
+            int(raw_result.get("provider_call_count", 0))
+            for raw_result in raw_results
+            if type(raw_result.get("provider_call_count")) is int
+        ),
+        "provider_p95_ms": _p95(provider_latencies),
+        "concurrency_p95_ms": _p95(concurrency_latencies),
+        "concurrency_request_count": (
+            next(iter(concurrency_wave_sizes))
+            if len(concurrency_wave_sizes) == 1
+            else None
         ),
         "results": raw_results,
     }

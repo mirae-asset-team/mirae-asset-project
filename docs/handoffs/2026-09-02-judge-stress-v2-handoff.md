@@ -4,7 +4,7 @@
 
 `agent/judge-stress-v2` 브랜치에서 Task 1~8의 로컬 구현·검증을 완료했다. 실제 600건 앱/provider 평가와 운영 승격은 완료된 것으로 주장하지 않는다. 통합 release gate의 현재 결과는 `BLOCKED_HARD_GATE`이며, 34개 차단 사유가 남아 있어 8001/8000 및 NCP 배포를 실행하지 않았다. 다음 작업은 private holdout 120건과 실제 staging provider/identity를 준비해 같은 gate를 재실행하는 것이다.
 
-> 2026-09-03 Task 8 갱신: 원시 결과 재계산, 변조 방지, all-citation 검증, 동시성/보안 카운터, freshness와 외부 trust anchor를 하나의 gate로 통합했다. 배포 스크립트는 PASS 보고서도 27개 metric을 독립 검증하고, traversal·rollback 부재·image/mount 불일치를 fail-closed로 거부한다. 평가/배포 양쪽 독립 재리뷰가 승인됐고 focused `136 passed, 177 subtests`, 전체 Python `823 passed, 2 skipped, 323 subtests`를 통과했다.
+> 2026-09-03 Task 8 갱신: 원시 결과 재계산, 변조 방지, all-citation 검증, 동시성/보안 카운터, freshness와 외부 trust anchor를 하나의 gate로 통합했다. 배포는 Git archive 기반 pre-stage→8001 실제 평가→최종 gate→별도 8000 승격의 두 단계다. PASS 보고서도 27개 metric을 독립 검증하고, traversal·rollback 부재·image/mount/health identity 불일치를 fail-closed로 거부한다. 반복 독립 재리뷰에서 발견된 상위 집계, raw latency, provider 실행표지와 untracked build-input 우회를 모두 닫았고 focused `181 passed, 94 subtests`, 전체 Python `868 passed, 2 skipped, 240 subtests`를 통과했다.
 
 > 2026-09-03 갱신: Task 5 첫 커밋은 독립 리뷰에서 거절되었고 후속 fixup에서 다섯 blocker와 Docker build-context 결함을 TDD로 수정했다. 현재 tracked 평가 결과가 ADOPTED가 아니므로 Dense는 의도적으로 비활성이고 Sparse가 안전 경로다. Task 6의 claim-level verification은 별도 미추적 작업으로 분리되어 있으며 이 Task 5 fixup에 포함하지 않는다.
 
@@ -91,8 +91,8 @@ python -m compileall -q src scripts
 git diff --check
 ```
 
-- Task 8 focused: `136 passed, 177 subtests passed`
-- Python 전체: `823 passed, 2 skipped, 86 warnings, 323 subtests passed`
+- Task 8 focused: `181 passed, 94 subtests passed`
+- Python 전체: `868 passed, 2 skipped, 86 warnings, 240 subtests passed`
 - Web: `12/12 passed`
 - compileall/diff: pass
 - 경고는 기존 FastAPI `on_event` deprecation이다.

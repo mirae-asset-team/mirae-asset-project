@@ -50,6 +50,7 @@ _FIXED_ZERO_COUNTERS = (
     "deterministic_provider_call_count",
 )
 _INDEPENDENT_SECURITY_COUNTERS = _FIXED_ZERO_COUNTERS[:5]
+_REQUIRED_RETRIEVAL_CASES = 120
 _FIXED_IDENTITY_FIELDS = (
     "commit",
     "image_id",
@@ -373,6 +374,11 @@ def _recompute_judge_results(
         "failure_count": None,
         "numeric_exactness": None,
         "claim_citation_coverage": None,
+        "answerability_agreement": None,
+        "metamorphic_consistency": None,
+        "provider_call_count": None,
+        "concurrency_request_count": None,
+        "concurrency_error_count": None,
         "evaluator_error_count": None,
         "forbidden_provider_call_count": None,
         "deterministic_provider_call_count": None,
@@ -390,6 +396,11 @@ def _recompute_judge_results(
     passed_count = 0
     numeric_values: list[float] = []
     citation_values: list[float] = []
+    answerability_values: list[float] = []
+    metamorphic_values: list[float] = []
+    provider_calls = 0
+    concurrency_wave_sizes: set[int] = set()
+    concurrency_errors = 0
     evaluator_errors = 0
     forbidden_calls = 0
     valid = len(raw_results) == required_total
@@ -411,9 +422,15 @@ def _recompute_judge_results(
             valid = False
         else:
             passed_count += int(passed)
+        lane = raw_result.get("lane")
+        if not isinstance(lane, str) or not lane:
+            reasons.append(f"invalid_domain:{label}.lane")
+            valid = False
         for field, values in (
             ("numeric_exactness", numeric_values),
             ("claim_citation_coverage", citation_values),
+            ("answerability_agreement", answerability_values),
+            ("metamorphic_consistency", metamorphic_values),
         ):
             value = raw_result.get(field)
             if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -426,16 +443,39 @@ def _recompute_judge_results(
                 valid = False
                 continue
             values.append(numeric)
-        for field in ("evaluator_error_count", "forbidden_provider_call_count"):
+        raw_counts: dict[str, int] = {}
+        for field in (
+            "provider_call_count",
+            "concurrency_request_count",
+            "concurrency_error_count",
+            "evaluator_error_count",
+            "forbidden_provider_call_count",
+        ):
             value = raw_result.get(field)
             if type(value) is not int or value < 0:
                 reasons.append(f"invalid_domain:{label}.{field}")
                 valid = False
                 continue
-            if field == "evaluator_error_count":
-                evaluator_errors += value
-            else:
-                forbidden_calls += value
+            raw_counts[field] = value
+        if len(raw_counts) == 5:
+            provider_calls += raw_counts["provider_call_count"]
+            evaluator_errors += raw_counts["evaluator_error_count"]
+            forbidden_calls += raw_counts["forbidden_provider_call_count"]
+            concurrency_errors += raw_counts["concurrency_error_count"]
+            if lane == "concurrency":
+                concurrency_wave_sizes.add(raw_counts["concurrency_request_count"])
+            elif raw_counts["concurrency_request_count"] != 0:
+                reasons.append(
+                    f"invalid_domain:{label}.concurrency_request_count"
+                )
+                valid = False
+
+    if not concurrency_wave_sizes:
+        reasons.append("missing_or_invalid:judge.results.concurrency")
+        valid = False
+    elif len(concurrency_wave_sizes) != 1:
+        reasons.append("inconsistent:judge.results.concurrency_request_count")
+        valid = False
 
     if not valid:
         return empty, case_ids
@@ -452,12 +492,257 @@ def _recompute_judge_results(
             "claim_citation_coverage": round(
                 sum(citation_values) / evaluated_count, 12
             ),
+            "answerability_agreement": round(
+                sum(answerability_values) / evaluated_count, 12
+            ),
+            "metamorphic_consistency": round(
+                sum(metamorphic_values) / evaluated_count, 12
+            ),
+            "provider_call_count": provider_calls,
+            "concurrency_request_count": next(iter(concurrency_wave_sizes)),
+            "concurrency_error_count": concurrency_errors,
             "evaluator_error_count": evaluator_errors,
             "forbidden_provider_call_count": forbidden_calls,
             "deterministic_provider_call_count": forbidden_calls,
         },
         case_ids,
     )
+
+
+def _nearest_rank_p95(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    return round(ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)], 6)
+
+
+def _recompute_latency_observations(
+    judge: Mapping[str, object],
+    *,
+    expected_case_ids: set[str],
+    expected_provider_observations: int,
+    provider_limit_ms: float,
+    concurrency_limit_ms: float,
+    reasons: list[str],
+) -> dict[str, int | float | None]:
+    """Recompute latency gates from content-free HTTP observations.
+
+    ``judge.latency_observations`` has exactly these required fields per row:
+    ``case_id``, ``probe_id``, ``lane``, ``provider_configured``,
+    ``final_generation_called``, ``provider_used`` and ``latency_ms``.
+    Provider p95 uses all 120 provider probe responses; concurrency p95 uses
+    every request in every 20-request wave. Both use nearest-rank p95, while
+    any individual latency above the corresponding limit also blocks release.
+    """
+
+    empty: dict[str, int | float | None] = {
+        "provider_call_count": None,
+        "forbidden_provider_call_count": None,
+        "provider_p95_ms": None,
+        "concurrency_p95_ms": None,
+    }
+    raw_observations = judge.get("latency_observations")
+    if not isinstance(raw_observations, list) or not raw_observations:
+        reasons.append("missing_or_invalid:judge.latency_observations")
+        return empty
+
+    raw_results = judge.get("results")
+    if not isinstance(raw_results, list):
+        reasons.append("missing_or_invalid:judge.results")
+        return empty
+    provider_expected: dict[str, int] = {}
+    concurrency_expected: dict[str, int] = {}
+    provider_reported_p95: dict[str, float] = {}
+    concurrency_reported_p95: dict[str, float] = {}
+    for index, raw_result in enumerate(raw_results):
+        if not isinstance(raw_result, Mapping):
+            continue
+        case_id = raw_result.get("case_id")
+        lane = raw_result.get("lane")
+        if not isinstance(case_id, str) or case_id not in expected_case_ids:
+            continue
+        if lane == "provider_answer":
+            probe_count = raw_result.get("probe_count")
+            if type(probe_count) is int and probe_count > 0:
+                provider_expected[case_id] = probe_count
+            else:
+                reasons.append(f"invalid_domain:judge.results[{index}].probe_count")
+            raw_p95 = raw_result.get("provider_p95_ms")
+            if (
+                isinstance(raw_p95, bool)
+                or not isinstance(raw_p95, (int, float))
+                or not math.isfinite(float(raw_p95))
+                or float(raw_p95) < 0
+            ):
+                reasons.append(
+                    f"invalid_domain:judge.results[{index}].provider_p95_ms"
+                )
+                valid = False
+            else:
+                provider_reported_p95[case_id] = float(raw_p95)
+        elif lane == "concurrency":
+            request_count = raw_result.get("concurrency_request_count")
+            if type(request_count) is int and request_count >= 0:
+                concurrency_expected[case_id] = request_count
+            else:
+                reasons.append(
+                    f"invalid_domain:judge.results[{index}].concurrency_request_count"
+                )
+            raw_p95 = raw_result.get("concurrency_p95_ms")
+            if (
+                isinstance(raw_p95, bool)
+                or not isinstance(raw_p95, (int, float))
+                or not math.isfinite(float(raw_p95))
+                or float(raw_p95) < 0
+            ):
+                reasons.append(
+                    f"invalid_domain:judge.results[{index}].concurrency_p95_ms"
+                )
+                valid = False
+            else:
+                concurrency_reported_p95[case_id] = float(raw_p95)
+        elif "provider_p95_ms" in raw_result or "concurrency_p95_ms" in raw_result:
+            reasons.append(f"invalid_domain:judge.results[{index}].lane_p95")
+            valid = False
+
+    provider_latencies: list[float] = []
+    concurrency_latencies: list[float] = []
+    provider_seen_by_case: dict[str, int] = {}
+    concurrency_seen_by_case: dict[str, int] = {}
+    provider_latencies_by_case: dict[str, list[float]] = {}
+    concurrency_latencies_by_case: dict[str, list[float]] = {}
+    provider_probe_keys: set[tuple[str, str]] = set()
+    provider_calls = 0
+    forbidden_calls = 0
+    valid = True
+    for index, raw_observation in enumerate(raw_observations):
+        label = f"judge.latency_observations[{index}]"
+        if not isinstance(raw_observation, Mapping):
+            reasons.append(f"invalid_domain:{label}")
+            valid = False
+            continue
+        case_id = raw_observation.get("case_id")
+        probe_id = raw_observation.get("probe_id")
+        lane = raw_observation.get("lane")
+        provider_configured = raw_observation.get("provider_configured")
+        final_generation_called = raw_observation.get("final_generation_called")
+        provider_used = raw_observation.get("provider_used")
+        raw_latency = raw_observation.get("latency_ms")
+        if (
+            not isinstance(case_id, str)
+            or not case_id
+            or case_id not in expected_case_ids
+        ):
+            reasons.append(f"invalid_domain:{label}.case_id")
+            valid = False
+        if not isinstance(probe_id, str) or not probe_id:
+            reasons.append(f"invalid_domain:{label}.probe_id")
+            valid = False
+        if lane not in {"provider_answer", "concurrency"}:
+            reasons.append(f"invalid_domain:{label}.lane")
+            valid = False
+        if type(provider_configured) is not bool:
+            reasons.append(f"invalid_domain:{label}.provider_configured")
+            valid = False
+        if type(final_generation_called) is not bool:
+            reasons.append(f"invalid_domain:{label}.final_generation_called")
+            valid = False
+        observed_provider_used = (
+            provider_configured is True and final_generation_called is True
+        )
+        if type(provider_used) is not bool:
+            reasons.append(f"invalid_domain:{label}.provider_used")
+            valid = False
+        elif provider_used != observed_provider_used:
+            reasons.append(f"mismatch:{label}.provider_used")
+            valid = False
+        if isinstance(raw_latency, bool) or not isinstance(raw_latency, (int, float)):
+            reasons.append(f"invalid_domain:{label}.latency_ms")
+            valid = False
+            continue
+        latency = float(raw_latency)
+        if not math.isfinite(latency) or latency < 0:
+            reasons.append(f"invalid_domain:{label}.latency_ms")
+            valid = False
+            continue
+        if lane == "provider_answer":
+            if isinstance(case_id, str):
+                provider_seen_by_case[case_id] = provider_seen_by_case.get(case_id, 0) + 1
+                provider_latencies_by_case.setdefault(case_id, []).append(latency)
+            if isinstance(case_id, str) and isinstance(probe_id, str):
+                key = (case_id, probe_id)
+                if key in provider_probe_keys:
+                    reasons.append(f"invalid_domain:{label}.probe_id")
+                    valid = False
+                provider_probe_keys.add(key)
+            provider_latencies.append(latency)
+            provider_calls += int(observed_provider_used)
+            if latency > provider_limit_ms:
+                reasons.append(
+                    "threshold:judge.provider_answer.raw_latency_ms:"
+                    f"expected_max_{provider_limit_ms}:actual_{latency}"
+                )
+        elif lane == "concurrency":
+            if isinstance(case_id, str):
+                concurrency_seen_by_case[case_id] = (
+                    concurrency_seen_by_case.get(case_id, 0) + 1
+                )
+                concurrency_latencies_by_case.setdefault(case_id, []).append(latency)
+            concurrency_latencies.append(latency)
+            forbidden_calls += int(observed_provider_used)
+            if latency > concurrency_limit_ms:
+                reasons.append(
+                    "threshold:judge.concurrency.raw_latency_ms:"
+                    f"expected_max_{concurrency_limit_ms}:actual_{latency}"
+                )
+
+    if len(provider_latencies) != expected_provider_observations:
+        reasons.append(
+            "incomplete:judge.latency_observations.provider_answer:"
+            f"expected_{expected_provider_observations}:actual_{len(provider_latencies)}"
+        )
+        valid = False
+    if provider_seen_by_case != provider_expected:
+        reasons.append("incomplete:judge.latency_observations.provider_cases")
+        valid = False
+    expected_concurrency_total = sum(concurrency_expected.values())
+    if len(concurrency_latencies) != expected_concurrency_total:
+        reasons.append(
+            "incomplete:judge.latency_observations.concurrency:"
+            f"expected_{expected_concurrency_total}:actual_{len(concurrency_latencies)}"
+        )
+        valid = False
+    if concurrency_seen_by_case != concurrency_expected:
+        reasons.append("incomplete:judge.latency_observations.concurrency_cases")
+        valid = False
+    for case_id, expected_p95 in provider_reported_p95.items():
+        recomputed_p95 = _nearest_rank_p95(provider_latencies_by_case.get(case_id, []))
+        if recomputed_p95 is None or not math.isclose(
+            expected_p95, recomputed_p95, rel_tol=0.0, abs_tol=1e-6
+        ):
+            reasons.append(
+                "mismatch:judge.results.provider_p95_ms:"
+                f"case_{case_id}:reported_{expected_p95}:recomputed_{recomputed_p95}"
+            )
+    for case_id, expected_p95 in concurrency_reported_p95.items():
+        recomputed_p95 = _nearest_rank_p95(
+            concurrency_latencies_by_case.get(case_id, [])
+        )
+        if recomputed_p95 is None or not math.isclose(
+            expected_p95, recomputed_p95, rel_tol=0.0, abs_tol=1e-6
+        ):
+            reasons.append(
+                "mismatch:judge.results.concurrency_p95_ms:"
+                f"case_{case_id}:reported_{expected_p95}:recomputed_{recomputed_p95}"
+            )
+    if not valid:
+        return empty
+    return {
+        "provider_call_count": provider_calls,
+        "forbidden_provider_call_count": forbidden_calls,
+        "provider_p95_ms": _nearest_rank_p95(provider_latencies),
+        "concurrency_p95_ms": _nearest_rank_p95(concurrency_latencies),
+    }
 
 
 def _recompute_security_counters(
@@ -500,6 +785,73 @@ def _recompute_security_counters(
         reasons.append("incomplete:judge.security_observations.case_coverage")
         return {field: None for field in _INDEPENDENT_SECURITY_COUNTERS}
     return totals
+
+
+def _recompute_retrieval_recall(
+    retrieval: Mapping[str, object], reasons: list[str]
+) -> float | None:
+    raw_scores = retrieval.get("case_scores")
+    if not isinstance(raw_scores, list) or not raw_scores:
+        reasons.append("missing_or_invalid:retrieval.case_scores")
+        return None
+    if len(raw_scores) != _REQUIRED_RETRIEVAL_CASES:
+        reasons.append(
+            "incomplete:retrieval.case_scores:"
+            f"expected_{_REQUIRED_RETRIEVAL_CASES}:actual_{len(raw_scores)}"
+        )
+
+    case_ids: set[str] = set()
+    target_count = 0
+    target_hits = 0
+    valid = len(raw_scores) == _REQUIRED_RETRIEVAL_CASES
+    for index, raw_score in enumerate(raw_scores):
+        label = f"retrieval.case_scores[{index}]"
+        if not isinstance(raw_score, Mapping):
+            reasons.append(f"invalid_domain:{label}")
+            valid = False
+            continue
+        case_id = raw_score.get("case_id")
+        if not isinstance(case_id, str) or not case_id or case_id in case_ids:
+            reasons.append(f"invalid_domain:{label}.case_id")
+            valid = False
+        else:
+            case_ids.add(case_id)
+        raw_target_count = raw_score.get("target_count")
+        raw_target_hits = raw_score.get("target_hits_at_20")
+        if type(raw_target_count) is not int or raw_target_count <= 0:
+            reasons.append(f"invalid_domain:{label}.target_count")
+            valid = False
+            continue
+        if (
+            type(raw_target_hits) is not int
+            or raw_target_hits < 0
+            or raw_target_hits > raw_target_count
+        ):
+            reasons.append(f"invalid_domain:{label}.target_hits_at_20")
+            valid = False
+            continue
+        target_count += raw_target_count
+        target_hits += raw_target_hits
+
+    metrics = _mapping(retrieval.get("metrics"))
+    for field, actual in (
+        ("case_count", len(raw_scores)),
+        ("target_count", target_count),
+        ("target_hits_at_20", target_hits),
+    ):
+        reported = _count(
+            metrics,
+            ((field,),),
+            f"retrieval.metrics.{field}",
+            reasons,
+        )
+        if reported is not None and reported != actual:
+            reasons.append(
+                f"mismatch:retrieval.{field}:reported_{reported}:recomputed_{actual}"
+            )
+    if not valid or target_count <= 0:
+        return None
+    return target_hits / target_count
 
 
 def _normalized_identity_value(field: str, value: object) -> str | None:
@@ -554,6 +906,16 @@ def evaluate_release_gate(
     recomputed_judge, raw_case_ids = _recompute_judge_results(
         judge, int(judge_contract["required_total"]), reasons
     )
+    recomputed_latency = _recompute_latency_observations(
+        judge,
+        expected_case_ids=raw_case_ids,
+        expected_provider_observations=int(
+            judge_contract["provider_probe_observation_count"]
+        ),
+        provider_limit_ms=float(judge_contract["provider_p95_ms_max"]),
+        concurrency_limit_ms=float(concurrency_contract["p95_ms_max"]),
+        reasons=reasons,
+    )
     for field, expected in (
         ("case_count", int(judge_contract["required_total"])),
         ("evaluated_count", int(judge_contract["required_total"])),
@@ -583,15 +945,30 @@ def evaluate_release_gate(
         ("answerability_agreement", float(judge_contract["answerability_agreement_min"])),
         ("metamorphic_consistency", float(judge_contract["metamorphic_consistency_min"])),
     ):
-        actual = _ratio(judge, ((field,),), f"judge.{field}", reasons)
+        reported = _ratio(judge, ((field,),), f"judge.{field}", reasons)
+        actual = recomputed_judge[field]
+        if actual is not None and reported is not None and actual != reported:
+            reasons.append(
+                f"mismatch:judge.{field}:reported_{reported}:recomputed_{actual}"
+            )
         _expect_minimum(metrics, f"judge_{field}", actual, minimum, reasons, reason_label=f"judge.{field}")
 
-    recall = _ratio(
+    reported_recall = _ratio(
         retrieval,
         (("metrics", "target_recall_at_20"), ("recall_at_20",)),
         "retrieval.recall_at_20",
         reasons,
     )
+    recall = _recompute_retrieval_recall(retrieval, reasons)
+    if (
+        recall is not None
+        and reported_recall is not None
+        and recall != reported_recall
+    ):
+        reasons.append(
+            "mismatch:retrieval.recall_at_20:"
+            f"reported_{reported_recall}:recomputed_{recall}"
+        )
     _expect_minimum(
         metrics,
         "retrieval_recall_at_20",
@@ -601,24 +978,52 @@ def evaluate_release_gate(
         reason_label="retrieval.recall_at_20",
     )
 
-    concurrency_request_count = _count(
+    reported_concurrency_request_count = _count(
         judge,
         (("concurrency_request_count",), ("concurrency", "request_count")),
         "judge.concurrency_request_count",
         reasons,
     )
-    concurrency_error_count = _count(
+    reported_concurrency_error_count = _count(
         judge,
         (("concurrency_error_count",), ("concurrency", "error_count")),
         "judge.concurrency_error_count",
         reasons,
     )
-    concurrency_p95 = _latency(
+    concurrency_request_count = recomputed_judge["concurrency_request_count"]
+    concurrency_error_count = recomputed_judge["concurrency_error_count"]
+    for field, reported, actual in (
+        (
+            "concurrency_request_count",
+            reported_concurrency_request_count,
+            concurrency_request_count,
+        ),
+        (
+            "concurrency_error_count",
+            reported_concurrency_error_count,
+            concurrency_error_count,
+        ),
+    ):
+        if actual is not None and reported is not None and actual != reported:
+            reasons.append(
+                f"mismatch:judge.{field}:reported_{reported}:recomputed_{actual}"
+            )
+    reported_concurrency_p95 = _latency(
         judge,
         (("concurrency_p95_ms",), ("concurrency", "p95_ms")),
         "judge.concurrency_p95_ms",
         reasons,
     )
+    concurrency_p95 = recomputed_latency["concurrency_p95_ms"]
+    if (
+        concurrency_p95 is not None
+        and reported_concurrency_p95 is not None
+        and concurrency_p95 != reported_concurrency_p95
+    ):
+        reasons.append(
+            "mismatch:judge.concurrency_p95_ms:"
+            f"reported_{reported_concurrency_p95}:recomputed_{concurrency_p95}"
+        )
     _expect_equal(metrics, "concurrency_request_count", concurrency_request_count, int(concurrency_contract["request_count"]), reasons, reason_label="judge.concurrency_request_count")
     _expect_equal(metrics, "concurrency_error_count", concurrency_error_count, int(concurrency_contract["error_count"]), reasons, reason_label="judge.concurrency_error_count")
     _expect_maximum(metrics, "concurrency_p95_ms", concurrency_p95, float(concurrency_contract["p95_ms_max"]), reasons, reason_label="judge.concurrency_p95_ms")
@@ -626,11 +1031,53 @@ def evaluate_release_gate(
     for field in (
         "provider_eligible_root_count",
         "provider_probe_observation_count",
-        "provider_call_count",
     ):
         actual = _count(judge, ((field,),), f"judge.{field}", reasons)
         _expect_equal(metrics, field, actual, int(judge_contract[field]), reasons, reason_label=f"judge.{field}")
-    provider_p95 = _latency(judge, (("provider_p95_ms",),), "judge.provider_p95_ms", reasons)
+    reported_provider_calls = _count(
+        judge, (("provider_call_count",),), "judge.provider_call_count", reasons
+    )
+    provider_calls = recomputed_latency["provider_call_count"]
+    raw_result_provider_calls = recomputed_judge["provider_call_count"]
+    if (
+        provider_calls is not None
+        and reported_provider_calls is not None
+        and provider_calls != reported_provider_calls
+    ):
+        reasons.append(
+            "mismatch:judge.provider_call_count:"
+            f"reported_{reported_provider_calls}:recomputed_{provider_calls}"
+        )
+    if (
+        provider_calls is not None
+        and raw_result_provider_calls is not None
+        and provider_calls != raw_result_provider_calls
+    ):
+        reasons.append(
+            "mismatch:judge.results.provider_call_count:"
+            f"reported_{raw_result_provider_calls}:recomputed_{provider_calls}"
+        )
+    _expect_equal(
+        metrics,
+        "provider_call_count",
+        provider_calls,
+        int(judge_contract["provider_call_count"]),
+        reasons,
+        reason_label="judge.provider_call_count",
+    )
+    reported_provider_p95 = _latency(
+        judge, (("provider_p95_ms",),), "judge.provider_p95_ms", reasons
+    )
+    provider_p95 = recomputed_latency["provider_p95_ms"]
+    if (
+        provider_p95 is not None
+        and reported_provider_p95 is not None
+        and provider_p95 != reported_provider_p95
+    ):
+        reasons.append(
+            "mismatch:judge.provider_p95_ms:"
+            f"reported_{reported_provider_p95}:recomputed_{provider_p95}"
+        )
     _expect_maximum(metrics, "provider_p95_ms", provider_p95, float(judge_contract["provider_p95_ms_max"]), reasons, reason_label="judge.provider_p95_ms")
 
     zero_counters = contract["zero_counters"]
@@ -638,14 +1085,27 @@ def evaluate_release_gate(
     recomputed_security = _recompute_security_counters(
         judge, raw_case_ids, reasons
     )
+    raw_forbidden_calls = recomputed_judge["forbidden_provider_call_count"]
+    observed_forbidden_calls = recomputed_latency["forbidden_provider_call_count"]
+    if (
+        raw_forbidden_calls is not None
+        and observed_forbidden_calls is not None
+        and raw_forbidden_calls != observed_forbidden_calls
+    ):
+        reasons.append(
+            "mismatch:judge.results.forbidden_provider_call_count:"
+            f"reported_{raw_forbidden_calls}:recomputed_{observed_forbidden_calls}"
+        )
+    combined_forbidden_calls = (
+        max(raw_forbidden_calls, observed_forbidden_calls)
+        if raw_forbidden_calls is not None and observed_forbidden_calls is not None
+        else None
+    )
     recomputed_security.update(
         {
-            field: recomputed_judge[field]
-            for field in (
-                "evaluator_error_count",
-                "forbidden_provider_call_count",
-                "deterministic_provider_call_count",
-            )
+            "evaluator_error_count": recomputed_judge["evaluator_error_count"],
+            "forbidden_provider_call_count": combined_forbidden_calls,
+            "deterministic_provider_call_count": combined_forbidden_calls,
         }
     )
     for field in zero_counters:

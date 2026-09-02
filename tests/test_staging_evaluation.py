@@ -594,6 +594,8 @@ def test_staging_judge_runtime_emits_only_structured_observation_and_identity() 
                 "answerable": True,
                 "answer": "DO-NOT-COPY-PROVIDER-PROSE",
                 "metadata": {
+                    "provider_configured": True,
+                    "final_generation_called": True,
                     "value": "100",
                     "unit": "KRW",
                     "scope": "consolidated",
@@ -623,6 +625,54 @@ def test_staging_judge_runtime_emits_only_structured_observation_and_identity() 
     assert "DO-NOT-COPY" not in repr(observation)
 
 
+def test_provider_lane_without_response_generation_metadata_is_not_provider_used() -> None:
+    class DeterministicTransport(RecordingTransport):
+        def __call__(self, method, url, payload, **kwargs):
+            self.calls.append((method, url, payload))
+            return {
+                "status": "answered",
+                "answerable": True,
+                "answer": "결정론적 응답",
+                "metadata": {"claim_support": []},
+            }
+
+    runtime = StagingJudgeRuntime(
+        StagingApiClient(
+            "http://127.0.0.1:8001", transport=DeterministicTransport()
+        ),
+        oracle_resolver=lambda case, probe: {
+            "allowed_numeric_values": [],
+            "allowed_citation_ids": [],
+            "allowed_filing_ids": [],
+        },
+    )
+
+    observation = runtime.execute(
+        "provider_answer",
+        {"case_id": "provider-without-generation", "category": "free_form"},
+        type(
+            "Probe",
+            (),
+            {"probe_id": "probe-1", "question": "safe provider test"},
+        )(),
+    )
+    summary = runtime.run_summary()
+
+    assert observation.provider_used is False
+    assert summary["latency_observations"] == [
+        {
+            "case_id": "provider-without-generation",
+            "probe_id": "probe-1",
+            "lane": "provider_answer",
+            "provider_configured": False,
+            "final_generation_called": False,
+            "provider_used": False,
+            "latency_ms": pytest.approx(observation.latency_ms),
+        }
+    ]
+    assert "결정론적 응답" not in json.dumps(summary, ensure_ascii=False)
+
+
 def test_staging_runtime_uses_independent_claim_inspection_in_observation_and_summary() -> None:
     class RuntimeTransport(RecordingTransport):
         def __call__(self, method, url, payload, **kwargs):
@@ -635,6 +685,8 @@ def test_staging_runtime_uses_independent_claim_inspection_in_observation_and_su
                 "answer": "매출액은 999원입니다.",
                 "citations": [{"evidence_id": "ev-1", "rcept_no": "filing-1"}],
                 "metadata": {
+                    "provider_configured": True,
+                    "final_generation_called": True,
                     "claim_support": [
                         {
                             "claim_id": "claim-1",
@@ -666,7 +718,11 @@ def test_staging_runtime_uses_independent_claim_inspection_in_observation_and_su
     observation = runtime.execute(
         "provider_answer",
         {"case_id": "case-1"},
-        type("Probe", (), {"question": "safe test question"})(),
+        type(
+            "Probe",
+            (),
+            {"probe_id": "probe-1", "question": "safe test question"},
+        )(),
     )
 
     assert observation.hallucinated_numeric_claim_count == 1
@@ -685,6 +741,17 @@ def test_staging_runtime_uses_independent_claim_inspection_in_observation_and_su
                 "cross_filing_citation_count": 0,
                 "policy_violation_count": 0,
                 "secret_leak_count": 0,
+            }
+        ],
+        "latency_observations": [
+            {
+                "case_id": "case-1",
+                "probe_id": "probe-1",
+                "lane": "provider_answer",
+                "provider_configured": True,
+                "final_generation_called": True,
+                "provider_used": True,
+                "latency_ms": pytest.approx(observation.latency_ms),
             }
         ],
     }
@@ -791,6 +858,85 @@ def test_staging_suite_gate_input_contains_independent_raw_security_counts() -> 
     assert gate_result.metrics["hallucinated_numeric_claim_count"] == 6
     assert gate_result.metrics["unknown_citation_count"] == 6
     assert gate_result.metrics["cross_filing_citation_count"] == 6
+
+
+def test_staging_suite_reports_concurrency_wave_size_not_sum_across_cases() -> None:
+    class SuccessfulTransport(RecordingTransport):
+        def __call__(self, method, url, payload, **kwargs):
+            self.calls.append((method, url, payload))
+            if url.endswith("/health"):
+                return {"status": "ok", "identity": {"commit": "abc123"}}
+            return {
+                "status": "answered",
+                "answerable": True,
+                "answer": "검증된 답변",
+                "metadata": {"claim_support": []},
+            }
+
+    cases = [
+        {
+            "case_id": f"development-concurrency-{index}",
+            "case_sha256": f"{index + 1:064x}",
+            "split": "development",
+            "category": "api_concurrency",
+            "question": "동시 요청 검사",
+            "oracle": {"kind": "safe_response"},
+        }
+        for index in range(2)
+    ]
+    manifest_cases = [
+        {
+            "case_id": case["case_id"],
+            "case_sha256": case["case_sha256"],
+            "split": case["split"],
+            "category": case["category"],
+        }
+        for case in cases
+    ]
+    manifest_cases.extend(
+        {
+            "case_id": f"holdout-provider-{index:04d}",
+            "case_sha256": f"{index + 100:064x}",
+            "split": "holdout",
+            "category": "free_form" if index < 24 else "multi_evidence_judgment",
+        }
+        for index in range(42)
+    )
+    runtime = StagingJudgeRuntime(
+        StagingApiClient(
+            "http://127.0.0.1:8001", transport=SuccessfulTransport()
+        ),
+        oracle_resolver=lambda case, probe: {
+            "allowed_numeric_values": [],
+            "allowed_citation_ids": [],
+            "allowed_filing_ids": [],
+        },
+    )
+
+    gate_input = run_staging_suite(
+        cases,
+        runtime,
+        JudgeRunOptions(
+            private_holdout_available=True,
+            provider_available=True,
+            concurrency=20,
+        ),
+        manifest={"cases": manifest_cases},
+    )
+
+    assert gate_input["concurrency_request_count"] == 20
+    assert gate_input["concurrency_error_count"] == 0
+    assert [row["concurrency_request_count"] for row in gate_input["results"]] == [
+        20,
+        20,
+    ]
+    raw_latencies = sorted(
+        row["latency_ms"]
+        for row in gate_input["latency_observations"]
+        if row["lane"] == "concurrency"
+    )
+    assert len(raw_latencies) == 40
+    assert gate_input["concurrency_p95_ms"] == round(raw_latencies[37], 6)
 
 
 def test_smoke_summary_contains_status_only() -> None:

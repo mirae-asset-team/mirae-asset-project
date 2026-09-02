@@ -268,13 +268,42 @@ provider smoke와 300-case 평가를 통과하기 전까지 최종 제출 상태
 
 ## Fail-closed release deployment
 
-`scripts/deploy_staging.ps1`과 `scripts/deploy_release.ps1`은 일반 배포 명령이 아니라
-`release-gate-summary-v1` 전용 승격 도구다. 기본 보고서
-`data/derived/release_gate_summary.json`이 없거나 JSON/schema가 잘못됐거나,
-`hard_gate_passed=true`와 `release_state=PASS`가 모두 아니면 **BLOCKED** 상태로 즉시
-종료한다. 이 검사는 Docker build, SSH, SCP보다 먼저 실행된다. 현재 추적된 Judge Stress
-보고서는 `release_state=BLOCKED`이므로 release gate 보고서를 대신할 수 없고 배포 입력으로
-사용할 수 없다.
+배포는 순환 의존을 막기 위해 두 단계로 실행한다. `scripts/deploy_staging.ps1`은 최종
+`release-gate-summary-v1`을 입력으로 요구하지 않는다. 대신 외부에서 전달한 full commit과
+세 data SHA-256을 trust anchor로 삼아 최신 financial 856건, retrieval Recall@20 95%,
+Judge 480+120 입력을 각각 재검사한다. 이 **pre-stage** 결과는
+`stage_state=READY_FOR_STAGING`, `final_release_passed=false`이며 최종 PASS나 production 승인을
+뜻하지 않는다. 현재 저장소의 stale/Recall 미달 보고서는 이 단계에서 **BLOCKED**되고 Docker
+build, SSH, SCP를 실행하지 않는다.
+
+pre-stage를 통과하면 `ExpectedCommit`의 `git archive`에서 Dockerfile과 모든 tracked
+`src`·`config`·`eval` build input을 임시 context로 추출한다. 현재 working tree를 재귀 복사하지
+않으므로 tracked 수정과 untracked/ignored 파일은 이미지에 들어갈 수 없다. 유일한 별도 입력인
+retrieval 보고서는 운영자가 전달한 `ExpectedRetrievalReportSha256`과 일치해야 하며, build
+context와 배포 묶음에 넣은 뒤에도 같은 hash를 다시 확인한다. private holdout은 Git archive,
+build context, image, 배포 archive 어디에도 복사하지 않는다. agent 이미지는 정확히 한 번 build하고 archive/hash를 만든 다음, 서버에서
+`docker compose ... up --no-build`로 8001에만 기동한다. 이때 DB·overlay·search·attestation과
+Dense data/model mount가 `RW=false`인지, 컨테이너 image ID와 서버 data hash가 trust anchor와
+같은지 검사한다.
+
+그 다음 로컬의 bounded evaluator가 실제 8001에만 요청한다. 요청별 timeout과 응답 크기를
+제한하고, development 480건과 Git-ignored private holdout 120건, concurrency 20, 필수
+security/provider 관측을 수행한다. `staging_evaluation.json`에는 case/hash/metric/counter만
+남기며 원 질문, 답변, provider 응답, credential은 남기지 않는다. 평가 전후 실제 8001
+`/health.identity`는 `commit`, `image_id`, `base_sha256`, `overlay_sha256`,
+`search_index_sha256` 다섯 필드만 허용하며 외부 trust anchor와 정확히 일치해야 한다. 필드가
+없거나 더 있거나 값이 다르면 즉시 실패한다. evaluator가 local trust 값을 runtime identity로
+덮어쓰지 않으며, 평가가 끝난 뒤 서버 내부 localhost `/health` identity hash와 컨테이너 image,
+세 data hash를 다시 묶어 검사해 endpoint 또는 자산이 평가 도중 교체되지 않았음을 확인한다.
+현재 API의 `/health`가 이 identity 계약을 제공하지 않으면 staging은 의도적으로 fail-closed되며
+production 승격 근거를 만들 수 없다.
+
+마지막으로 `scripts/evaluate_release_candidate.py`가 external trust anchor, financial,
+retrieval, 방금 생성한 staging 결과로 최종 gate를 재계산한다. 여기서 생성된
+`release-gate-summary-v1`이 `hard_gate_passed=true`, `release_state=PASS`, 실제 빈
+`hard_gate_reasons=[]`일 때만 별도의 `scripts/deploy_release.ps1` 입력으로 사용할 수 있다.
+staging 스크립트 자체는 8000을 변경하지 않으며 출력의 `production_promoted=false`도 이를
+명시한다.
 
 PASS 표시 자체는 신뢰하지 않는다. `hard_gate_reasons`는 JSON `null`이 아닌 실제 빈 배열이어야
 하며, 27개 필수 metric을 각각 숫자 타입인지 확인한 뒤 계약의 exact/minimum/maximum 기준을
@@ -284,9 +313,9 @@ PASS 표시 자체는 신뢰하지 않는다. `hard_gate_reasons`는 JSON `null`
 PowerShell 5.1의 문자열 역직렬화와 PowerShell 7의 `DateTime` 역직렬화를 모두 허용하되 같은
 시간·freshness 규칙을 적용한다.
 
-승인 보고서의 `identity`에는 full Git commit, Docker `sha256:` image ID와 아래 3개
-SHA-256이 있어야 한다. 명령행의 expected 값과 한 항목이라도 다르면 staging과 production
-모두 변경하지 않는다.
+최종 승인 보고서의 `identity`에는 full Git commit, staging에서 실제 build·inspect한 Docker
+`sha256:` image ID와 아래 3개 SHA-256이 있어야 한다. 명령행 trust anchor와 한 항목이라도
+다르면 production을 변경하지 않는다.
 
 | Identity field | 실제 검증 대상 |
 |---|---|
@@ -294,12 +323,9 @@ SHA-256이 있어야 한다. 명령행의 expected 값과 한 항목이라도 �
 | `overlay_sha256` | `/srv/mirae/data/agent/agent_overlay.sqlite` |
 | `search_index_sha256` | `/srv/mirae/data/agent/agent_search.sqlite` |
 
-Staging 스크립트는 agent 이미지를 로컬에서 정확히 한 번 build하고 `docker save` 결과와
-SHA-256을 만든다. 배포 묶음에는 image archive, release compose, gate 보고서와 Dockerfile이
-요구하는 `data/derived/freeform_retrieval_summary.json`이 포함된다. 서버에서는 이미지를
-load한 뒤 `docker compose ... up --no-build`만 사용한다. 8001 컨테이너의 `.Image`가 승인된
-image ID와 같은지, DB·overlay·search·attestation 및 Dense data/model mount가 실제
-`RW=false`인지 `docker inspect`로 확인하고 나서만 staging ready를 반환한다.
+배포 묶음에는 image archive, release compose, `pre_stage_attestation.json`과 Dockerfile이
+요구하는 `data/derived/freeform_retrieval_summary.json`만 포함한다. private holdout과 최종 gate는
+포함하지 않는다. 최종 gate는 8001 평가 후 로컬 artifact directory에만 생성한다.
 
 Production 승격은 8001에서 검사된 것과 **동일한 image ID**가 실행 중일 때만 시작한다.
 기존 8000 image에는 UTC·image ID가 포함된 고유 rollback tag를 붙이고, 전환 전에 rollback

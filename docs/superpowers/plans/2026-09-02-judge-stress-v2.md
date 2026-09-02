@@ -120,9 +120,12 @@ or identity-mismatched inputs fail closed. The deployment scripts independently 
 27 metrics before any Git/SSH/Docker command, reject path traversal, require read-only protected
 mounts, build/save/hash the agent image once, use `--no-build` for 8001 and 8000, verify the same
 image identity, and require a validated rollback image and health checks. Independent reviews of the
-evaluation gate and deployment path were APPROVED after adversarial fixes. Focused Task 8 regression
-passed `136` tests and `177` subtests; the full Python suite passed `823` with `2` optional skips and
-`323` subtests. The current tracked result remains `BLOCKED_HARD_GATE` with 34 reasons: it has no
+evaluation gate and deployment path were APPROVED after adversarial fixes. A later whole-branch
+review found forged aggregate/raw-latency/provider-use and circular staging/build-identity gaps; these
+were closed by raw per-case recomputation, observed provider metadata, exact Git-archive build inputs,
+actual `/health.identity` binding, and a two-phase pre-stage/final-release flow. Focused Task 8 regression
+passed `181` tests and `94` subtests; the full Python suite passed `868` with `2` optional skips and
+`240` subtests. The current tracked result remains `BLOCKED_HARD_GATE` with 34 reasons: it has no
 complete raw 600-case Judge run, Recall@20 is `0.487179...`, provider calls are `0/120`, historical
 financial/retrieval inputs are stale for release purposes, and trusted staging image/data identities
 are absent. Therefore no 8001/8000 or NCP deployment was attempted and no threshold was lowered.

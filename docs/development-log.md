@@ -898,5 +898,13 @@
 - staging 검사: 실제 응답에서 숫자·모든 citation·issuer/filing·정책·secret을 재검사한다. `error`/`invalid`/`abstained`는 동시성 실패이고, NFKC·zero-width·circled/fullwidth·hex·한글 숫자와 매수/매도 권유 동의어 우회를 회귀로 고정했다. 내부 chain-of-thought, 질문·답변 원문, provider body, credential은 tracked JSON/HTML에 기록하지 않는다.
 - 배포 계약: PowerShell 스크립트가 gate schema/state/identity와 27개 metric의 타입·임계값을 외부 명령 전에 다시 검증한다. 원격 경로 traversal, rollback image 부재, image/mount 불일치를 fail-closed로 거부한다. agent image는 한 번만 build/save/hash하고 8001/8000 모두 `--no-build`로 같은 image ID를 사용하며 보호 mount는 `RW=false`여야 한다.
 - TDD/리뷰: 변조된 빈 PASS, 상위 집계 위조, 미참조 wrong citation, 20개 error 응답, 추천·Unicode 우회, 경로 traversal, rollback 성공 오판을 각각 RED로 재현한 뒤 최소 수정했다. 평가 gate와 배포 경로의 최종 독립 재리뷰는 모두 `APPROVED`였다.
-- 검증: Task 8 focused `136 passed, 177 subtests`; 전체 Python `823 passed, 2 skipped, 86 warnings, 323 subtests`; Web `12/12`; compileall/diff 통과. 경고는 기존 FastAPI `on_event` deprecation이며 optional skip 2건은 기존 환경 항목이다.
+- 검증: Task 8 focused `181 passed, 94 subtests`; 전체 Python `868 passed, 2 skipped, 86 warnings, 240 subtests`; Web `12/12`; compileall/diff 통과. 경고는 기존 FastAPI `on_event` deprecation이며 optional skip 2건은 기존 환경 항목이다.
 - 현재 판정: [release gate JSON](../data/derived/release_gate_summary.json)은 `BLOCKED_HARD_GATE`, `hard_gate_passed=false`, 차단 사유 34개다. 원시 600-case 결과·staging security observations·trusted deployment identity가 없고 provider `0/120`, provider p95 미측정, Recall@20 `0.487179... < 0.95`, 재무/검색 보고서가 release freshness 기준상 stale이다. 기준은 낮추지 않았으며 8001/8000 승격을 실행하지 않았다.
+
+### Task 8 post-commit whole-branch review fix
+
+- 최초 Task 8 커밋 `c7d1631` 뒤 전체 브랜치 독립 리뷰가 상위 집계값 위조, staging 평가와 PASS gate의 순환 의존, commit 이후 고정 HEAD test를 발견했다. 후속 공격 리뷰에서는 raw per-case p95, 실제 HCX 실행 표지, untracked build input과 `/health` identity 결속도 추가로 재현했다.
+- gate는 answerability, metamorphic consistency, provider/concurrency 호출·오류·latency, Recall@20과 보안 수치를 원시 case/observation에서 다시 계산한다. per-result provider/concurrency p95도 같은 case의 완전한 원시 latency 집합과 일치해야 하며 누락·NaN/Inf·음수·초과·불일치는 차단한다. provider 호출은 lane 이름이 아니라 응답 metadata의 `provider_configured=true`와 `final_generation_called=true`가 함께 관측된 경우만 센다.
+- staging은 최종 PASS를 선행 조건으로 사용하지 않는다. 최신 financial/retrieval/Judge 입력과 외부 commit/data trust anchor를 검증한 pre-stage만으로 정확한 `ExpectedCommit` Git archive를 build context로 만들고, hash-trusted retrieval summary만 별도 추가한다. 작업 디렉터리의 tracked dirty/untracked `src`·`config`는 이미지에 들어갈 수 없다.
+- 후보는 8001에서만 `--no-build`로 실행한다. evaluator는 실제 `/health.identity`의 commit/image/base/overlay/search 값을 외부 trust anchor와 평가 전후 대조하고 sanitized 600-case 결과를 만든다. 그 결과로 최종 gate를 다시 계산한 뒤에만 별도의 production 스크립트가 8000을 변경할 수 있다. staging 스크립트에는 production 변경 경로가 없다.
+- TDD: post-commit HEAD 실패 `1 failed, 822 passed`, aggregate 우회 `14 failed`, circular-flow `3 failed`, identity/provider/raw-latency 우회와 최종 per-result p95 `6 failed`를 각각 재현했다. 최종 targeted 독립 재리뷰는 `APPROVED`; 실제 외부 Docker/SSH/NCP/provider는 호출하지 않았다.

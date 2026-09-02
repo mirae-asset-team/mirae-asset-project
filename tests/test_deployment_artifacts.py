@@ -150,8 +150,9 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn('EVAL_ENABLED: "1"', compose)
         self.assertIn("DISCLOSURE_DENSE_URL: http://dense-retriever:8080", compose)
         self.assertIn("qa-eval-data:/app/eval", compose)
-        self.assertIn("docker compose build disclosure-agent-staging", deploy)
-        self.assertIn("docker compose up -d --no-deps disclosure-agent-staging", deploy)
+        self.assertIn("& docker build", deploy)
+        self.assertIn("up -d --no-build dense-retriever disclosure-agent-staging", deploy)
+        self.assertNotIn("docker compose build disclosure-agent-staging", deploy)
         self.assertNotIn("docker compose down", deploy)
         self.assertNotIn("CLOVASTUDIO_API_KEY=", deploy)
 

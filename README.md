@@ -37,7 +37,7 @@
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
 | HCX Function Calling | V1.1 실제 smoke 성공 | 운영 5종 질문 반복 smoke와 장애율 측정 |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
-| 테스트 | Task 8 focused `136 passed, 177 subtests`; 전체 Python `823 passed, 2 skipped, 323 subtests`; Web JS `12 passed` | private/provider 600건과 실제 staging identity 평가 |
+| 테스트 | Task 8 focused `181 passed, 94 subtests`; 전체 Python `868 passed, 2 skipped, 240 subtests`; Web JS `12 passed` | private/provider 600건과 실제 staging identity 평가 |
 | Release gate | `BLOCKED_HARD_GATE` (34개 사유) | 차단 사유를 해소한 동일 입력으로만 재평가; 임계값 완화 금지 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
@@ -47,6 +47,7 @@
 - Compose/NCP 관측에는 full-corpus Dense가 연결되어 있지만, 새 identity contract가 포함된 image는 아직 build/deploy되지 않았습니다.
 - Dense 채택 조건인 Sparse 대비 Recall@20 `+5%p`, wrong issuer/version `0`, p95 `2초` 이하는 모두 `UNVERIFIED`입니다. 따라서 전체 corpus 의미 검색 성능을 확보했다고 주장하지 않습니다.
 - missing/invalid/empty Dense 결과와 sidecar 통신 실패는 로컬 회귀에서 Sparse로 fallback합니다. 다만 Compose의 agent cold start는 현재 Dense `service_healthy`에 의존하므로 cold-start fallback은 `UNVERIFIED`입니다.
+- 배포는 두 단계입니다. pre-stage는 정확한 Git commit archive와 별도 hash-trusted retrieval 보고서로 후보 이미지를 한 번 build해 8001에만 올립니다. 실제 `/health.identity`, read-only mount와 600-case/provider 평가를 거쳐 최종 release gate가 PASS한 경우에만 별도 스크립트가 같은 image를 8000에 승격합니다. 현재 보고서는 BLOCKED이므로 어느 배포 단계도 실행되지 않았습니다.
 - `[agent]` extra와 기본 `Dockerfile`에는 NumPy를 선언하지 않고, `Dockerfile.dense`가 설치하는 `[dense]` extra에만 `numpy==2.5.2`를 고정했습니다. Docker engine을 사용할 수 없어 실제 image package inventory는 `BLOCKED_ENVIRONMENT`입니다.
 - Dense startup은 FAISS/metadata SHA-256, 전 vector의 L2 norm, 실제 FAISS metric/type, 그리고 mounted model 전체 파일 SHA-256을 먼저 검증합니다. 통과한 Python/NumPy/FAISS/model revision/vector count·dimension/index identity만 `/runtime/dense_runtime_manifest.json`과 sidecar `/health`에 동일하게 기록합니다. 기존 health 필드는 유지됩니다.
 - 모델 identity는 live/read-only mount 안에서 임의 생성하지 않습니다. staging 모델 복사본에서 `$env:PYTHONPATH='src'; python scripts/build_dense_model_identity.py --model-path <staging-model-dir> --output <staging-model-dir>/model_identity.json`으로 생성하고 검토한 뒤, 그 디렉터리 전체를 read-only로 mount합니다.
