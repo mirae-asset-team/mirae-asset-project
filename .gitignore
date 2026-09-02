@@ -49,3 +49,6 @@ data/derived/bge_m3_dense_pilot/
 
 # Downloaded source archives
 references/official/source_archives/
+
+# Local QA ledgers and run artifacts
+runs/
