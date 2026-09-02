@@ -103,6 +103,7 @@ class HcxRuntimeIntegrationTests(unittest.TestCase):
         self.assertIn(RCEPT_NO, result.answer)
         self.assertEqual(hybrid.calls[0][0], "테스트회사 사업 내용은?")
         self.assertEqual(len(service.available_tools()), 5)
+        self.assertIsNotNone(service.analysis_executor)
 
     def test_no_credential_path_is_composed_without_network(self) -> None:
         service, hybrid = self._service(HyperClovaFunctionClient(env={}))

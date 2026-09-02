@@ -20,6 +20,8 @@ import urllib.request
 import uuid
 
 from .generation import UNANSWERABLE_TEXT
+from .bounded_analysis import BoundedAnalysisExecution, BoundedAnalysisExecutor
+from .analysis_planner import classify_policy
 from .calculator import calculate
 from .disclosure_tools import format_financial_value
 from .evidence_sufficiency import EvidenceSufficiencyChecker
@@ -120,12 +122,15 @@ class HcxToolCall:
 class HcxGeneratedAnswer:
     answer: str
     citation_ids: tuple[str, ...]
+    conclusion: str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.answer, str) or not self.answer.strip() or len(self.answer) > 10_000:
             raise ValueError("hcx_final_answer_invalid")
         if not all(isinstance(item, str) and item for item in self.citation_ids):
             raise ValueError("hcx_final_citation_ids_invalid")
+        if self.conclusion is not None and not isinstance(self.conclusion, str):
+            raise ValueError("hcx_final_conclusion_invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,7 +233,10 @@ def hcx_tool_schemas(registry: ToolRegistry) -> list[dict[str, object]]:
     return json.loads(json.dumps(tools, ensure_ascii=False))
 
 
-def _final_answer_tool(evidence_ids: Sequence[str]) -> dict[str, object]:
+def _final_answer_tool(
+    evidence_ids: Sequence[str],
+    allowed_conclusions: Sequence[str] = (),
+) -> dict[str, object]:
     """Build the private HCX output contract from admitted Evidence IDs."""
 
     allowed_ids = list(dict.fromkeys(str(item) for item in evidence_ids if item))
@@ -236,6 +244,29 @@ def _final_answer_tool(evidence_ids: Sequence[str]) -> dict[str, object]:
         raise HcxProtocolError(
             "hcx_final_evidence_ids_empty", stage="final_generation_preflight"
         )
+    properties: dict[str, object] = {
+        "answer": {
+            "type": "string",
+            "description": "DART Tool Evidence에만 근거한 한국어 최종 답변",
+        },
+        "citation_ids": {
+            "type": "array",
+            "description": "답변에 실제 사용한 evidence ID",
+            "items": {"type": "string", "enum": allowed_ids},
+            "minItems": 1,
+        },
+    }
+    required = ["answer", "citation_ids"]
+    bounded_conclusions = list(dict.fromkeys(
+        str(item) for item in allowed_conclusions if item != "insufficient_evidence"
+    ))
+    if bounded_conclusions:
+        properties["conclusion"] = {
+            "type": "string",
+            "description": "백엔드가 허용한 과거 공시 판단 범주",
+            "enum": bounded_conclusions,
+        }
+        required.append("conclusion")
     return {
         "type": "function",
         "function": {
@@ -245,19 +276,8 @@ def _final_answer_tool(evidence_ids: Sequence[str]) -> dict[str, object]:
             ),
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "answer": {
-                        "type": "string",
-                        "description": "DART Tool Evidence에만 근거한 한국어 최종 답변",
-                    },
-                    "citation_ids": {
-                        "type": "array",
-                        "description": "답변에 실제 사용한 evidence ID",
-                        "items": {"type": "string", "enum": allowed_ids},
-                        "minItems": 1,
-                    },
-                },
-                "required": ["answer", "citation_ids"],
+                "properties": properties,
+                "required": required,
             },
         },
     }
@@ -402,7 +422,14 @@ class HyperClovaFunctionClient:
             if isinstance(raw_evidence_ids, (list, tuple))
             else []
         )
-        final_tool = _final_answer_tool(evidence_ids)
+        data = tool_response.get("data")
+        raw_conclusions = data.get("allowed_conclusions") if isinstance(data, Mapping) else None
+        allowed_conclusions = (
+            [str(item) for item in raw_conclusions if isinstance(item, str)]
+            if isinstance(raw_conclusions, (list, tuple))
+            else []
+        )
+        final_tool = _final_answer_tool(evidence_ids, allowed_conclusions)
         tool_content = json.dumps(tool_response, ensure_ascii=False, separators=(",", ":"))
         data = self._chat({
             "model": self.model,
@@ -431,20 +458,28 @@ class HyperClovaFunctionClient:
             stage="final_generation_response",
             expected_name=FINAL_ANSWER_TOOL_NAME,
         )
-        if set(final_call.arguments) != {"answer", "citation_ids"}:
+        expected_fields = {"answer", "citation_ids"}
+        if allowed_conclusions:
+            expected_fields.add("conclusion")
+        if set(final_call.arguments) != expected_fields:
             raise HcxProtocolError(
                 "hcx_final_output_schema_mismatch", stage="final_generation_response"
             )
         answer = final_call.arguments.get("answer")
         citations = final_call.arguments.get("citation_ids")
+        conclusion = final_call.arguments.get("conclusion")
         if not isinstance(answer, str) or not isinstance(citations, list) or not all(
             isinstance(item, str) for item in citations
-        ):
+        ) or (allowed_conclusions and not isinstance(conclusion, str)):
             raise HcxProtocolError(
                 "hcx_final_output_schema_mismatch", stage="final_generation_response"
             )
         try:
-            return HcxGeneratedAnswer(answer, tuple(citations))
+            return HcxGeneratedAnswer(
+                answer,
+                tuple(citations),
+                str(conclusion) if conclusion is not None else None,
+            )
         except ValueError as exc:
             raise HcxProtocolError(str(exc), stage="final_generation_response") from exc
 
@@ -565,6 +600,7 @@ class HcxFunctionCallingService:
         *,
         max_question_chars: int = 2_000,
         router: QuestionRouter | None = None,
+        analysis_executor: BoundedAnalysisExecutor | None = None,
     ) -> None:
         if max_question_chars <= 0:
             raise ValueError("max_question_chars_must_be_positive")
@@ -574,7 +610,23 @@ class HcxFunctionCallingService:
         self.client = client
         self.max_question_chars = max_question_chars
         self.router = router
+        self.analysis_executor = analysis_executor
         self.evidence_checker = EvidenceSufficiencyChecker()
+
+    @staticmethod
+    def _analysis_metadata(execution: BoundedAnalysisExecution) -> dict[str, object]:
+        return {
+            "execution_mode": "bounded_analysis",
+            "analysis_dimension": execution.plan.judgment_dimension,
+            "conclusion": execution.conclusion,
+            "evidence_slots": [dict(slot) for slot in execution.evidence_slots],
+            "limitations": [
+                "historical_disclosure_only",
+                "no_transaction_recommendation",
+                "no_forecast",
+                *execution.reason_codes,
+            ],
+        }
 
     def available_tools(self) -> list[dict[str, object]]:
         return hcx_tool_schemas(self.registry)
@@ -1309,7 +1361,75 @@ class HcxFunctionCallingService:
                     "final_generation_called": False,
                 },
             )
-        route = self.router.route(question) if self.router is not None else None
+
+        analysis_execution: BoundedAnalysisExecution | None = None
+        if self.analysis_executor is not None:
+            try:
+                analysis_execution = self.analysis_executor.execute(question)
+            except Exception as exc:
+                diagnostics = self._record_failure("bounded_analysis", exc)
+                return self._result(
+                    "error",
+                    UNANSWERABLE_TEXT,
+                    recommended_action="abstain",
+                    warnings=["bounded_analysis_failed_closed"],
+                    metadata={
+                        "provider_configured": bool(self.client.configured),
+                        "route_source": "deterministic",
+                        "route_reason": "bounded_analysis_failed_closed",
+                        "tool_selection_called": False,
+                        "final_generation_called": False,
+                        **diagnostics,
+                    },
+                )
+        if analysis_execution is not None and analysis_execution.plan.analysis_mode == "prohibited":
+            reason = analysis_execution.reason_codes[0] if analysis_execution.reason_codes else "policy_refusal"
+            message = (
+                "공시 근거를 사용하더라도 매수·매도 추천은 제공하지 않습니다."
+                if reason == "policy_recommendation_or_suitability_refusal"
+                else "공시되지 않은 미래 수치나 전망은 제공하지 않습니다."
+                if reason == "policy_forecast_refusal"
+                else "해당 요청은 공시 분석 범위에서 처리할 수 없습니다."
+            )
+            return self._result(
+                "abstained",
+                message,
+                recommended_action="abstain",
+                warnings=list(analysis_execution.reason_codes),
+                metadata={
+                    "provider_configured": bool(self.client.configured),
+                    "route_source": "deterministic",
+                    "route_reason": reason,
+                    "execution_mode": "policy_refusal",
+                    "conclusion": None,
+                    "tool_selection_called": False,
+                    "final_generation_called": False,
+                },
+            )
+        if analysis_execution is not None and not analysis_execution.complete:
+            tool_response = analysis_execution.to_tool_response()
+            return self._result(
+                "abstained",
+                "확인된 공시 근거가 필수 항목을 모두 충족하지 않아 판단을 보류합니다.",
+                tool_name="build_summary_context",
+                tool_response=tool_response,
+                recommended_action="abstain",
+                warnings=list(analysis_execution.reason_codes),
+                metadata={
+                    "provider_configured": bool(self.client.configured),
+                    "route_source": "deterministic",
+                    "route_reason": "mandatory_analysis_evidence_missing",
+                    "tool_selection_called": False,
+                    "final_generation_called": False,
+                    **self._analysis_metadata(analysis_execution),
+                },
+            )
+
+        route = (
+            self.router.route(question)
+            if analysis_execution is None and self.router is not None
+            else None
+        )
         if route is not None and route.kind in {"clarification", "unavailable"}:
             recommended_action = "ask_clarification" if route.kind == "clarification" else "abstain"
             bundle = ToolEvidenceBundle(
@@ -1356,21 +1476,44 @@ class HcxFunctionCallingService:
                 },
             )
 
-        tool_selection_called = route is None
+        tool_selection_called = analysis_execution is None and route is None
         if not self.client.configured:
+            analysis_response = (
+                analysis_execution.to_tool_response()
+                if analysis_execution is not None
+                else None
+            )
             return self._result(
                 "provider_unavailable", UNANSWERABLE_TEXT,
+                tool_name="build_summary_context" if analysis_execution is not None else None,
+                tool_response=analysis_response,
                 warnings=["hcx_api_key_not_configured"],
                 metadata={
                     "provider_configured": False,
-                    "route_source": "deterministic" if route is not None else "provider",
-                    "route_reason": route.reason if route is not None else "provider_tool_selection",
+                    "route_source": "deterministic" if route is not None or analysis_execution is not None else "provider",
+                    "route_reason": (
+                        "bounded_analysis"
+                        if analysis_execution is not None
+                        else route.reason if route is not None
+                        else "provider_tool_selection"
+                    ),
                     "question_corrections": list(route.corrections) if route is not None else [],
                     "tool_selection_called": False,
                     "final_generation_called": False,
+                    **(
+                        self._analysis_metadata(analysis_execution)
+                        if analysis_execution is not None
+                        else {}
+                    ),
                 },
             )
-        if route is not None:
+        if analysis_execution is not None:
+            tool_call = HcxToolCall(
+                f"call_{uuid.uuid4().hex[:24]}",
+                "build_summary_context",
+                {"question": question},
+            )
+        elif route is not None:
             tool_call = HcxToolCall(
                 f"call_{uuid.uuid4().hex[:24]}",
                 str(route.tool_name),
@@ -1403,7 +1546,9 @@ class HcxFunctionCallingService:
                     ),
                 },
             )
-        if route is not None:
+        if analysis_execution is not None:
+            tool_response = analysis_execution.to_tool_response()
+        elif route is not None:
             tool_call, tool_response = self._execute_route(question, route, tool_call)
         else:
             tool_response = self.registry.dispatch(tool_call.name, tool_call.arguments)
@@ -1423,13 +1568,32 @@ class HcxFunctionCallingService:
                 "provider_configured": bool(self.client.configured),
                 "model": self.client.model,
                 "prompt_version": HCX_FUNCTION_PROMPT_VERSION,
-                "route_source": "deterministic" if route is not None else "provider",
-                "route_reason": route.reason if route is not None else "provider_tool_selection",
-                "metric_kind": route.metric_kind if route is not None else "SEARCH",
-                "workflow": route.workflow if route is not None else "function_calling_fallback",
+                "route_source": "deterministic" if route is not None or analysis_execution is not None else "provider",
+                "route_reason": (
+                    "bounded_analysis"
+                    if analysis_execution is not None
+                    else route.reason if route is not None
+                    else "provider_tool_selection"
+                ),
+                "metric_kind": (
+                    "ANALYSIS" if analysis_execution is not None
+                    else route.metric_kind if route is not None
+                    else "SEARCH"
+                ),
+                "workflow": (
+                    "bounded_analysis"
+                    if analysis_execution is not None
+                    else route.workflow if route is not None
+                    else "function_calling_fallback"
+                ),
                 "question_corrections": list(route.corrections) if route is not None else [],
                 "tool_selection_called": tool_selection_called,
                 "final_generation_called": False,
+                **(
+                    self._analysis_metadata(analysis_execution)
+                    if analysis_execution is not None
+                    else {}
+                ),
             },
         }
         if tool_status == "invalid_request":
@@ -1473,8 +1637,25 @@ class HcxFunctionCallingService:
         common["metadata"]["final_generation_called"] = True  # type: ignore[index]
         failure_stage = "final_generation"
         try:
-            generated = self.client.generate_routed_answer(question, tool_call, tool_response)
+            generated = (
+                self.client.generate_answer(question, tool_call, tool_response)
+                if analysis_execution is not None
+                else self.client.generate_routed_answer(question, tool_call, tool_response)
+            )
             failure_stage = "final_citation_validation"
+            if analysis_execution is not None:
+                if (
+                    generated.conclusion is None
+                    or generated.conclusion == "insufficient_evidence"
+                    or generated.conclusion not in analysis_execution.plan.allowed_conclusions
+                ):
+                    raise HcxProtocolError("hcx_final_conclusion_not_allowed")
+                generated_policy = classify_policy(generated.answer)
+                if generated_policy.action in {"refuse_recommendation", "refuse_forecast"}:
+                    raise HcxProtocolError("hcx_final_policy_violation")
+                if _FORECAST_CLAIM.search(generated.answer):
+                    raise HcxProtocolError("hcx_final_forecast_not_allowed")
+                common["metadata"]["conclusion"] = generated.conclusion  # type: ignore[index]
             data = tool_response.get("data")
             facts = data.get("facts") if isinstance(data, Mapping) else None
             has_validated_actual = isinstance(facts, list) and any(

@@ -41,10 +41,12 @@ Completed locally on 2026-09-03 from base `ab143611f000279ff8f8e2bd099dcdbbc7829
 
 ## Task 4 — Bounded analysis executor
 
-- Connect `plan_analysis -> search_analysis` to the public Function Calling path without adding a sixth public Tool.
-- Support profitability, financial health, liquidity/cash flow, financing, CAPEX, business risk, governance, correction materiality, and peer comparison.
-- Bind evidence slots by issuer and period. Missing mandatory slots force `insufficient_evidence`.
-- Continue refusing transaction recommendations and forecasts while allowing bounded historical disclosure judgments.
+- [x] Connect `plan_analysis -> search_analysis` to the public Function Calling path without adding a sixth public Tool.
+- [x] Support profitability, financial health, liquidity/cash flow, financing, CAPEX, business risk, governance, correction materiality, and peer comparison.
+- [x] Bind evidence slots by issuer and period. Missing mandatory slots force `insufficient_evidence`.
+- [x] Continue refusing transaction recommendations and forecasts while allowing bounded historical disclosure judgments.
+
+Completed locally on 2026-09-03 from Task 3 base `3b11110e18f6b61c7c2f24d54c3c2099afff687a`. The public registry remains exactly five Tools; bounded analysis internally calls `EvidenceService.search_analysis` and reuses `build_summary_context` for the admitted response. Canonical issuer aliases and every explicit issuer/period pair receive distinct slots. Evidence that fails either ownership check is excluded, and any mandatory gap prevents HCX generation with `conclusion=insufficient_evidence`. Focused Task 3/4 regression passed `146` tests with `86` subtests; full Python passed `641` with `2` existing optional skips and `134` subtests; Web passed `12/12`. No provider, Docker, NCP, D-drive, live-data, credential, `.env`, or PEM operation was performed.
 
 ## Task 5 — Hybrid retrieval gate
 

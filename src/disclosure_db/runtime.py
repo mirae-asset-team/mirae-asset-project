@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .agent import AgentSettings, DisclosureAgent
+from .bounded_analysis import BoundedAnalysisExecutor
 from .dense_client import EvidenceServiceDenseRetriever
 from .disclosure_tools import HybridSearch, build_tool_registry
 from .hcx_function_calling import (
@@ -117,6 +118,7 @@ def build_function_calling_service(
         registry,
         client if client is not None else HyperClovaFunctionClient(),
         router=router,
+        analysis_executor=BoundedAnalysisExecutor(evidence_service),
     )
 
 

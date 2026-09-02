@@ -854,3 +854,12 @@
 - 세 번째 재검토에서 planner가 보존한 ISO 날짜를 router가 다시 연도 네 자리로 축약해 같은 연도의 서로 다른 날짜를 하나로 합치고, HCX executor가 날짜 경계를 연말로 바꾸는 downstream 결함을 확인했다.
 - router는 연간 기간만 기존 `YYYY` label/계약으로 유지하고, 부분기간·instant는 전체 날짜와 명시적 `start_date`/`end_date`/`instant_date`를 requirement별로 보존한다. HCX 비교 실행기는 각 requirement의 정확한 경계를 Tool 요청에 전달한다. 기존 연간 multi-axis 응답 형식은 그대로다.
 - exact-boundary route/dispatch 회귀를 먼저 추가하고 수정 후 ISO focused `10 passed, 5 subtests`, Task 3 확대 focused `144 passed, 86 subtests`를 확인했다. 전체 회귀와 새 독립 승인 전에는 완료로 표시하지 않는다.
+
+## 2026-09-03 — Judge Stress V2 Task 4 bounded analysis executor
+
+- 범위와 기준선: 최종 Task 3 커밋 `3b11110e18f6b61c7c2f24d54c3c2099afff687a` 위에서만 작업했다. Task 3를 amend하지 않았고 public Tool 5개와 기존 최상위 응답 필드를 유지했다. credential, `.env`, PEM, provider, Docker, NCP, D-drive 원본·live overlay/index는 접근하거나 변경하지 않았다.
+- TDD 경로: 9개 판단 차원·미래 전망 거절은 최초 `5 failed, 5 passed`에서 `10 passed`; executor 모듈 부재와 HCX constructor/public 연결은 각각 import/`4 failed` RED 뒤 focused `15 passed`와 `20 passed`로 전환했다. 엄격 소유권 검토에서는 잘못된 issuer fact 잔존 `1 failed`, 다중 기업·다중 기간 슬롯 누락 `2 failed`, canonical alias 비교 누락 `1 failed`, issuer와 period 불일치가 섞인 근거 잔존 `1 failed`를 각각 재현한 뒤 최소 수정했다.
+- 실행 구조: 공개 Function Calling 서비스가 판단 질문에 `BoundedAnalysisExecutor`를 호출하고 내부에서 `plan_analysis -> EvidenceService.search_analysis`를 순차 실행한다. HCX에게 여섯 번째 검색 Tool을 공개하거나 Tool 선택을 맡기지 않고 기존 `build_summary_context` 응답 계약을 재사용한다. HCX는 backend가 허용한 결론 enum과 admission된 citation으로 문장화만 한다.
+- 판단 범위: 수익성, 재무건전성, 현금흐름·유동성, 차입·자금조달, CAPEX, 사업위험, 지배구조, 정정 중요성, 기업 비교의 9개 dimension을 catalog로 제한했다. 매수·매도·적합성 요청과 미래 수치·전망은 검색/provider 호출 전 거절하고, 공시된 과거 사실에 대한 catalog 결론만 허용한다. HCX가 허용 범위 밖 결론이나 전망 문구를 반환하면 최종 답변을 폐기한다.
+- strict fail-close: canonical alias를 적용한 명시 기업과 모든 명시 기간의 Cartesian pair마다 고유 evidence slot을 만든다. issuer와 period 검사를 독립 적용해 하나라도 다른 근거는 context/fact/event에서 제거한다. mandatory slot 누락, 최소 evidence 미달, retrieval incomplete는 `conclusion=insufficient_evidence`, `answer_allowed=false`로 고정하고 HCX 최종 생성을 호출하지 않는다.
+- 검증: Task 3/4 관련 focused suite `146 passed, 12 warnings, 86 subtests`; 전체 Python `641 passed, 2 skipped, 86 warnings, 134 subtests`; Web `12/12`; `python -m compileall -q src scripts`와 `git diff --check`가 통과했다. warnings는 기존 FastAPI/Dense `on_event` deprecation이고 skips는 기존 optional 환경 항목이다. 실제 provider·staging·600-case 평가와 Task 5~8은 실행하거나 통과로 주장하지 않는다.

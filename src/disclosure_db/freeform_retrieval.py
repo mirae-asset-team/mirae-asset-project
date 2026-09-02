@@ -99,7 +99,8 @@ def build_query_variants(plan: AnalysisPlan, slot: EvidenceSlot) -> tuple[str, .
     issuer = slot.issuer or plan.base_plan.company
     if not issuer:
         return ()
-    terms = _load_catalog().get(slot.slot_id, ())
+    catalog_slot_id = slot.slot_id.split("__i", 1)[0]
+    terms = _load_catalog().get(catalog_slot_id, ())
     return tuple(f"{issuer} {term}" for term in terms[:MAX_VARIANTS_PER_SLOT])
 
 
