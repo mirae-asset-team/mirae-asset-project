@@ -85,6 +85,7 @@ class QaEvaluationTests(unittest.TestCase):
         def financial(company: str, value: str, index: int) -> dict[str, object]:
             evidence_id = f"ev-{index}"; receipt = f"2026031800000{index}"
             fact = {
+                "financial_fact_id": f"ff-{index}-{company}",
                 "value_numeric": value, "scale": 1, "normalized_value": value,
                 "display_value": format_financial_value(value, 1, "KRW"), "unit": "KRW",
                 "period": {"period_start": "2025-01-01", "period_end": "2025-12-31"},

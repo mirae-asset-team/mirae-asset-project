@@ -78,6 +78,16 @@ evidence, provider content, or private reasoning. Focused Task 6 verification pa
 `6` subtests; full Python passed `678` tests with `2` existing optional skips and `146` subtests;
 Web passed `12/12`; compile and diff checks passed. No external/provider/live evaluation is claimed.
 
+Independent Task 6 review rejected the first implementation at five admission and schema
+boundaries. The fixup admits only explicit recognized fact IDs with admitted evidence, or the
+narrowly typed `validated_statement_values` schema; arbitrary nested numeric mappings and ID-less
+fallback rows are excluded. Claims-less provider output is never promoted to a claim or reused as
+prose. Explicit evidence-slot contracts fail closed when incomplete or invalid, while the legacy
+`tool_evidence` slot is available only when the slot field is absent. The private final-answer Tool
+schema is closed with `additionalProperties=false` at both the top level and nested claim level.
+Deterministic fallback therefore uses admitted structured facts only, and bounded judgments with
+incomplete support resolve to `insufficient_evidence`.
+
 ## Task 7 — Automated judge and security evaluation
 
 - [x] Cover Korean/English paraphrases, typos, JSON demands, prompt extraction, direct/indirect/encoded injection, SQL/XSS strings, nonexistent facts, corrections, wrong issuer/version/unit/scope, provider faults, Dense faults, and restart/concurrency behavior.
