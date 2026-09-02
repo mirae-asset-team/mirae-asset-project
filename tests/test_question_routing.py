@@ -96,6 +96,24 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
         self.assertEqual(route.normalized_question, "삼성전자 2025년 매출액은?")
         self.assertEqual(route.corrections, ("삼선전자->삼성전자",))
 
+    def test_multi_account_each_request_routes_to_multi_metric_workflow(self) -> None:
+        route = self.router.route("삼성전자의 2025년 연결 매출액과 영업이익을 각각 알려주세요.")
+        self.assertIsNotNone(route)
+        self.assertEqual(route.kind, "tool")
+        self.assertEqual(route.tool_name, "get_financial_facts")
+        self.assertEqual(route.workflow, "financial_comparison")
+        requirements = route.context["requirements"]
+        self.assertEqual(len(requirements), 2)
+        self.assertEqual([item["account"] for item in requirements], ["매출액", "영업이익"])
+        self.assertTrue(all(item["company"] == "삼성전자" for item in requirements))
+        self.assertTrue(all(item["period"] == "2025" for item in requirements))
+        self.assertEqual(route.context["intent"], "financial_multi_metric")
+
+    def test_ambiguous_accounts_without_each_still_ask_clarification(self) -> None:
+        route = self.router.route("삼성전자 2025년 매출액과 영업이익은?")
+        self.assertIsNotNone(route)
+        self.assertEqual(route.kind, "clarification")
+
     def test_event_disclosure_questions_route_to_search_deterministically(self) -> None:
         cases = (
             "삼성전자의 가장 최근 주식 대량보유상황보고서에서 보고자와 보유비율을 알려주세요.",

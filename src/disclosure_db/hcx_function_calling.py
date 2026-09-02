@@ -851,7 +851,12 @@ class HcxFunctionCallingService:
             all_facts.append(fact)
         calculations: list[dict[str, object]] = []
         calculation_failed = False
-        if len(companies) == 1 and len(periods) >= 2:
+        # "A와 B를 각각" requests mix accounts; ranking or differencing across
+        # different accounts is meaningless, so those steps require one metric.
+        single_metric = len({
+            str(requirement.get("account") or "") for requirement, _, _ in selected
+        }) <= 1
+        if single_metric and len(companies) == 1 and len(periods) >= 2:
             ordered_selected = sorted(selected, key=lambda item: str(item[0].get("period") or ""))
             for (previous_requirement, previous, previous_value), (current_requirement, current, current_value) in zip(
                 ordered_selected, ordered_selected[1:],
@@ -892,7 +897,12 @@ class HcxFunctionCallingService:
             len(requirements) >= 2
             and len(selected) == len(requirements)
             and not calculation_failed
-            and (len(companies) != 1 or len(periods) < 2 or len(calculations) == 2 * (len(periods) - 1))
+            and (
+                not single_metric
+                or len(companies) != 1
+                or len(periods) < 2
+                or len(calculations) == 2 * (len(periods) - 1)
+            )
         )
         comparison: dict[str, object] = {
             "status": "complete" if complete else "incomplete",
@@ -904,6 +914,7 @@ class HcxFunctionCallingService:
                 {
                     "company": requirement.get("company"),
                     "period": requirement.get("period"),
+                    "account": requirement.get("account"),
                     "display_value": fact.get("display_value"),
                 }
                 for requirement, fact, _ in selected
@@ -911,12 +922,12 @@ class HcxFunctionCallingService:
             "calculations": calculations,
             "winner": None,
         }
-        if complete and len(companies) >= 2 and len(periods) <= 1:
+        if complete and single_metric and len(companies) >= 2 and len(periods) <= 1:
             maximum = max(value for _, _, value in selected)
             winners = [str(requirement.get("company")) for requirement, _, value in selected if value == maximum]
             comparison["winner"] = winners[0] if len(winners) == 1 else None
             comparison["tie"] = len(winners) > 1
-        elif complete and len(companies) == 1 and periods:
+        elif complete and single_metric and len(companies) == 1 and periods:
             maximum = max(value for _, _, value in selected)
             largest = [str(requirement.get("period")) for requirement, _, value in selected if value == maximum]
             comparison["largest_period"] = largest[0] if len(largest) == 1 else None
@@ -1614,7 +1625,7 @@ class HcxFunctionCallingService:
             return None
         metric = str(comparison.get("metric") or "재무 수치")
         lines = [
-            f"{row.get('company')} {row.get('period')}년 {metric}은 {row.get('display_value')}입니다."
+            f"{row.get('company')} {row.get('period')}년 {row.get('account') or metric}은 {row.get('display_value')}입니다."
             for row in rows
             if row.get("company") and row.get("period") and row.get("display_value")
         ]

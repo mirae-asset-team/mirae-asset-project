@@ -249,6 +249,55 @@ class DeterministicQuestionRouter:
             "corrections": corrections,
         }
 
+        if (
+            plan.company
+            and plan.account_status == "ambiguous"
+            and any(marker in text for marker in ("각각", "모두", "둘 다"))
+            and 2 <= len(plan.account_candidates) <= 4
+            and len(periods) <= 1
+        ):
+            # "A와 B를 각각 알려주세요" names every account explicitly, so the
+            # multi-account executor answers each one instead of asking the
+            # user to pick a single account.
+            catalog_accounts = self.account_catalog.by_id
+            candidates = [catalog_accounts.get(str(item)) for item in plan.account_candidates]
+            if all(item is not None and item.support_level == "structured" for item in candidates):
+                period = periods[0] if periods else None
+                requirements = [
+                    {"company": str(plan.company), "period": period, "account": item.label_ko}
+                    for item in candidates
+                ]
+                arguments = {
+                    "company": str(plan.company),
+                    "account": requirements[0]["account"],
+                    "correction_policy": plan.correction_policy,
+                    "top_k": 1,
+                }
+                if period:
+                    arguments["start_date"] = f"{period}-01-01"
+                    arguments["end_date"] = f"{period}-12-31"
+                if plan.scope:
+                    arguments["scope"] = plan.scope
+                return QuestionRoute(
+                    "tool",
+                    "financial_multi_metric_request",
+                    "get_financial_facts",
+                    arguments,
+                    workflow="financial_comparison",
+                    metric_kind="DIRECT",
+                    context={
+                        "companies": [str(plan.company)],
+                        "period": period,
+                        "periods": [period] if period else [],
+                        "metric": None,
+                        "metrics": [item.label_ko for item in candidates],
+                        "intent": "financial_multi_metric",
+                        "requirements": requirements,
+                        "required_evidence": "validated_structured_fact_per_account",
+                    },
+                    **route_context,
+                )
+
         if plan.account_status == "ambiguous" and plan.account_warning:
             return QuestionRoute(
                 "clarification",

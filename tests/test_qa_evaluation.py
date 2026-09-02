@@ -158,6 +158,64 @@ class QaEvaluationTests(unittest.TestCase):
         self.assertIsNone(blocked.tool_response["data"]["comparison"]["winner"])
         self.assertEqual(blocked_client.final_calls, 0)
 
+    def test_multi_metric_each_request_answers_every_account_without_a_winner(self) -> None:
+        def financial(account: str, value: str, index: int) -> dict[str, object]:
+            evidence_id = f"ev-{index}"; receipt = f"2026031800000{index}"
+            fact = {
+                "account_name": account,
+                "value_numeric": value, "scale": 1, "normalized_value": value,
+                "display_value": format_financial_value(value, 1, "KRW"), "unit": "KRW",
+                "period": {"period_start": "2025-01-01", "period_end": "2025-12-31"},
+                "scope": "consolidated", "support_level": "structured",
+                "validation_status": "validated", "evidence_ids": [evidence_id],
+                "company_identifiers": {"company": "삼성전자"},
+            }
+            return {
+                "status": "success", "tool_name": "get_financial_facts",
+                "data": {"facts": [fact]},
+                "evidence_bundle": {
+                    "question_intent": "get_financial_facts", "requested_scope": {},
+                    "covered_scope": {"company": ["삼성전자"], "account": [account]},
+                    "items": [{"evidence_id": evidence_id, "evidence_ids": [evidence_id], "filing_id": receipt, "rcept_no": receipt, "report_name": "사업보고서", "quality_status": "validated_structured_evidence"}],
+                    "evidence_ids": [evidence_id], "filing_ids": [receipt], "issuer_corp_codes": [],
+                    "quality_warnings": [], "correction_status": "policy_applied",
+                    "retrieval_status": {}, "sufficiency": "sufficient",
+                },
+                "warnings": [], "metadata": {"sufficiency_check": {"status": "sufficient", "answer_allowed": True, "recommended_action": "answer"}},
+            }
+
+        class Registry:
+            def __init__(self): self.calls = []
+            def list_tools(self): return []
+            def dispatch(self, name, arguments):
+                self.calls.append((name, dict(arguments)))
+                account = str(arguments.get("account"))
+                return financial(account, "200" if account == "매출액" else "100", 1 if account == "매출액" else 2)
+
+        class Client:
+            model = "fake"; configured = True
+            def select_tool(self, question, tools): raise AssertionError
+            def generate_answer(self, question, call, response): raise AssertionError
+            def generate_routed_answer(self, question, call, response):
+                return HcxGeneratedAnswer("삼성전자 2025년 매출액은 200원, 영업이익은 100원입니다.", ("ev-1", "ev-2"))
+
+        registry = Registry()
+        result = HcxFunctionCallingService(
+            registry, Client(), router=DeterministicQuestionRouter(["삼성전자"]),
+        ).answer("삼성전자의 2025년 연결 매출액과 영업이익을 각각 알려주세요.")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(
+            [call[1]["account"] for call in registry.calls], ["매출액", "영업이익"],
+        )
+        comparison = result.tool_response["data"]["comparison"]
+        self.assertEqual(comparison["status"], "complete")
+        self.assertEqual(
+            [row["account"] for row in comparison["values"]], ["매출액", "영업이익"],
+        )
+        self.assertIsNone(comparison.get("winner"))
+        self.assertIsNone(comparison.get("largest_period"))
+
     def test_jsonl_store_is_structural_and_result_failure_is_classified(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
