@@ -35,6 +35,7 @@ tmp/
 *.log
 *.verification-failure.png
 eval/qa_results/
+eval/judge_stress_v2/
 
 # Official contest dataset (large local artifacts)
 data/public/official_dataset/raw/

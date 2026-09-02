@@ -21,10 +21,14 @@ Harden the public disclosure agent for human and automated contest judging while
 
 ## Task 2 — Judge Stress V2
 
-- Preserve the legacy 300-case and 856-case regressions.
-- Add a deterministic 600-case suite split into 480 development and 120 hidden holdout cases.
-- Allocate: structured 120, alias/period/correction 90, free-form 120, multi-evidence judgment 90, policy/adversarial 90, API/concurrency 60, fault 30.
-- Produce JSON and HTML reports and classify failures as entity, period, account, routing, retrieval, evidence, calculation, generation, security, or runtime.
+- [x] Preserve the legacy 300-case and 856-case regressions.
+- [x] Add a deterministic tracked 480-case development builder and require an explicitly supplied git-ignored private 120-case holdout to validate the full 600-case suite; block instead of synthesizing when private input is absent.
+- [x] Allocate: structured 120, alias/period/correction 90, free-form 120, multi-evidence judgment 90, policy/adversarial 90, API/concurrency 60, fault 30.
+- [x] Produce JSON and HTML reports and classify failures as entity, period, account, routing, retrieval, evidence, calculation, generation, security, or runtime.
+- [x] Enforce issuer, independent document group, independent question-template family, source group, and exact-question isolation between development and private holdout.
+- [x] Before reporting, independently validate 600 unique manifest rows/IDs, `480/120`, exact total/per-split category allocation, row split/category consistency, and recomputed suite SHA-256.
+
+Completed 2026-09-03 and corrected through review fix round 2. Suite SHA-256 `47664c91b6d241288ab4cd928955321eae301658de5681b06a40665054125a87`; tracked reports contain IDs/hashes/counts/reproducibility metadata but no exact authored private question/rubric text. Underlying audited public facts and issuer/source group hashes remain tracked; no cryptographic secrecy is claimed for public provenance. Raw development may remain ignored; no tracked 480-row raw artifact is required. Actual evaluation remains `NOT_RUN` for Tasks 3–7. See `.superpowers/sdd/2026-09-02-judge-stress-v2/task-2-report.md`.
 
 ## Task 3 — Input and routing hardening
 

@@ -1,0 +1,42 @@
+{
+  "schema_version": "judge-stress-v2-summary-v1",
+  "suite_sha256": "47664c91b6d241288ab4cd928955321eae301658de5681b06a40665054125a87",
+  "status": "NOT_RUN",
+  "case_count": 600,
+  "evaluated_count": 0,
+  "pass_count": 0,
+  "failure_count": 0,
+  "split_counts": {
+    "development": 480,
+    "holdout": 120
+  },
+  "category_counts": {
+    "structured": 120,
+    "alias_period_correction": 90,
+    "free_form": 120,
+    "multi_evidence_judgment": 90,
+    "policy_adversarial": 90,
+    "api_concurrency": 60,
+    "fault": 30
+  },
+  "failure_category_counts": {
+    "entity": 0,
+    "period": 0,
+    "account": 0,
+    "routing": 0,
+    "retrieval": 0,
+    "evidence": 0,
+    "calculation": 0,
+    "generation": 0,
+    "security": 0,
+    "runtime": 0
+  },
+  "reproducibility": {
+    "canonicalization": "UTF-8 JSON; sorted keys; compact separators; LF JSONL",
+    "input_order_independent": true,
+    "development_policy": "deterministic tracked audited-source build; 480 cases only",
+    "holdout_policy": "explicit git-ignored private evaluator input; never synthesized",
+    "split_policy": "issuer, document, source, question-template-family, and exact-question isolation",
+    "raw_artifact_policy": "git-ignored evaluator artifacts only"
+  }
+}

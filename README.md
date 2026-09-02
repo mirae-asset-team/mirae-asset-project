@@ -8,9 +8,9 @@
 
 ## 현재 개발 상태와 인수인계
 
-> **Judge Stress V2 즉시 인수인계:** 이번 작업자는 계획의 Task 1(Dense 런타임·의존성·신원 계약)까지만 완료하고 종료합니다. Task 2~8은 완료가 아니며, 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)와 [실행 계획](docs/superpowers/plans/2026-09-02-judge-stress-v2.md)을 읽은 뒤 Task 2의 600건 평가 구축부터 시작하세요.
+> **Judge Stress V2 인수인계:** Task 1(Dense 런타임·의존성·신원 계약)과 Task 2(개발 480건 생성기·private holdout 120건 검증·안전한 manifest/report)가 완료되었습니다. 실제 앱 평가는 아직 `NOT_RUN`이며 Task 3~8은 완료가 아닙니다. 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)를 읽고 Task 3부터 진행하세요.
 
-> **2026-09-02 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, HCX Function Calling V1.1, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결이 구현되어 있습니다. Compose에는 full-corpus Dense sidecar가 선언되어 있지만, 이번 Task 1에서는 Docker/NCP를 실행하거나 변경하지 않았습니다. 새 image의 Python/NumPy/FAISS/model/vector identity와 Dense Recall@20·issuer/version·p95 채택 gate는 아직 검증되지 않았습니다.
+> **2026-09-03 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, HCX Function Calling V1.1, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결이 구현되어 있습니다. Judge Stress V2의 tracked 코드는 개발 480건만 생성하고, 전체 600건 검증에는 별도 git-ignored private holdout 120건을 요구합니다. 앱 실행 결과는 아직 없습니다. Task 1~2에서는 Docker/NCP를 실행하거나 변경하지 않았고, 새 image의 Python/NumPy/FAISS/model/vector identity와 Dense Recall@20·issuer/version·p95 채택 gate는 아직 검증되지 않았습니다.
 
 ### 현재 한눈에 보기
 
@@ -37,7 +37,7 @@
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
 | HCX Function Calling | V1.1 실제 smoke 성공 | 운영 5종 질문 반복 smoke와 장애율 측정 |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
-| 테스트 | Task 1 최종 Python `553 passed, 2 skipped`; Web JS `12 passed`; Dense identity focused `29 passed` | Task 2의 Judge Stress V2 600건 구축 |
+| 테스트 | Task 2 review fix round 2 최종 Python `572 passed, 2 skipped`; Web JS `12 passed`; Judge Stress V2 focused `19 passed` | Task 3 질의 정규화·분해 계약 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
 ### 현재 품질 경계
@@ -52,6 +52,31 @@
 - 이 builder의 신뢰 루트는 로컬 Hugging Face cache가 돌려준 정확한 commit snapshot입니다. 로컬 cache 자체의 공급망 진위까지 증명하려면 별도 서명·upstream hash 정책이 필요하며 현재 release gate의 후속 항목으로 남았습니다.
 - 원본 base DB, overlay, search SQLite는 계속 read-only로 유지합니다.
 - HCX credential, `.env`, SQLite, chunk JSONL, FAISS index와 모델 파일은 Git에 올리지 않습니다.
+
+### Judge Stress V2 600건 suite
+
+Task 2는 기존 300건 stress와 856건 financial release regression을 수정하지 않고 별도 600건 계약을 만들었습니다. 구성은 structured 120, alias/period/correction 90, free-form 120, multi-evidence judgment 90, policy/adversarial 90, API/concurrency 60, fault 30이며 development 480과 hidden holdout 120으로 나뉩니다. tracked 생성기는 audited source에서 development 480만 재현합니다. 실제 holdout 질문·oracle·선정값·paraphrase/template family는 git-ignored private evaluator 입력으로만 존재하며, 입력이 없으면 builder는 개발 파일을 만든 뒤 `BLOCKED_PRIVATE_HOLDOUT`으로 종료합니다.
+
+tracked [manifest](data/derived/judge_stress_v2_manifest.json), [JSON summary](data/derived/judge_stress_v2_summary.json), [standalone HTML summary](data/derived/judge_stress_v2_summary.html)에는 case/group ID, SHA-256, 분류별 수량과 재현 메타데이터만 있습니다. underlying audited source facts는 추적되지만 exact hidden 질문·oracle·private selection은 추적되지 않습니다. raw development도 plan상 tracked 산출물이 아니며 holdout과 함께 `eval/judge_stress_v2/` 아래에서만 다룹니다. 실제 split은 issuer, 독립 document group, 독립 question-template family, source group, exact question hash가 모두 겹치지 않아야 합니다. 애플리케이션 runtime은 evaluator module이나 raw artifact를 import하지 않습니다. 현재 summary의 `status=NOT_RUN`은 suite 구축만 끝났고 실제 Task 3~7 평가를 아직 실행하지 않았다는 뜻입니다.
+
+Reporter는 manifest 선언을 신뢰하지 않고 매번 600개 unique row, development/holdout `480/120`, 전체 및 split별 exact category allocation, row split/category, unique case ID와 canonical `suite_sha256`을 다시 검증합니다. Privacy 범위는 exact authored private 질문과 private rubric ID가 개발 코드/추적 산출물에서 조회·재구성되지 않는다는 뜻입니다. 공개 issuer/fact provenance나 공개 DB 사실 답변까지 암호학적으로 숨긴다는 주장은 하지 않으며, 유한한 공개 corpus의 hashed group ID는 대조 가능할 수 있습니다. pre-paraphrase 질문이나 공개 fact를 재구성하는 것은 evaluator가 보관하는 exact private holdout 원문과 동일하지 않습니다.
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath 'src').Path
+# 일반 개발 build: development.jsonl 480건 생성 후 private 입력 부재를 명시적으로 차단
+python scripts/build_judge_stress_v2.py
+
+# evaluator 보유 환경에서만 전체 600건 검증/manifest 재생성
+python scripts/build_judge_stress_v2.py `
+  --private-holdout <git-ignored-private-holdout.jsonl>
+
+# evaluator가 case ID별 결과 metadata를 만든 뒤 JSON/HTML 재생성
+python scripts/evaluate_judge_stress_v2.py `
+  --manifest data/derived/judge_stress_v2_manifest.json `
+  --results eval/judge_stress_v2/results.jsonl `
+  --json-summary data/derived/judge_stress_v2_summary.json `
+  --html-summary data/derived/judge_stress_v2_summary.html
+```
 
 ### 다음 작업자가 시작하는 순서
 
