@@ -1453,6 +1453,16 @@ class HcxFunctionCallingService:
             common["metadata"].update(  # type: ignore[union-attr]
                 self._record_failure(failure_stage, exc, tool_name=tool_call.name)
             )
+            fallback = self._deterministic_fallback(route, tool_call, tool_response, available_citations)
+            if fallback is not None:
+                answer_text, citations = fallback
+                common["metadata"]["deterministic_fallback_used"] = True  # type: ignore[index]
+                return self._result(
+                    "answered", self._render_answer(answer_text, citations), answer_allowed=True,
+                    citation_ids=[item.evidence_id for item in citations],
+                    citations=[item.to_dict() for item in citations],
+                    warnings=["hcx_final_generation_failed_deterministic_fallback"], **common,
+                )
             common["recommended_action"] = "abstain"
             return self._result(
                 "error", UNANSWERABLE_TEXT, warnings=["hcx_final_generation_failed"], **common,
@@ -1462,6 +1472,38 @@ class HcxFunctionCallingService:
             citation_ids=[item.evidence_id for item in citations],
             citations=[item.to_dict() for item in citations], **common,
         )
+
+    def _deterministic_fallback(
+        self,
+        route: QuestionRoute | None,
+        tool_call: HcxToolCall,
+        tool_response: Mapping[str, object],
+        available_citations: Mapping[str, "HcxCitation"],
+    ) -> tuple[str, list["HcxCitation"]] | None:
+        """Answer from backend-validated display values when HCX generation fails.
+
+        Only deterministic financial routes have a full backend rendering of the
+        claim, so text answers keep failing closed instead of echoing evidence.
+        """
+        if route is None:
+            return None
+        available_ids = [
+            str(item) for item in (
+                tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
+            ) if item
+        ]
+        if route.workflow == "single":
+            generated = self._deterministic_financial_answer(tool_response, available_ids)
+        elif route.workflow == "financial_comparison":
+            generated = self._deterministic_financial_comparison_answer(tool_response, available_ids)
+        else:
+            return None
+        if generated is None:
+            return None
+        citations = self._selected_citations(tool_call.name, generated.citation_ids, available_citations)
+        if not citations:
+            return None
+        return generated.answer, citations
 
     @staticmethod
     def _deterministic_financial_answer(

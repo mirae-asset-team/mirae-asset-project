@@ -429,6 +429,129 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(result.metadata["route_source"], "deterministic")
         self.assertEqual(registry.calls[0][0], "get_financial_facts")
 
+    def test_final_generation_failure_falls_back_to_deterministic_financial_answer(self) -> None:
+        receipt = "20250318000001"
+        response: dict[str, object] = {
+            "status": "success",
+            "tool_name": "get_financial_facts",
+            "data": {
+                "facts": [{
+                    "account_id": "revenue",
+                    "account_name": "매출액",
+                    "value_numeric": "1234567",
+                    "scale": 1,
+                    "unit": "KRW",
+                    "display_value": "1,234,567원",
+                    "period": {
+                        "period_type": "duration",
+                        "period_start": "2025-01-01",
+                        "period_end": "2025-12-31",
+                        "instant_date": None,
+                    },
+                    "scope": "consolidated",
+                    "company_identifiers": {"company": "삼성전자"},
+                }],
+            },
+            "evidence_bundle": {
+                "evidence_ids": ["ev-fin"],
+                "items": [{
+                    "evidence_id": "ev-fin",
+                    "evidence_ids": ["ev-fin"],
+                    "filing_id": receipt,
+                    "rcept_no": receipt,
+                    "report_name": "사업보고서",
+                    "filed_at": "2026-03-18",
+                }],
+            },
+            "warnings": [],
+            "metadata": {
+                "sufficiency_check": {
+                    "status": "sufficient",
+                    "answer_allowed": True,
+                    "recommended_action": "answer",
+                }
+            },
+        }
+        registry = StaticRegistry(response)
+        client = FakeHcxClient(
+            self._search_call(),
+            generation_error=RuntimeError("hcx_rate_limited"),
+        )
+        service = HcxFunctionCallingService(
+            registry,  # type: ignore[arg-type]
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자 2025년 연결 매출액은?")
+
+        self.assertEqual(result.status, "answered")
+        self.assertTrue(result.answer_allowed)
+        self.assertIn("1,234,567원", result.answer)
+        self.assertIn(receipt, result.answer)
+        self.assertIn("hcx_final_generation_failed_deterministic_fallback", result.warnings)
+        self.assertTrue(result.metadata["deterministic_fallback_used"])
+        self.assertEqual([item["rcept_no"] for item in result.citations], [receipt])
+
+    def test_final_generation_failure_without_display_value_stays_failed_closed(self) -> None:
+        receipt = "20250318000001"
+        response: dict[str, object] = {
+            "status": "success",
+            "tool_name": "get_financial_facts",
+            "data": {
+                "facts": [{
+                    "account_id": "revenue",
+                    "account_name": "매출액",
+                    "value_numeric": "1234567",
+                    "scale": 1,
+                    "unit": "KRW",
+                    "period": {
+                        "period_type": "duration",
+                        "period_start": "2025-01-01",
+                        "period_end": "2025-12-31",
+                        "instant_date": None,
+                    },
+                    "scope": "consolidated",
+                    "company_identifiers": {"company": "삼성전자"},
+                }],
+            },
+            "evidence_bundle": {
+                "evidence_ids": ["ev-fin"],
+                "items": [{
+                    "evidence_id": "ev-fin",
+                    "evidence_ids": ["ev-fin"],
+                    "filing_id": receipt,
+                    "rcept_no": receipt,
+                    "report_name": "사업보고서",
+                    "filed_at": "2026-03-18",
+                }],
+            },
+            "warnings": [],
+            "metadata": {
+                "sufficiency_check": {
+                    "status": "sufficient",
+                    "answer_allowed": True,
+                    "recommended_action": "answer",
+                }
+            },
+        }
+        registry = StaticRegistry(response)
+        client = FakeHcxClient(
+            self._search_call(),
+            generation_error=RuntimeError("hcx_rate_limited"),
+        )
+        service = HcxFunctionCallingService(
+            registry,  # type: ignore[arg-type]
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자 2025년 연결 매출액은?")
+
+        self.assertEqual(result.status, "error")
+        self.assertFalse(result.answer_allowed)
+        self.assertIn("hcx_final_generation_failed", result.warnings)
+
     def test_ambiguous_financial_term_skips_provider_and_tool(self) -> None:
         registry = StaticRegistry({})
         client = FakeHcxClient(self._search_call())
