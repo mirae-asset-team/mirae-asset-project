@@ -8,6 +8,8 @@
 
 ## 현재 개발 상태와 인수인계
 
+> **Judge Stress V2 즉시 인수인계:** 이번 작업자는 계획의 Task 1(Dense 런타임·의존성·신원 계약)까지만 완료하고 종료합니다. Task 2~8은 완료가 아니며, 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)와 [실행 계획](docs/superpowers/plans/2026-09-02-judge-stress-v2.md)을 읽은 뒤 Task 2의 600건 평가 구축부터 시작하세요.
+
 > **2026-09-02 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, HCX Function Calling V1.1, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결이 구현되어 있습니다. Compose에는 full-corpus Dense sidecar가 선언되어 있지만, 이번 Task 1에서는 Docker/NCP를 실행하거나 변경하지 않았습니다. 새 image의 Python/NumPy/FAISS/model/vector identity와 Dense Recall@20·issuer/version·p95 채택 gate는 아직 검증되지 않았습니다.
 
 ### 현재 한눈에 보기
@@ -35,7 +37,7 @@
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
 | HCX Function Calling | V1.1 실제 smoke 성공 | 운영 5종 질문 반복 smoke와 장애율 측정 |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
-| 테스트 | Task 1 fix round 2 Python `552 passed, 2 skipped`; Web JS `12 passed`; 새 Dense identity focused `28 passed` | 새 image가 가능한 환경에서 container identity 검증 |
+| 테스트 | Task 1 최종 Python `553 passed, 2 skipped`; Web JS `12 passed`; Dense identity focused `29 passed` | Task 2의 Judge Stress V2 600건 구축 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
 ### 현재 품질 경계
@@ -47,6 +49,7 @@
 - `[agent]` extra와 기본 `Dockerfile`에는 NumPy를 선언하지 않고, `Dockerfile.dense`가 설치하는 `[dense]` extra에만 `numpy==2.5.2`를 고정했습니다. Docker engine을 사용할 수 없어 실제 image package inventory는 `BLOCKED_ENVIRONMENT`입니다.
 - Dense startup은 FAISS/metadata SHA-256, 전 vector의 L2 norm, 실제 FAISS metric/type, 그리고 mounted model 전체 파일 SHA-256을 먼저 검증합니다. 통과한 Python/NumPy/FAISS/model revision/vector count·dimension/index identity만 `/runtime/dense_runtime_manifest.json`과 sidecar `/health`에 동일하게 기록합니다. 기존 health 필드는 유지됩니다.
 - 모델 identity는 live/read-only mount 안에서 임의 생성하지 않습니다. staging 모델 복사본에서 `$env:PYTHONPATH='src'; python scripts/build_dense_model_identity.py --model-path <staging-model-dir> --output <staging-model-dir>/model_identity.json`으로 생성하고 검토한 뒤, 그 디렉터리 전체를 read-only로 mount합니다.
+- 이 builder의 신뢰 루트는 로컬 Hugging Face cache가 돌려준 정확한 commit snapshot입니다. 로컬 cache 자체의 공급망 진위까지 증명하려면 별도 서명·upstream hash 정책이 필요하며 현재 release gate의 후속 항목으로 남았습니다.
 - 원본 base DB, overlay, search SQLite는 계속 read-only로 유지합니다.
 - HCX credential, `.env`, SQLite, chunk JSONL, FAISS index와 모델 파일은 Git에 올리지 않습니다.
 

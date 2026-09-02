@@ -797,3 +797,10 @@
 - TDD RED: 잘못된 FAISS SHA-256, 실제 non-unit vector, 변경된 mounted model file의 세 회귀를 먼저 추가해 기존 코드에서 `3 failed, 12 passed`를 확인했다. 모델 identity builder 부재도 별도 artifact test에서 `1 failed`로 확인했다.
 - 최소 GREEN: FAISS/metadata SHA-256을 build manifest와 비교하고, `IndexFlatIP`의 모든 vector를 bounded batch로 reconstruct하여 L2 norm `1±1e-4`를 검증한다. Staging 전용 builder가 model directory 전체 regular file의 size/SHA-256 identity를 원자적으로 만들며 runtime은 파일 집합·크기·hash를 모두 확인한다. Live/read-only mount를 쓰지 않으며 main agent에는 NumPy를 추가하지 않았다.
 - 검증: Dense runtime 및 deployment artifact `28 passed`; 전체 Python `552 passed, 2 skipped, 58 warnings, 74 subtests`; Web `12/12`; `compileall src scripts`와 `git diff --check` 통과. Docker/NCP/live artifact 측정은 계속 `BLOCKED_ENVIRONMENT`이다.
+
+### 2026-09-02 — Task 1 fix round 3 and handoff
+
+- 재리뷰 요구를 좁혀 staging model을 임의 파일 집합으로 self-assert하지 못하게 했다. Builder는 `huggingface_hub.snapshot_download(repo_id='BAAI/bge-m3', revision=<pinned commit>, local_files_only=True)`가 해석한 snapshot과 staged model 전체 파일을 byte-for-byte 비교한 뒤에만 identity를 만든다.
+- TDD RED: reference snapshot 비교 API와 local-only snapshot resolver가 없는 상태에서 `2 failed`를 확인했다. GREEN 후 focused `29 passed`, 전체 Python `553 passed, 2 skipped, 58 warnings, 74 subtests`, Web `12/12`, compileall/diff check를 통과했다.
+- Review boundary: mounted files가 pinned local snapshot과 동일함은 검증하지만 로컬 Hugging Face cache 자체의 공급망 진위는 별도 신뢰 루트다. 서명된 upstream file manifest가 없는 현재 환경에서는 이를 더 강하게 증명할 수 없으므로 후속 supply-chain gate로 명시한다.
+- 사용자 요청에 따라 이번 작업자는 Task 1에서 종료한다. Task 2~8과 Docker/NCP staging/production promotion은 미완료이며 `docs/handoffs/2026-09-02-judge-stress-v2-handoff.md`로 넘긴다.
