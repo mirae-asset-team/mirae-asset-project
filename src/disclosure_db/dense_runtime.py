@@ -61,37 +61,53 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _model_file_paths(model_path: Path) -> dict[str, Path]:
+def _model_file_paths(model_path: Path, *, allow_external_symlinks: bool = False) -> dict[str, Path]:
     root = model_path.resolve()
     files: dict[str, Path] = {}
     for path in sorted(model_path.rglob("*")):
         if not path.is_file() or path.name == MODEL_IDENTITY_FILENAME:
             continue
         resolved = path.resolve()
-        try:
-            relative = resolved.relative_to(root).as_posix()
-        except ValueError as exc:
-            raise ValueError("dense_mounted_model_path_invalid") from exc
+        if not allow_external_symlinks:
+            try:
+                resolved.relative_to(root)
+            except ValueError as exc:
+                raise ValueError("dense_mounted_model_path_invalid") from exc
+        relative = path.relative_to(model_path).as_posix()
         files[relative] = path
     return files
 
 
-def build_model_identity(model_path: Path) -> dict[str, object]:
-    """Return a non-secret identity manifest bound to every mounted model file."""
+def build_model_identity(
+    model_path: Path,
+    *,
+    reference_model_path: Path,
+) -> dict[str, object]:
+    """Bind staged model files to a locally resolved pinned upstream snapshot."""
     files = _model_file_paths(Path(model_path))
-    if not files:
+    reference_files = _model_file_paths(
+        Path(reference_model_path), allow_external_symlinks=True
+    )
+    if not files or set(files) != set(reference_files):
         raise ValueError("dense_mounted_model_files_missing")
+    contracts: dict[str, dict[str, object]] = {}
+    for relative, path in files.items():
+        reference = reference_files[relative]
+        size_bytes = path.stat().st_size
+        sha256 = _sha256_file(path)
+        if size_bytes != reference.stat().st_size or sha256 != _sha256_file(reference):
+            raise ValueError(f"dense_mounted_model_reference_mismatch:{relative}")
+        contracts[relative] = {"size_bytes": size_bytes, "sha256": sha256}
     return {
         "schema_version": MODEL_IDENTITY_SCHEMA_VERSION,
         "model": EXPECTED_MODEL,
         "model_revision": EXPECTED_MODEL_REVISION,
-        "files": {
-            relative: {
-                "size_bytes": path.stat().st_size,
-                "sha256": _sha256_file(path),
-            }
-            for relative, path in files.items()
+        "provenance": {
+            "repository": EXPECTED_MODEL,
+            "revision": EXPECTED_MODEL_REVISION,
+            "verification": "pinned_snapshot_byte_match",
         },
+        "files": contracts,
     }
 
 

@@ -45,6 +45,8 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertTrue(script.is_file())
         text = script.read_text(encoding="utf-8")
         self.assertIn("build_model_identity", text)
+        self.assertIn("snapshot_download", text)
+        self.assertIn("local_files_only=True", text)
         self.assertIn("--model-path", text)
         self.assertIn("--output", text)
 

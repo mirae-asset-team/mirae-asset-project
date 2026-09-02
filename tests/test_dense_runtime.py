@@ -13,7 +13,13 @@ import numpy as real_numpy
 
 from fastapi.testclient import TestClient
 
-from disclosure_db.dense_runtime import DenseRuntime, FilingVectorIndex, JsonlOffsetIndex, create_app
+from disclosure_db.dense_runtime import (
+    DenseRuntime,
+    FilingVectorIndex,
+    JsonlOffsetIndex,
+    build_model_identity,
+    create_app,
+)
 
 
 def _write_metadata(path: Path) -> None:
@@ -248,6 +254,23 @@ class DenseRuntimeApiTests(unittest.TestCase):
 
 
 class DenseRuntimeIdentityTests(unittest.TestCase):
+    def test_model_identity_requires_byte_identical_pinned_reference_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            reference = root / "reference"
+            staged = root / "staged"
+            reference.mkdir()
+            staged.mkdir()
+            (reference / "config.json").write_text("same\n", encoding="utf-8")
+            (staged / "config.json").write_text("same\n", encoding="utf-8")
+
+            identity = build_model_identity(staged, reference_model_path=reference)
+            self.assertEqual(identity["provenance"]["verification"], "pinned_snapshot_byte_match")
+
+            (staged / "config.json").write_text("changed\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "dense_mounted_model_reference_mismatch"):
+                build_model_identity(staged, reference_model_path=reference)
+
     def test_loaded_runtime_records_dependency_model_and_vector_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

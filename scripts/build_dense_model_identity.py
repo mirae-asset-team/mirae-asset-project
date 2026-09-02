@@ -6,7 +6,13 @@ import os
 from pathlib import Path
 import tempfile
 
-from disclosure_db.dense_runtime import MODEL_IDENTITY_FILENAME, build_model_identity
+from disclosure_db.dense_runtime import (
+    EXPECTED_MODEL,
+    EXPECTED_MODEL_REVISION,
+    MODEL_IDENTITY_FILENAME,
+    build_model_identity,
+)
+from huggingface_hub import snapshot_download
 
 
 def main() -> None:
@@ -22,7 +28,15 @@ def main() -> None:
     if output.parent != model_path or output.name != MODEL_IDENTITY_FILENAME:
         raise SystemExit(f"--output must be --model-path/{MODEL_IDENTITY_FILENAME}")
 
-    identity = build_model_identity(model_path)
+    reference_model_path = Path(snapshot_download(
+        repo_id=EXPECTED_MODEL,
+        revision=EXPECTED_MODEL_REVISION,
+        local_files_only=True,
+    ))
+    identity = build_model_identity(
+        model_path,
+        reference_model_path=reference_model_path,
+    )
     payload = json.dumps(identity, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
     descriptor, temporary_name = tempfile.mkstemp(
         prefix=f".{output.name}.", suffix=".tmp", dir=str(output.parent)
