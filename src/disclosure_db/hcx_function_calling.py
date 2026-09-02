@@ -2017,7 +2017,7 @@ class HcxFunctionCallingService:
             )
         if not answer_allowed:
             return self._result(
-                "abstained", self._abstention_text(recommended_action),
+                "abstained", self._abstention_text(recommended_action, sufficiency),
                 warnings=["answer_generation_blocked_by_sufficiency"], **common,
             )
 
@@ -2484,9 +2484,21 @@ class HcxFunctionCallingService:
         return sufficiency if isinstance(sufficiency, Mapping) else {}
 
     @staticmethod
-    def _abstention_text(action: str) -> str:
+    def _abstention_text(action: str, sufficiency: Mapping[str, object] | None = None) -> str:
         if action == "ask_clarification":
             return "근거 범위를 확정할 수 있도록 회사, 계정 또는 기간을 더 구체적으로 알려주세요."
+        missing = {str(item) for item in (sufficiency or {}).get("missing_requirements") or []}
+        if "validated_structured_financial_fact" in missing:
+            return (
+                "요청하신 회사·계정·기간의 검증된 재무 수치가 공시 코퍼스에서 확인되지 않아 "
+                "답변을 보류합니다. 회계연도나 연결/별도 범위를 바꿔 다시 시도해 주세요. "
+                "금융지주·보험사 손익계산서에는 매출액 계정이 별도로 표시되지 않을 수 있습니다."
+            )
+        if "search_results" in missing or "citable_evidence" in missing:
+            return (
+                "요청과 일치하는 공시 근거를 코퍼스에서 찾지 못해 답변을 보류합니다. "
+                "회사명이나 검색어를 바꾸어 다시 시도해 주세요."
+            )
         return UNANSWERABLE_TEXT
 
     def _record_failure(
