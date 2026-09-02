@@ -167,6 +167,56 @@ def _reject(table: Mapping[str, object], reason_code: str, **extra: object) -> d
     }
 
 
+def _net_income_attribution_values(
+    row: list[dict[str, object]],
+    label_cell: Mapping[str, object],
+    rows: Mapping[int, list[dict[str, object]]],
+    row_index: int,
+    years: Mapping[int, int],
+) -> dict[int, tuple[str, list[str]]]:
+    """Recover a blank 당기순이익 total from the 지배/비지배 attribution rows below it.
+
+    DART consolidated statements often leave the total row empty and carry the
+    figures on the owner/minority split; the total is their exact sum, so this
+    stays deterministic and every source cell is kept as evidence.
+    """
+    value_cells = [
+        cell for cell in row
+        if int(cell.get("column_index") or 0) in years and cell is not label_cell
+    ]
+    if any(str(cell.get("text_raw") or "").strip() for cell in value_cells):
+        return {}
+    parent_row = rows.get(row_index + 1, [])
+    minority_row = rows.get(row_index + 2, [])
+
+    def _row_label(cells: list[dict[str, object]]) -> str:
+        label = next((cell for cell in cells if int(cell.get("column_index") or 0) == 0), None)
+        return _normalized_label(str(label.get("text_raw") or "")) if label else ""
+
+    parent_label = _row_label(parent_row)
+    minority_label = _row_label(minority_row)
+    if "지배기업" not in parent_label or "비지배" in parent_label or "비지배" not in minority_label:
+        return {}
+    parent_by_column = {int(cell.get("column_index") or 0): cell for cell in parent_row}
+    minority_by_column = {int(cell.get("column_index") or 0): cell for cell in minority_row}
+    recovered: dict[int, tuple[str, list[str]]] = {}
+    for cell in value_cells:
+        column = int(cell.get("column_index") or 0)
+        parent_value = parse_numeric_value(str((parent_by_column.get(column) or {}).get("text_raw") or ""))
+        minority_value = parse_numeric_value(str((minority_by_column.get(column) or {}).get("text_raw") or ""))
+        if parent_value is None or minority_value is None:
+            continue
+        total = Decimal(parent_value) + Decimal(minority_value)
+        recovered[column] = (
+            str(total),
+            [
+                str(parent_by_column[column].get("evidence_id") or ""),
+                str(minority_by_column[column].get("evidence_id") or ""),
+            ],
+        )
+    return recovered
+
+
 def extract_table_candidates(
     table: Mapping[str, object],
     cells: Iterable[Mapping[str, object]],
@@ -200,6 +250,11 @@ def extract_table_candidates(
             rejects.append(_reject(table, "ambiguous_metric_label", row_index=row_index))
             continue
         label_cell, account_id = labels[0]
+        attribution = (
+            _net_income_attribution_values(row, label_cell, rows, row_index, years)
+            if account_id == "net_income"
+            else {}
+        )
         value_count = 0
         for value_cell in row:
             column = int(value_cell.get("column_index") or 0)
@@ -209,6 +264,11 @@ def extract_table_candidates(
             if year not in {fiscal_year, fiscal_year - 1, fiscal_year - 2}:
                 continue
             value = parse_numeric_value(str(value_cell.get("text_raw") or ""))
+            evidence_ids = [str(value_cell.get("evidence_id") or "")]
+            extraction_method = "annual_statement_rule_v1"
+            if value is None and column in attribution:
+                value, evidence_ids = attribution[column]
+                extraction_method = "annual_statement_attribution_sum_v1"
             if value is None:
                 rejects.append(
                     _reject(
@@ -230,7 +290,7 @@ def extract_table_candidates(
                     str(table.get("table_id") or ""),
                     str(account_id),
                     str(year),
-                    str(value_cell.get("evidence_id") or ""),
+                    "+".join(evidence_ids),
                 )
             )
             facts.append(
@@ -255,8 +315,8 @@ def extract_table_candidates(
                     "scale": classification["scale"],
                     "unit_raw": classification["unit_raw"],
                     "account_evidence_id": str(label_cell.get("evidence_id") or ""),
-                    "evidence_ids": [str(value_cell.get("evidence_id") or "")],
-                    "extraction_method": "annual_statement_rule_v1",
+                    "evidence_ids": list(evidence_ids),
+                    "extraction_method": extraction_method,
                     "validation_status": "candidate",
                 }
             )
