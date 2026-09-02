@@ -50,9 +50,12 @@ Completed locally on 2026-09-03 from Task 3 base `3b11110e18f6b61c7c2f24d54c3c20
 
 ## Task 5 — Hybrid retrieval gate
 
-- Keep structured facts/corrections/aggregates on SQLite.
-- Apply issuer/version/period filters before Sparse/Dense retrieval and remove instruction-like corpus text from model context.
-- Adopt Dense only at >= 5 percentage-point Recall@20 gain, zero wrong issuer/version, and p95 <= 2 seconds; otherwise use Sparse fallback.
+- [x] Keep structured facts/events/corrections/aggregates on SQLite and never invoke Dense on those routes.
+- [x] Apply issuer, `as_of`, correction-version, and filing-period filters before Dense; send only the resulting filing-ID allowlist and reject hydrated evidence whose actual filing is outside it.
+- [x] Admit evidence through one instruction-like-text gate before any public model context, including tool search results and bounded summary context.
+- [x] A Dense URL alone does not enable serving. `DISCLOSURE_DENSE_ADOPTION_ARTIFACT` must name strict `dense-adoption-v1` JSON with exactly `status: ADOPTED`, identity matching the active base SHA-256/size, corpus revision, normalized Dense URL, and vector count, finite measured gain `>= 0.05`, separate wrong-issuer and wrong-version counts of zero, and finite p95 latency from `0` through `2000` ms.
+- [x] No current deployment artifact is declared adopted, so current Compose agents remain Sparse-first and start without waiting for Dense health.
+- [x] Focused verification: `141 passed, 1 skipped, 6 warnings, 31 subtests` across Dense client, evidence service, disclosure tools, free-form evaluation/retrieval, runtime configuration/integration, and hybrid retrieval tests. The skip is the existing optional local smoke index; warnings are existing FastAPI `on_event` deprecations.
 
 ## Task 6 — Claim-level verification
 

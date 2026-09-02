@@ -2,6 +2,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 from disclosure_db.runtime import RuntimeConfig
 
 
@@ -30,6 +32,14 @@ class RuntimeConfigTests(unittest.TestCase):
             self.assertEqual(config.port, 8000)
             self.assertFalse(config.provider_configured)
             config.validate()
+
+    def test_compose_agents_can_start_without_dense_health(self):
+        compose_path = Path(__file__).resolve().parents[1] / "compose.yaml"
+        compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+
+        for service_name in ("disclosure-agent", "disclosure-agent-staging"):
+            dependencies = compose["services"][service_name].get("depends_on", {})
+            self.assertNotIn("dense-retriever", dependencies)
 
 
 if __name__ == "__main__":

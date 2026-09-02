@@ -476,6 +476,41 @@ def test_measured_dense_decision_uses_same_denominator_top_level_p95_and_overall
         })
 
 
+@pytest.mark.parametrize(
+    ("updates", "error"),
+    [
+        ({"measured_gain": float("nan")}, "dense_gain_schema_mismatch"),
+        ({"wrong_issuer_count": -1, "wrong_version_count": 1}, "dense_safety_counts_invalid"),
+        ({"p95_ms": float("nan")}, "dense_p95_invalid"),
+        ({"p95_ms": -1}, "dense_p95_invalid"),
+    ],
+)
+def test_dense_decision_rejects_non_finite_or_invalid_adoption_metrics(
+    updates: dict[str, object], error: str,
+) -> None:
+    dense = {
+        "scope": "overall", "target_count": 100,
+        "sparse_target_hits_at_20": 80, "dense_target_hits_at_20": 85,
+        "sparse_recall_at_20": 0.80, "dense_recall_at_20": 0.85,
+        "measured_gain": 0.05,
+        "wrong_issuer_count": 0, "wrong_version_count": 0,
+        "p95_ms": 150,
+        **updates,
+    }
+    summary = {
+        "target_count": 100, "target_recall_at_20": 0.80, "target_hits_at_20": 80,
+        "residual_misses": [{
+            "case_id": "text-miss", "route": "text",
+            "target_evidence_ids": [f"target-{number}" for number in range(10)],
+        }],
+        "wrong_issuer_count": 0, "wrong_version_count": 0,
+        "dense_pilot": dense,
+    }
+
+    with pytest.raises(ValueError, match=error):
+        decide_embedding_pilot(summary)
+
+
 def test_source_record_derivation_refuses_missing_serving_identity_databases() -> None:
     connection = sqlite3.connect(":memory:")
     connection.executescript(

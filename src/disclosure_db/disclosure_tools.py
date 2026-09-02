@@ -17,7 +17,7 @@ import sqlite3
 from typing import Mapping, Protocol
 
 from .agent_contracts import EvidenceBundle as ServiceEvidenceBundle
-from .evidence_service import EvidenceService
+from .evidence_service import EvidenceService, evidence_text_is_admitted
 from .financial_accounts import (
     FinancialAccountResolution,
     load_financial_account_catalog,
@@ -172,6 +172,7 @@ def _evidence_item(row: Mapping[str, object]) -> dict[str, object]:
     evidence_ids = _row_evidence_ids(row)
     locator = _json_object(row.get("locator") or row.get("locator_json"))
     section = _json_object(row.get("section") or row.get("section_path") or row.get("section_path_json"))
+    text = row.get("text_normalized") or row.get("text") or row.get("excerpt")
     if section in (None, "") and isinstance(locator, Mapping):
         section = locator.get("section") or locator.get("section_path")
     return {
@@ -198,7 +199,7 @@ def _evidence_item(row: Mapping[str, object]) -> dict[str, object]:
         "table_id": row.get("table_id") or (locator.get("table_id") if isinstance(locator, Mapping) else None),
         "locator": locator,
         "source_path": row.get("source_path"),
-        "text": row.get("text_normalized") or row.get("text") or row.get("excerpt"),
+        "text": text if evidence_text_is_admitted(text) else None,
         "structured_value": row.get("structured_value") or row.get("value_numeric"),
         "scale": row.get("scale"),
         "unit": row.get("unit") or row.get("currency") or row.get("unit_raw"),
@@ -430,7 +431,12 @@ class DisclosureToolBackend:
             correction_policy=str(request.get("correction_policy") or "current"),
             limit=int(request.get("top_k") or 10),
         )
-        rows = [dict(row) for row in result.hits]
+        rows = [
+            dict(row) for row in result.hits
+            if evidence_text_is_admitted(
+                row.get("text_normalized") or row.get("text") or row.get("excerpt")
+            )
+        ]
         bundle = _retrieval_bundle("search_disclosures", request, rows, result)
         warnings = list(bundle.quality_warnings)
         return ToolResponse(
@@ -509,7 +515,10 @@ class DisclosureToolBackend:
                 "evidence_ids": list(fact.get("evidence_ids") or []),
             })
         allowed_ids = {str(item) for fact in facts for item in fact["evidence_ids"]}  # type: ignore[union-attr]
-        refs = [ref for ref in service_bundle.evidence if ref.evidence_id in allowed_ids]
+        refs = [
+            ref for ref in service_bundle.evidence
+            if ref.evidence_id in allowed_ids and evidence_text_is_admitted(ref.text)
+        ]
         actual_dates = sorted(
             str(value) for fact in facts for value in (
                 fact["period"].get("period_start"), fact["period"].get("period_end"), fact["period"].get("instant_date")  # type: ignore[union-attr]
@@ -899,7 +908,12 @@ class DisclosureToolBackend:
                 correction_policy=str(request.get("correction_policy") or "current"),
                 limit=int(request.get("top_k") or 10),
             )
-        rows = [dict(row) for row in result.hits]
+        rows = [
+            dict(row) for row in result.hits
+            if evidence_text_is_admitted(
+                row.get("text_normalized") or row.get("text") or row.get("excerpt")
+            )
+        ]
         maximum = int(request.get("max_chars") or 6000)
         context_parts: list[str] = []
         remaining = maximum

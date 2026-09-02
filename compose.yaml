@@ -47,9 +47,6 @@ services:
       - "${DISCLOSURE_AGENT_DB_DIR_HOST}:/data/agent:ro"
       - "${DISCLOSURE_ATTESTATION_HOST}:/data/attestation.json:ro"
       - "${DISCLOSURE_RUNTIME_DIR_HOST}:/runtime"
-    depends_on:
-      dense-retriever:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/health'))['ready']"]
       interval: 30s
@@ -84,9 +81,6 @@ services:
       - "${DISCLOSURE_ATTESTATION_HOST}:/data/attestation.json:ro"
       - "${DISCLOSURE_RUNTIME_DIR_HOST}:/runtime"
       - "qa-eval-data:/app/eval"
-    depends_on:
-      dense-retriever:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); assert data['ready'] and data['eval_enabled']"]
       interval: 30s

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 from urllib import error
@@ -12,6 +14,7 @@ from disclosure_db.dense_client import (
     DenseSearchClient,
     EvidenceServiceDenseRetriever,
     flatten_evidence_ids,
+    load_dense_adoption_artifact,
 )
 
 
@@ -30,7 +33,27 @@ class _Response:
 
 
 class DenseSearchClientTests(unittest.TestCase):
-    def test_environment_configuration_is_opt_in(self) -> None:
+    @staticmethod
+    def _adoption_artifact(path: Path, **updates: object) -> None:
+        payload: dict[str, object] = {
+            "schema_version": "dense-adoption-v1",
+            "status": "ADOPTED",
+            "identity": {
+                "base_sha256": "a" * 64,
+                "base_size_bytes": 123,
+                "corpus_revision": "semantic-v1",
+                "dense_url": "http://dense:8080",
+                "dense_vector_count": 2_571_506,
+            },
+            "measured_gain": 0.05,
+            "wrong_issuer_count": 0,
+            "wrong_version_count": 0,
+            "p95_ms": 2000,
+        }
+        payload.update(updates)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def test_dense_url_alone_does_not_enable_runtime(self) -> None:
         with patch.dict(os.environ, {}, clear=True):
             self.assertIsNone(DenseSearchClient.from_environment())
         with patch.dict(os.environ, {
@@ -38,11 +61,67 @@ class DenseSearchClientTests(unittest.TestCase):
             "DISCLOSURE_DENSE_TIMEOUT_SECONDS": "3.5",
             "DISCLOSURE_DENSE_VECTOR_COUNT": "2571506",
         }, clear=True):
-            client = DenseSearchClient.from_environment()
+            self.assertIsNone(DenseSearchClient.from_environment(
+                base_sha256="a" * 64,
+                base_size_bytes=123,
+                corpus_revision="semantic-v1",
+            ))
+
+    def test_identity_bound_adopted_artifact_enables_dense_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            artifact = Path(temp) / "dense-adoption.json"
+            self._adoption_artifact(artifact)
+            with patch.dict(os.environ, {
+                "DISCLOSURE_DENSE_URL": "http://dense:8080",
+                "DISCLOSURE_DENSE_TIMEOUT_SECONDS": "3.5",
+                "DISCLOSURE_DENSE_VECTOR_COUNT": "2571506",
+                "DISCLOSURE_DENSE_ADOPTION_ARTIFACT": str(artifact),
+            }, clear=True):
+                client = DenseSearchClient.from_environment(
+                    base_sha256="a" * 64,
+                    base_size_bytes=123,
+                    corpus_revision="semantic-v1",
+                )
+
         self.assertIsNotNone(client)
+        assert client is not None
         self.assertEqual(client.base_url, "http://dense:8080")
         self.assertEqual(client.timeout_seconds, 3.5)
         self.assertEqual(client.vector_count, 2_571_506)
+
+    def test_adoption_loader_rejects_unknown_fields_and_every_failed_gate(self) -> None:
+        identity = {
+            "base_sha256": "a" * 64,
+            "base_size_bytes": 123,
+            "corpus_revision": "semantic-v1",
+            "dense_url": "http://dense:8080",
+            "dense_vector_count": 2_571_506,
+        }
+        invalid_updates = (
+            {"unexpected": "field"},
+            {"status": "REJECTED_PILOT"},
+            {"identity": {**identity, "base_sha256": "b" * 64}},
+            {"identity": {**identity, "dense_vector_count": 1}},
+            {"measured_gain": float("nan")},
+            {"measured_gain": 0.05 - 5e-13},
+            {"wrong_issuer_count": 1},
+            {"wrong_version_count": 1},
+            {"p95_ms": float("inf")},
+            {"p95_ms": 2000.001},
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            artifact = Path(temp) / "dense-adoption.json"
+            for updates in invalid_updates:
+                with self.subTest(updates=updates):
+                    self._adoption_artifact(artifact, **updates)
+                    self.assertIsNone(load_dense_adoption_artifact(
+                        artifact,
+                        base_sha256="a" * 64,
+                        base_size_bytes=123,
+                        corpus_revision="semantic-v1",
+                        dense_url="http://dense:8080",
+                        dense_vector_count=2_571_506,
+                    ))
 
     def test_search_sends_bounded_filter_and_parses_hits(self) -> None:
         client = DenseSearchClient("http://dense:8080/")

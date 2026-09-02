@@ -4,12 +4,86 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 import os
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Iterable, Mapping, Protocol
 from urllib import error, request
 
 from .hybrid_retrieval import RetrievalResult
+
+
+DENSE_ADOPTION_SCHEMA_VERSION = "dense-adoption-v1"
+DENSE_MINIMUM_GAIN = 0.05
+DENSE_MAXIMUM_P95_MS = 2000.0
+
+
+def _finite_number(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def load_dense_adoption_artifact(
+    path: Path,
+    *,
+    base_sha256: str,
+    base_size_bytes: int,
+    corpus_revision: str,
+    dense_url: str,
+    dense_vector_count: int,
+) -> dict[str, object] | None:
+    """Load an adopted Dense decision only when metrics and serving identity match."""
+
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if set(payload) != {
+        "schema_version",
+        "status",
+        "identity",
+        "measured_gain",
+        "wrong_issuer_count",
+        "wrong_version_count",
+        "p95_ms",
+    }:
+        return None
+    identity = payload.get("identity")
+    if (
+        payload.get("schema_version") != DENSE_ADOPTION_SCHEMA_VERSION
+        or payload.get("status") != "ADOPTED"
+        or not isinstance(identity, dict)
+        or identity != {
+            "base_sha256": base_sha256,
+            "base_size_bytes": base_size_bytes,
+            "corpus_revision": corpus_revision,
+            "dense_url": dense_url,
+            "dense_vector_count": dense_vector_count,
+        }
+    ):
+        return None
+    measured_gain = _finite_number(payload.get("measured_gain"))
+    p95_ms = _finite_number(payload.get("p95_ms"))
+    wrong_issuer = payload.get("wrong_issuer_count")
+    wrong_version = payload.get("wrong_version_count")
+    if (
+        measured_gain is None
+        or measured_gain < DENSE_MINIMUM_GAIN
+        or p95_ms is None
+        or p95_ms < 0
+        or p95_ms > DENSE_MAXIMUM_P95_MS
+        or type(wrong_issuer) is not int
+        or type(wrong_version) is not int
+        or wrong_issuer != 0
+        or wrong_version != 0
+    ):
+        return None
+    return payload
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,13 +114,32 @@ class DenseSearchClient:
         self.vector_count = int(vector_count)
 
     @classmethod
-    def from_environment(cls) -> "DenseSearchClient | None":
+    def from_environment(
+        cls,
+        *,
+        base_sha256: str | None = None,
+        base_size_bytes: int | None = None,
+        corpus_revision: str | None = None,
+    ) -> "DenseSearchClient | None":
         url = os.getenv("DISCLOSURE_DENSE_URL", "").strip()
-        return cls(
-            url,
-            timeout_seconds=float(os.getenv("DISCLOSURE_DENSE_TIMEOUT_SECONDS", "5")),
-            vector_count=int(os.getenv("DISCLOSURE_DENSE_VECTOR_COUNT", "0")),
-        ) if url else None
+        artifact_path = os.getenv("DISCLOSURE_DENSE_ADOPTION_ARTIFACT", "").strip()
+        if not all((url, artifact_path, base_sha256, corpus_revision)) or base_size_bytes is None:
+            return None
+        try:
+            timeout_seconds = float(os.getenv("DISCLOSURE_DENSE_TIMEOUT_SECONDS", "5"))
+            vector_count = int(os.getenv("DISCLOSURE_DENSE_VECTOR_COUNT", "0"))
+            client = cls(url, timeout_seconds=timeout_seconds, vector_count=vector_count)
+        except (TypeError, ValueError):
+            return None
+        adopted = load_dense_adoption_artifact(
+            Path(artifact_path),
+            base_sha256=base_sha256,
+            base_size_bytes=base_size_bytes,
+            corpus_revision=corpus_revision,
+            dense_url=client.base_url,
+            dense_vector_count=client.vector_count,
+        )
+        return client if adopted is not None else None
 
     def search(
         self,
@@ -189,8 +282,10 @@ class EvidenceServiceDenseRetriever:
 
 
 __all__ = [
+    "DENSE_ADOPTION_SCHEMA_VERSION",
     "DenseChunkHit",
     "DenseSearchClient",
     "EvidenceServiceDenseRetriever",
     "flatten_evidence_ids",
+    "load_dense_adoption_artifact",
 ]

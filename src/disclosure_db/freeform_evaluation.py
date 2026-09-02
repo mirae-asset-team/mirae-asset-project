@@ -1109,23 +1109,39 @@ def decide_embedding_pilot(
             raise ValueError("dense_denominator_mismatch")
         sparse_hits = int(dense.get("sparse_target_hits_at_20", -1))
         dense_hits = int(dense.get("dense_target_hits_at_20", -1))
-        if sparse_hits < 0 or dense_hits < 0:
+        if sparse_hits < 0 or dense_hits < 0 or sparse_hits > target_count or dense_hits > target_count:
             raise ValueError("dense_hit_counts_invalid")
         if "target_hits_at_20" in summary and sparse_hits != int(summary["target_hits_at_20"]):
             raise ValueError("dense_sparse_hits_mismatch")
         dense_sparse_recall = sparse_hits / target_count
         dense_recall = dense_hits / target_count
+        reported_sparse_recall = float(dense.get("sparse_recall_at_20", -1))
+        reported_dense_recall = float(dense.get("dense_recall_at_20", -1))
         if (
-            abs(dense_sparse_recall - sparse_recall) > 1e-12
-            or abs(float(dense.get("sparse_recall_at_20", -1)) - dense_sparse_recall) > 1e-12
-            or abs(float(dense.get("dense_recall_at_20", -1)) - dense_recall) > 1e-12
+            not math.isfinite(reported_sparse_recall)
+            or not math.isfinite(reported_dense_recall)
+            or abs(dense_sparse_recall - sparse_recall) > 1e-12
+            or abs(reported_sparse_recall - dense_sparse_recall) > 1e-12
+            or abs(reported_dense_recall - dense_recall) > 1e-12
         ):
             raise ValueError("dense_recall_schema_mismatch")
         measured_gain = dense_recall - dense_sparse_recall
-        if abs(float(dense.get("measured_gain", math.inf)) - measured_gain) > 1e-12:
+        reported_gain = float(dense.get("measured_gain", math.inf))
+        if not math.isfinite(reported_gain) or abs(reported_gain - measured_gain) > 1e-12:
             raise ValueError("dense_gain_schema_mismatch")
-        dense_safety = int(dense.get("wrong_issuer_count", 0)) + int(dense.get("wrong_version_count", 0))
+        wrong_issuer = dense.get("wrong_issuer_count", 0)
+        wrong_version = dense.get("wrong_version_count", 0)
+        if (
+            type(wrong_issuer) is not int
+            or type(wrong_version) is not int
+            or wrong_issuer < 0
+            or wrong_version < 0
+        ):
+            raise ValueError("dense_safety_counts_invalid")
+        dense_safety = wrong_issuer + wrong_version
         p95 = float(dense.get("p95_ms", math.inf))
+        if not math.isfinite(p95) or p95 < 0:
+            raise ValueError("dense_p95_invalid")
         adopted = measured_gain + 1e-12 >= minimum_gain and dense_safety == 0 and p95 <= 2000
         return {
             **base,
@@ -1136,6 +1152,8 @@ def decide_embedding_pilot(
             "maximum_possible_gain": maximum_gain,
             "dense_recall_at_20": dense_recall,
             "measured_gain": measured_gain,
+            "dense_wrong_issuer_count": wrong_issuer,
+            "dense_wrong_version_count": wrong_version,
             "dense_wrong_issuer_or_version_count": dense_safety,
             "dense_p95_ms": p95,
         }
