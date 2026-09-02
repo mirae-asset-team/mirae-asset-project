@@ -98,6 +98,74 @@ def load_companies() -> list[dict]:
 
 COVERAGE = PROJECT / "data" / "derived" / "financial_fact_coverage.json"
 CATALOG = PROJECT / "config" / "financial_account_catalog.json"
+DISCLOSURE_INVENTORY = PROJECT / "runs" / "disclosure_inventory.json"
+
+# Event-disclosure question templates, asked only where the corpus holds the
+# filing type (positive) and sampled where it does not (negative probes).
+_EVENT_TEMPLATES: dict[str, tuple[str, ...]] = {
+    "contract_signed": (
+        "{name}의 가장 최근 단일판매·공급계약 체결 공시 내용을 알려주세요. 계약 상대방과 계약금액이 궁금합니다.",
+        "{name}의 최근 공급계약 금액은 매출액 대비 몇 퍼센트인가요?",
+    ),
+    "contract_terminated": (
+        "{name}의 공급계약 해지 공시가 있나요? 있다면 어떤 계약이 해지되었나요?",
+    ),
+    "holding_report": (
+        "{name}의 가장 최근 주식 대량보유상황보고서에서 보고자와 보유비율을 알려주세요.",
+        "{name}의 대량보유상황보고서에서 직전 보고 대비 지분율이 어떻게 변했나요?",
+    ),
+    "treasury_acquire": (
+        "{name}의 자기주식 취득 결정 공시 내용을 알려주세요. 취득 예정 금액이 궁금합니다.",
+    ),
+    "treasury_dispose": (
+        "{name}의 자기주식 처분 결정 공시에서 처분 수량과 목적을 알려주세요.",
+    ),
+    "treasury_trust_sign": (
+        "{name}의 자기주식취득 신탁계약 체결 공시 내용을 알려주세요.",
+    ),
+    "treasury_trust_end": (
+        "{name}의 자기주식취득 신탁계약 해지 공시가 있나요?",
+    ),
+    "rights_issue": (
+        "{name}의 유상증자 결정 공시에서 신주 발행 규모와 자금 사용 목적을 알려주세요.",
+    ),
+    "bonus_issue": (
+        "{name}의 무상증자 결정 내용을 알려주세요.",
+    ),
+    "convertible_bond": (
+        "{name}의 전환사채 발행 결정에서 발행금액과 전환가액을 알려주세요.",
+    ),
+    "contingent_capital": (
+        "{name}의 조건부자본증권 발행 결정 내용을 알려주세요.",
+    ),
+    "merger": (
+        "{name}의 회사합병 결정 공시에서 합병 상대와 합병 방식이 무엇인가요?",
+    ),
+    "company_split": (
+        "{name}의 회사분할 결정 내용을 알려주세요.",
+    ),
+    "capital_reduction": (
+        "{name}의 감자 결정 공시 내용을 알려주세요.",
+    ),
+    "share_exchange": (
+        "{name}의 주식교환·이전 결정 공시 내용을 알려주세요.",
+    ),
+    "lawsuit": (
+        "{name}에 제기된 소송 관련 공시 내용을 알려주세요.",
+    ),
+    "investment_judgment": (
+        "{name}의 가장 최근 투자판단 관련 주요경영사항 공시 내용을 요약해 주세요.",
+    ),
+    "facility_investment": (
+        "{name}의 신규 시설투자 결정에서 투자금액과 투자 목적을 알려주세요.",
+    ),
+}
+# Types a company may legitimately lack — a grounded "no such filing" or an
+# abstention is the correct behavior when probed.
+_NEGATIVE_PROBE_TYPES = (
+    "rights_issue", "merger", "convertible_bond", "capital_reduction",
+    "bonus_issue", "lawsuit", "company_split",
+)
 
 _ACCOUNT_EN = {
     "매출액": "revenue", "영업이익": "operating_income", "당기순이익": "net_income",
@@ -137,8 +205,12 @@ def _typo_variant(name: str) -> str | None:
     return variant if variant != name else None
 
 
-def build_bank(companies: list[dict]) -> list[dict]:
-    """Bank v2 — one question per evaluation-axis measurement, coverage-aware.
+def build_bank(companies: list[dict], *, include_events: bool = False) -> list[dict]:
+    """Bank v2/v3 — one question per evaluation-axis measurement, coverage-aware.
+
+    include_events=False reproduces the 8,651-question v2 bank exactly (so an
+    in-flight run can resume unchanged); True appends the event-disclosure
+    layer generated from the corpus inventory.
 
     Axes follow the official criteria: 정확성, 근거 완전성, 요구사항 충족,
     근거 기반성, 추론 논리성, 안전성, 정보한계 대응. Repeat and paraphrase
@@ -315,6 +387,36 @@ def build_bank(companies: list[dict]) -> list[dict]:
                 f"{alias}의 2025년 연결 매출액은 얼마인가요?",
                 group=f"{slug}-g-revenue-2025", scale_check=True)
 
+    # 이벤트 공시 계층 — 코퍼스에 그 유형이 실재하는 회사에만 묻고(positive),
+    # 없는 유형은 표본 추출해 근거 있는 부정·보류를 검사한다(negative probe).
+    inventory: dict = {}
+    if include_events:
+        try:
+            inventory = json.loads(DISCLOSURE_INVENTORY.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            inventory = {}
+    if inventory:
+        by_corp = {entry["listed_name"]: entry.get("types", {}) for entry in inventory.values()}
+        for index, company in enumerate(companies):
+            name = company["listed_name"]
+            slug = company["stock_code"] or f"i{index}"
+            owned = by_corp.get(name, {})
+            for type_key, templates in _EVENT_TEMPLATES.items():
+                if type_key not in owned:
+                    continue
+                for template_index, template in enumerate(templates):
+                    add(f"{slug}-ev-{type_key}-{template_index}", name, f"event_{type_key}",
+                        "answer_or_abstain", template.format(name=name))
+            # 상위 계약·대량보유 보유사에는 건수 집계(추이 도구) 질문도 얹는다.
+            if "contract_signed" in owned:
+                add(f"{slug}-ev-contract-count", name, "event_trend", "answer_or_abstain",
+                    f"{name}의 2026년 단일판매·공급계약 공시가 몇 건 있었나요?")
+            missing_types = [t for t in _NEGATIVE_PROBE_TYPES if t not in owned]
+            for probe_index, type_key in enumerate(missing_types[:2]):
+                template = _EVENT_TEMPLATES[type_key][0]
+                add(f"{slug}-evneg-{type_key}", name, f"event_negative_{type_key}",
+                    "answer_or_abstain", template.format(name=name))
+
     # 전역 정보한계 프로브 (회사 무관).
     for probe_index, (category, expected, question) in enumerate((
         ("missing_company", "abstain", "테슬라의 2025년 연결 매출액은 얼마인가요?"),
@@ -441,10 +543,12 @@ def main() -> int:
     parser.add_argument("--notes", default="")
     parser.add_argument("--retry-errors", action="store_true",
                         help="drop this run's error rows first so they are re-asked")
+    parser.add_argument("--events", action="store_true",
+                        help="append the event-disclosure question layer (bank v3)")
     args = parser.parse_args()
 
     companies = load_companies()
-    bank = build_bank(companies)
+    bank = build_bank(companies, include_events=args.events)
     if args.limit:
         bank = bank[: args.limit]
     connection = open_ledger()
