@@ -52,6 +52,48 @@ def normalized_financial_value(
     return numeric if numeric.is_finite() else None
 
 
+_KRW_UNIT_FACTOR = {
+    "조": Decimal(10) ** 12,
+    "십억": Decimal(10) ** 9,
+    "억": Decimal(10) ** 8,
+    "천만": Decimal(10) ** 7,
+    "백만": Decimal(10) ** 6,
+    "만": Decimal(10) ** 4,
+}
+_KRW_AMOUNT_TOKEN = re.compile(r"([0-9][0-9,\.]*)\s*(조|십억|억|천만|백만|만)?\s*(원)?")
+
+
+def parse_korean_krw_amounts(text: str) -> list[Decimal]:
+    """Extract absolute KRW magnitudes like '333조 6,059억 원' from answer prose.
+
+    Grouped 조/억/만 segments accumulate into one amount; bare numbers count
+    only when anchored by 원, so years and percentages never register.
+    """
+    amounts: list[Decimal] = []
+    current = Decimal(0)
+    accumulating = False
+    for match in _KRW_AMOUNT_TOKEN.finditer(text):
+        digits, unit, won = match.group(1), match.group(2), match.group(3)
+        try:
+            value = Decimal(digits.replace(",", ""))
+        except InvalidOperation:
+            continue
+        if unit:
+            current += value * _KRW_UNIT_FACTOR[unit]
+            accumulating = True
+            if unit == "만" or won:
+                amounts.append(current)
+                current, accumulating = Decimal(0), False
+        elif won and accumulating:
+            amounts.append(current + value)
+            current, accumulating = Decimal(0), False
+        elif won and value >= 1000:
+            amounts.append(value)
+    if accumulating:
+        amounts.append(current)
+    return amounts
+
+
 def format_financial_value(
     value: object, scale: object = 1, unit: object = "KRW",
 ) -> str | None:
