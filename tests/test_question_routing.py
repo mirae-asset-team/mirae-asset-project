@@ -96,6 +96,24 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
         self.assertEqual(route.normalized_question, "삼성전자 2025년 매출액은?")
         self.assertEqual(route.corrections, ("삼선전자->삼성전자",))
 
+    def test_spaced_company_name_is_collapsed_before_routing(self) -> None:
+        route = self.router.route("삼 성 전 자의 2025년 연결 매출액은 얼마인가요?")
+        self.assertIsNotNone(route)
+        self.assertEqual(route.tool_name, "get_financial_facts")
+        self.assertEqual(route.arguments["company"], "삼성전자")
+        self.assertIn("spacing:삼 성 전 자->삼성전자", route.corrections)
+
+    def test_partially_spaced_company_name_is_collapsed_before_routing(self) -> None:
+        route = self.router.route("현대 자동차의 2025년 연결 매출액은 얼마인가요?")
+        self.assertIsNotNone(route)
+        self.assertEqual(route.arguments["company"], "현대자동차")
+        self.assertIn("spacing:현대 자동차->현대자동차", route.corrections)
+
+    def test_exact_company_name_records_no_spacing_correction(self) -> None:
+        route = self.router.route("삼성전자 2025년 매출액은?")
+        self.assertIsNotNone(route)
+        self.assertEqual(route.corrections, ())
+
     def test_exact_company_is_not_changed_to_one_edit_neighbor(self) -> None:
         router = DeterministicQuestionRouter(["삼성전자", "삼성전기", "현대자동차"])
 
