@@ -447,6 +447,10 @@ def open_ledger() -> sqlite3.Connection:
         "CREATE TABLE IF NOT EXISTS judgment(run_id TEXT, qid TEXT, judge TEXT, verdict TEXT,"
         " failure_class TEXT, note TEXT, created_at TEXT)"
     )
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS growth(failure_class TEXT PRIMARY KEY, first_seen_run TEXT,"
+        " root_cause TEXT, fix_commit TEXT, status TEXT, verified_run TEXT, updated_at TEXT)"
+    )
     return connection
 
 
@@ -545,6 +549,9 @@ def main() -> int:
                         help="drop this run's error rows first so they are re-asked")
     parser.add_argument("--events", action="store_true",
                         help="append the event-disclosure question layer (bank v3)")
+    parser.add_argument("--growth-order", action="store_true",
+                        help="ask new-information categories first and adaptively skip "
+                             "questions whose failure class is already saturated")
     args = parser.parse_args()
 
     companies = load_companies()
@@ -560,6 +567,49 @@ def main() -> int:
         print(f"retry-errors: dropped {dropped} error rows")
     done = {row[0] for row in connection.execute("SELECT qid FROM result WHERE run_id=?", (args.run_id,))}
     pending = [item for item in bank if item["qid"] not in done]
+    # Growth ordering: a question is only worth a credit when its outcome can
+    # still teach us something, so novel categories come first and grains
+    # whose failure class is already saturated get skipped without a call.
+    _KNOWN_CLASS_CATEGORIES = {
+        "financial_lookup", "paraphrase", "repeat_consistency",
+        "robust_spacing", "robust_josa", "robust_alias",
+    }
+    _CATEGORY_PRIORITY = {
+        **{f"event_{key}": 0 for key in _EVENT_TEMPLATES},
+        "event_trend": 0,
+        **{f"event_negative_{key}": 0 for key in _NEGATIVE_PROBE_TYPES},
+        "prompt_injection": 1, "nonpublic_information": 1, "out_of_scope": 1,
+        "missing_company": 1, "date_limit": 1, "robust_typo": 1, "robust_english": 1,
+        "quarter_lookup": 2, "derived_metric": 2, "multi_requirement": 2,
+        "financial_comparison": 2, "financial_trend": 2, "scope_separate": 2,
+        "retrieval_account": 3, "business_summary": 3, "risk_summary": 3,
+        "contract_search": 3, "research_development": 3, "dividend": 3,
+        "correction": 3, "financial_growth": 3,
+        "financial_lookup": 4, "paraphrase": 5, "robust_spacing": 5,
+        "robust_josa": 5, "robust_alias": 5, "repeat_consistency": 6,
+    }
+    if args.growth_order:
+        pending.sort(key=lambda item: (_CATEGORY_PRIORITY.get(item["category"], 2), item["qid"]))
+
+    saturated_lock = threading.Lock()
+    mismatch_counts: dict[str, int] = dict(
+        connection.execute(
+            "SELECT company, COUNT(*) FROM result WHERE run_id=? AND flags LIKE '%numeric_display_mismatch%'"
+            " GROUP BY company",
+            (args.run_id,),
+        ).fetchall()
+    )
+
+    def known_class_saturated(item: dict) -> bool:
+        if not args.growth_order or item["category"] not in _KNOWN_CLASS_CATEGORIES:
+            return False
+        with saturated_lock:
+            return mismatch_counts.get(item["company"], 0) >= 3
+
+    def record_mismatch(item: dict, flags: list[str]) -> None:
+        if any(flag.startswith("numeric_display_mismatch") for flag in flags):
+            with saturated_lock:
+                mismatch_counts[item["company"]] = mismatch_counts.get(item["company"], 0) + 1
     commit = subprocess.run(
         ["git", "-C", str(PROJECT), "rev-parse", "--short", "HEAD"],
         capture_output=True, text=True, check=False,
@@ -577,6 +627,20 @@ def main() -> int:
     progress = {"done": 0}
 
     def worker(item: dict) -> None:
+        if known_class_saturated(item):
+            with write_lock:
+                connection.execute(
+                    "INSERT OR REPLACE INTO result VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
+                    (
+                        args.run_id, item["qid"], item["company"], item["category"], item["expected"],
+                        item["question"], item["group_id"], "skipped",
+                        "known_class_saturated:numeric_display_mismatch", "[]",
+                        None, None, 0.0, "", "",
+                    ),
+                )
+                connection.commit()
+                progress["done"] += 1
+            return
         with pace_lock:
             wait = last_start[0] + args.pace_seconds - time.time()
             if wait > 0:
@@ -588,7 +652,7 @@ def main() -> int:
                 error is None
                 and isinstance(result, dict)
                 and result.get("status") == "error"
-                and "hcx_final_generation_failed" in (result.get("warnings") or [])
+                and any(str(warning).startswith("hcx_") for warning in result.get("warnings") or [])
             )
             if not rate_limited:
                 break
@@ -596,6 +660,7 @@ def main() -> int:
             result, retry_elapsed, error = ask(args.base_url, item["question"], args.timeout)
             elapsed += retry_elapsed
         verdict, note, flags = deterministic_verdict(item, result, error)
+        record_mismatch(item, flags)
         with write_lock:
             connection.execute(
                 "INSERT OR REPLACE INTO result VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))",
