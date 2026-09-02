@@ -131,6 +131,26 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
         self.assertIsNone(router.route("Samsung 2025년 매출액은?"))
         self.assertIsNone(router.route("삼성전가 2025년 매출액은?"))
 
+    def test_event_disclosure_questions_route_to_search_deterministically(self) -> None:
+        cases = (
+            "삼성전자의 가장 최근 주식 대량보유상황보고서에서 보고자와 보유비율을 알려주세요.",
+            "삼성전자의 대량보유상황보고서에서 직전 보고 대비 지분율이 어떻게 변했나요?",
+            "삼성전자의 유상증자 결정 공시에서 신주 발행 규모를 알려주세요.",
+            "삼성전자의 자기주식 취득 결정에서 취득 예정 금액이 궁금합니다.",
+            "삼성전자의 신규 시설투자 결정에서 투자금액을 알려주세요.",
+        )
+        for question in cases:
+            with self.subTest(question=question):
+                route = self.router.route(question)
+                self.assertIsNotNone(route)
+                self.assertEqual(route.tool_name, "search_disclosures")
+                self.assertEqual(route.arguments["company"], "삼성전자")
+
+    def test_correction_wording_still_wins_over_event_markers(self) -> None:
+        route = self.router.route("삼성전자 유상증자 정정공시에서 변경 전 금액을 알려주세요.")
+        self.assertIsNotNone(route)
+        self.assertEqual(route.workflow, "correction_search_then_lineage")
+
     def test_spaced_company_name_is_collapsed_before_routing(self) -> None:
         route = self.router.route("삼 성 전 자의 2025년 연결 매출액은 얼마인가요?")
         self.assertIsNotNone(route)

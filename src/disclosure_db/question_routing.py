@@ -27,6 +27,11 @@ _SUMMARY_MARKERS = ("요약", "요악", "요약해", "정리해", "핵심 내용
 _SEARCH_MARKERS = ("찾아", "검색", "언급", "관련 공시", "공시 내용", "어떤 공시")
 _CORRECTION_MARKERS = ("정정", "최초공시", "원공시", "변경 전", "변경 후")
 _CHANGE_REASON_MARKERS = ("증가한 이유", "감소한 이유", "증가 이유", "감소 이유", "변동 이유", "왜 증가", "왜 감소")
+_EVENT_DISCLOSURE_MARKERS = (
+    "대량보유", "자기주식", "유상증자", "무상증자", "전환사채", "조건부자본증권",
+    "시설투자", "공급계약", "회사합병", "합병 결정", "회사분할", "분할 결정",
+    "감자 결정", "주식교환", "투자판단", "소송",
+)
 _UNAVAILABLE_MARKERS = ("시가총액", "목표주가", "미래 주가", "주가 예측", "예상 주가")
 _COMPARISON_MARKERS = ("비교", "중", "더 높은", "더 낮은", "큰 곳", "작은 곳", "어디")
 _PERIOD_COMPARISON_MARKERS = (
@@ -547,6 +552,23 @@ class DeterministicQuestionRouter:
                     "top_k": 10,
                 },
                 workflow="correction_search_then_lineage",
+                metric_kind="SEARCH",
+                **route_context,
+            )
+
+        if plan.company and any(marker in text for marker in _EVENT_DISCLOSURE_MARKERS):
+            # Event-report questions (holding reports, treasury stock, capital
+            # actions...) must not depend on provider tool selection, which has
+            # been observed picking get_correction_lineage for them.
+            return QuestionRoute(
+                "tool",
+                "event_disclosure_type_question",
+                "search_disclosures",
+                {
+                    "question": text,
+                    "company": plan.company,
+                    "top_k": 10,
+                },
                 metric_kind="SEARCH",
                 **route_context,
             )
