@@ -429,6 +429,17 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(result.metadata["route_source"], "deterministic")
         self.assertEqual(registry.calls[0][0], "get_financial_facts")
 
+    def test_final_prompts_demand_disclosure_type_fidelity(self) -> None:
+        from disclosure_db.hcx_prompts import (
+            HCX_FINAL_ANSWER_SYSTEM_PROMPT,
+            HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT,
+        )
+
+        for prompt in (HCX_FINAL_ANSWER_SYSTEM_PROMPT, HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT):
+            self.assertIn("보고서 유형을 답변에 명시", prompt)
+            self.assertIn("정기보고서 서술을", prompt)
+        self.assertEqual(HCX_FUNCTION_PROMPT_VERSION, "hcx-function-v1.2")
+
     def test_missing_structured_fact_abstention_names_the_data_gap(self) -> None:
         response: dict[str, object] = {
             "status": "success",

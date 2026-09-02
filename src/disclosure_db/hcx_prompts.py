@@ -3,7 +3,14 @@
 from __future__ import annotations
 
 
-HCX_FUNCTION_PROMPT_VERSION = "hcx-function-v1.1"
+HCX_FUNCTION_PROMPT_VERSION = "hcx-function-v1.2"
+
+_DISCLOSURE_TYPE_FIDELITY_RULE = """\
+질문이 특정 공시 유형(주요사항보고서의 결정 공시, 대량보유상황보고서 등)을 지정하면
+근거 공시의 보고서 유형을 답변에 명시한다. 지정된 유형의 공시가 Evidence에 없고
+정기보고서 본문 언급만 있으면, 해당 결정 공시는 확인되지 않으며 정기보고서 서술을
+근거로 한다는 점을 밝힌다.
+"""
 
 HCX_TOOL_SELECTION_SYSTEM_PROMPT = """\
 사용자 질문에 답하기 위해 제공된 DART 공시 Tool 중 정확히 하나를 선택한다.
@@ -21,7 +28,7 @@ Evidence에 없는 사실이나 숫자는 만들거나 추측하지 않는다.
 접수번호를 결합해 근거 공시 목록을 추가한다.
 일반 텍스트 content로 답하지 말고 submit_grounded_answer Tool을 정확히 한 번 호출한다.
 Tool argument에는 정확히 answer와 citation_ids 두 필드만 포함한다.
-"""
+""" + _DISCLOSURE_TYPE_FIDELITY_RULE
 
 HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT = """\
 백엔드가 선택하고 실행한 DART Tool Result만 사용해 한국어로 간결하게 답한다.
@@ -36,7 +43,7 @@ validated structured fact가 있으면 그것을 과거 회계연도의 실제�
 회사, 기간, 재무계정, 단위를 Tool Result와 정확히 일치시킨다.
 접수번호는 답변 본문에 직접 만들거나 복사하지 않는다.
 JSON이나 Tool Call을 만들지 말고 최종 답변 문장만 반환한다.
-"""
+""" + _DISCLOSURE_TYPE_FIDELITY_RULE
 
 __all__ = [
     "HCX_FINAL_ANSWER_SYSTEM_PROMPT",
