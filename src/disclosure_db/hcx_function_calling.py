@@ -821,18 +821,21 @@ class HcxFunctionCallingService:
     def _fact_row_admitted(
         row: Mapping[str, object], admission: ClaimAdmission,
     ) -> bool:
+        fact_ref: str | None = None
         for key in ("financial_fact_id", "event_fact_id", "fact_id"):
             if row.get(key):
-                return str(row[key]) in admission.facts
-        raw_ids = row.get("evidence_ids")
-        ids = {
-            str(item) for item in raw_ids if item
-        } if isinstance(raw_ids, (list, tuple)) else set()
-        if not ids:
+                fact_ref = str(row[key])
+                break
+        if fact_ref is None:
             return False
-        return bool(ids) and any(
-            ids == set(fact.evidence_ids) for fact in admission.facts.values()
-        )
+        admitted_fact = admission.facts.get(fact_ref)
+        if admitted_fact is None:
+            return False
+        raw_ids = row.get("evidence_ids")
+        ids = [str(item) for item in raw_ids if item] if isinstance(raw_ids, (list, tuple)) else []
+        if row.get("evidence_id"):
+            ids.insert(0, str(row["evidence_id"]))
+        return tuple(dict.fromkeys(ids)) == admitted_fact.evidence_ids
 
     def _deterministic_claim_fallback(
         self,

@@ -513,6 +513,22 @@ def test_deterministic_fallback_excludes_row_without_fact_id_or_evidence() -> No
     assert result.metadata["verification_trace"]["status"] == "fallback"
 
 
+def test_deterministic_fallback_excludes_idless_row_reusing_admitted_evidence() -> None:
+    admitted = _fact("fact-1", "200", "ev-1", year="2025")
+    unrelated = dict(_fact("unused", "999", "ev-1", year="2025"))
+    unrelated.pop("financial_fact_id")
+    generated = HcxGeneratedAnswer("검증되지 않은 설명입니다.", ("ev-1",))
+
+    result = _service(
+        _response(facts=[admitted, unrelated]), generated
+    ).answer("삼성전자 매출액은?")
+
+    assert result.status == "answered"
+    assert "200원입니다" in result.answer
+    assert "999원" not in result.answer
+    assert result.metadata["verification_trace"]["status"] == "fallback"
+
+
 class _HttpResponse:
     def __init__(self, payload: dict[str, object]) -> None:
         self.payload = payload
