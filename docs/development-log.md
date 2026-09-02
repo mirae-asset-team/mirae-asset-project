@@ -826,3 +826,10 @@
 - 클래스와 조치: A+B 금액 표시 오류(전체 실패의 대부분, 10×/100×/1000×)는 병합 코드의 `format_financial_value`+`display_value` 계약이 이미 해결하며 배포 대기. C 회사명 띄어쓰기 변형은 `question_routing._collapse_spaced_companies`로 TDD 수정(bfbe647). D "금융지주·보험 매출액 결손"은 신한지주 CIS 실측으로 재판정 — 순액 표시라 매출액 계정이 원래 없어 보류가 정답이며, 질문뱅크를 업종 인지형으로 보정(d7419f4)하고 런 24건을 소급 정정. E KB금융 18/18 결손은 유니버스가 고른 최신 정정본(20260619000667)이 PDF 원문이라 table_record 0건(이전 XML판 20260324000835에 4개 본표 존재), 하나금융지주는 본표 unit_text 부재로 분류 탈락 — 계보 내 표 보유 버전 fallback+출처 명시는 서빙 수치 정책이라 팀 결정 대기로 남긴다.
 - 하네스 자체 결함 수정: 서버 오류를 abstain 통과로 세던 거짓 정상 제거(cc0926d).
 - 미실행·경계: NCP 배포·스테이징 접근·overlay/검색 인덱스 확보는 하지 않았다. 원본 코퍼스는 ro/immutable로만 열었다. push는 하지 않았다.
+
+## 2026-09-02T22:05+09:00 — QA 개선 사이클 2: 결정론 폴백·귀속행 합산 복구
+
+- HCX 최종 문장화 실패 시 결정론 폴백(5bbf7b0): 정형 재무 route(single/financial_comparison)는 backend `display_value` 기반 결정론 렌더러로 답하고 `hcx_final_generation_failed_deterministic_fallback` warning과 `deterministic_fallback_used` metadata를 남긴다. 근거 없는 text 답변은 기존대로 fail-closed. QA pass1의 error 213건(HCX QPM 거절) 클래스를 소멸시키고 거절 시 재시도 지연도 제거한다. TDD 2건(폴백 성공·display_value 부재 fail-closed) + HCX 전체 35 passed.
+- 빈 당기순이익 합계행 복구(5af7a2e): DART 연결 손익계산서에서 합계행이 비고 '지배기업 소유주지분'+'비지배지분' 두 행에 값이 있는 표준 패턴을 결정론 합산(회계 항등식)으로 복구한다. `extraction_method=annual_statement_attribution_sum_v1`, evidence는 두 원천 셀 모두 보존, 값이 있는 행은 절대 대체하지 않는다. 실물 검증: 레인보우로보틱스 3개년 정확 복구(2025 1,421,503,230 / 2023 -842,680,471), 전수 스캔에서 삼성중공업 포함 2개사 각 3개년 해당. TDD 3건 + 전체 회귀 `581 passed, 2 skipped`.
+- 배선 주의: 복구된 fact가 서빙에 반영되려면 financial candidates→overlay 재빌드가 필요하다(이번 작업은 추출 코드까지). HCX 폴백·라우팅 수정의 효과 실현은 NCP 재배포 후다.
+- 하나금융지주 재무제표 결손 심층 판정: main dart_xml은 parse success인데 연결재무상태표 table_record가 제목 블록(5셀)+본문 첫 2행(14셀)에서 잘려 있고, '자산총계' 셀이 재무제표 섹션·감사보고서 첨부(src_ea4e…, src_fc2e…) 어디에도 없다. 단위 상속으로 해결 불가한 파서 레벨 인제스트 결손으로, 코퍼스 재수집·재빌드가 필요한 백로그다(KB금융 PDF 정정본 fallback 정책과 함께 팀 결정 대기).
