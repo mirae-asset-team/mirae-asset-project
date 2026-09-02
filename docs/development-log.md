@@ -816,3 +816,13 @@
 - TDD RED: reference snapshot 비교 API와 local-only snapshot resolver가 없는 상태에서 `2 failed`를 확인했다. GREEN 후 focused `29 passed`, 전체 Python `553 passed, 2 skipped, 58 warnings, 74 subtests`, Web `12/12`, compileall/diff check를 통과했다.
 - Review boundary: mounted files가 pinned local snapshot과 동일함은 검증하지만 로컬 Hugging Face cache 자체의 공급망 진위는 별도 신뢰 루트다. 서명된 upstream file manifest가 없는 현재 환경에서는 이를 더 강하게 증명할 수 없으므로 후속 supply-chain gate로 명시한다.
 - 사용자 요청에 따라 이번 작업자는 Task 1에서 종료한다. Task 2~8과 Docker/NCP staging/production promotion은 미완료이며 `docs/handoffs/2026-09-02-judge-stress-v2-handoff.md`로 넘긴다.
+
+## 2026-09-02T21:20+09:00 — 대량 QA 파이프라인 1차 사이클 (judge-stress-v2 병합 후)
+
+- 통합: `origin/agent/judge-stress-v2` 23커밋을 `agent/disclosure-db-foundation`에 병합(d8cc643). 로컬 QA lab·dense WIP는 스냅샷 커밋(3139c35) 후 병합해 보존. 충돌 16개 파일은 코어 검색·평가는 팀원 일반화판, 라우트·테스트·문서는 union으로 해소. 전체 회귀 `576 passed, 2 skipped`, Web `12/12`.
+- 하네스: `scripts/run_mass_qa.py`(69개사×21템플릿=1,460문항, 결정론 검증기: 기대행동·인용·금액표시 일관성·metamorphic 쌍·안전 프로브)와 `scripts/report_mass_qa.py`, 원장 `runs/qa_mass.sqlite`(Git 제외)를 추가했다.
+- 프로덕션(:8000) 1,460문항 실측: pass 1,017 / fail 230 / error 213. error는 전부 HCX `hcx_final_generation_failed` 즉시 거절(0.1~0.3초)로, 분당 85~105건 페이스가 CLOVA QPM을 초과한 것이다. 대량 QA 지속 페이스는 concurrency 1·pace 1.3s에서도 일부 거절이 남는다.
+- 판정: sonnet 배치 7 + opus 클러스터러 1 워크플로로 실패 102건 전수 판정 후 8개 근본원인 클래스 확정. 잔여 신규 실패 151건도 동일 클래스 분포(표시 오류 111·띄어쓰기 보류 24·metamorphic 16)로 확인했다.
+- 클래스와 조치: A+B 금액 표시 오류(전체 실패의 대부분, 10×/100×/1000×)는 병합 코드의 `format_financial_value`+`display_value` 계약이 이미 해결하며 배포 대기. C 회사명 띄어쓰기 변형은 `question_routing._collapse_spaced_companies`로 TDD 수정(bfbe647). D "금융지주·보험 매출액 결손"은 신한지주 CIS 실측으로 재판정 — 순액 표시라 매출액 계정이 원래 없어 보류가 정답이며, 질문뱅크를 업종 인지형으로 보정(d7419f4)하고 런 24건을 소급 정정. E KB금융 18/18 결손은 유니버스가 고른 최신 정정본(20260619000667)이 PDF 원문이라 table_record 0건(이전 XML판 20260324000835에 4개 본표 존재), 하나금융지주는 본표 unit_text 부재로 분류 탈락 — 계보 내 표 보유 버전 fallback+출처 명시는 서빙 수치 정책이라 팀 결정 대기로 남긴다.
+- 하네스 자체 결함 수정: 서버 오류를 abstain 통과로 세던 거짓 정상 제거(cc0926d).
+- 미실행·경계: NCP 배포·스테이징 접근·overlay/검색 인덱스 확보는 하지 않았다. 원본 코퍼스는 ro/immutable로만 열었다. push는 하지 않았다.
