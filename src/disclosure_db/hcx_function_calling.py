@@ -21,7 +21,7 @@ import uuid
 
 from .generation import UNANSWERABLE_TEXT
 from .calculator import calculate
-from .disclosure_tools import format_financial_value
+from .disclosure_tools import format_financial_value, normalized_financial_value, parse_korean_krw_amounts
 from .evidence_sufficiency import EvidenceSufficiencyChecker
 from .hcx_prompts import (
     HCX_FINAL_ANSWER_SYSTEM_PROMPT,
@@ -1421,7 +1421,10 @@ class HcxFunctionCallingService:
                 and bool(fact.get("display_value"))
                 for fact in facts
             )
-            if has_validated_actual and _FORECAST_CLAIM.search(generated.answer):
+            amounts_conflict = has_validated_actual and not self._answer_amounts_grounded(
+                generated.answer, tool_response,
+            )
+            if has_validated_actual and (_FORECAST_CLAIM.search(generated.answer) or amounts_conflict):
                 available_ids = list(
                     tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
                 )
@@ -1433,8 +1436,14 @@ class HcxFunctionCallingService:
                     else None
                 )
                 if grounded is None:
-                    raise HcxProtocolError("hcx_final_forecast_conflicts_with_validated_actual")
+                    raise HcxProtocolError(
+                        "hcx_final_amounts_conflict_with_validated_actual"
+                        if amounts_conflict
+                        else "hcx_final_forecast_conflicts_with_validated_actual"
+                    )
                 generated = grounded
+                if amounts_conflict:
+                    common["metadata"]["deterministic_amount_guard_used"] = True  # type: ignore[index]
             known_ids = {
                 str(item) for item in (
                     tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
@@ -1504,6 +1513,52 @@ class HcxFunctionCallingService:
         if not citations:
             return None
         return generated.answer, citations
+
+    @staticmethod
+    def _answer_amounts_grounded(answer: str, tool_response: Mapping[str, object]) -> bool:
+        """Check every KRW amount claimed in the answer against backend values.
+
+        The provider receives display_value verbatim but can still re-type or
+        re-scale figures while composing prose; any claimed amount that matches
+        no backend-validated magnitude within 1% is a grounding violation.
+        """
+        claimed = [amount for amount in parse_korean_krw_amounts(answer) if abs(amount) >= 10_000]
+        if not claimed:
+            return True
+        data = tool_response.get("data")
+        backend: list[Decimal] = []
+        facts = data.get("facts") if isinstance(data, Mapping) else None
+        for fact in facts if isinstance(facts, list) else []:
+            if not isinstance(fact, Mapping):
+                continue
+            normalized = normalized_financial_value(
+                fact.get("value_numeric"), fact.get("scale") or 1, fact.get("unit") or "KRW",
+            )
+            if normalized is not None:
+                backend.append(abs(normalized))
+        comparison = data.get("comparison") if isinstance(data, Mapping) else None
+        if isinstance(comparison, Mapping):
+            for row in comparison.get("values") or []:
+                if isinstance(row, Mapping):
+                    for amount in parse_korean_krw_amounts(str(row.get("display_value") or "")):
+                        backend.append(abs(amount))
+            for calculation in comparison.get("calculations") or []:
+                if isinstance(calculation, Mapping) and calculation.get("value") is not None:
+                    normalized = normalized_financial_value(
+                        calculation.get("value"), 1, calculation.get("unit") or "KRW",
+                    )
+                    if normalized is not None:
+                        backend.append(abs(normalized))
+        if not backend:
+            return True
+        for amount in claimed:
+            magnitude = abs(amount)
+            if not any(
+                reference and abs(magnitude - reference) / reference <= Decimal("0.01")
+                for reference in backend
+            ):
+                return False
+        return True
 
     @staticmethod
     def _deterministic_financial_answer(
