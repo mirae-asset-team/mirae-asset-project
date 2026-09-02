@@ -81,6 +81,14 @@ class FinancialAccountResolutionTests(unittest.TestCase):
         resolution = resolve_financial_account("영 업-이 익")
         self.assertEqual(resolution.canonical_id, "operating_income")
 
+    def test_english_labels_resolve_like_aliases(self) -> None:
+        self.assertEqual(resolve_financial_account("revenue는 얼마인가요").canonical_id, "revenue")
+        self.assertEqual(
+            resolve_financial_account("삼성전자의 FY2025 연결 revenue는 얼마인가요?").canonical_id,
+            "revenue",
+        )
+        self.assertEqual(resolve_financial_account("Operating Income은?").canonical_id, "operating_income")
+
     def test_colloquial_tails_do_not_hide_the_account(self) -> None:
         self.assertEqual(resolve_financial_account("매출액 좀 알려줄래").canonical_id, "revenue")
         self.assertEqual(resolve_financial_account("영업이익 궁금해").canonical_id, "operating_income")
