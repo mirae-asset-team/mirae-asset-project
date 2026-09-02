@@ -23,6 +23,33 @@ from disclosure_db.hcx_prompts import HCX_FUNCTION_PROMPT_VERSION
 from disclosure_db.hybrid_retrieval import RetrievalResult
 
 
+def _strict_answer(
+    answer: str,
+    citation_ids: tuple[str, ...] = ("ev-1",),
+    *,
+    fact_refs: tuple[str, ...] = (),
+    calculation_refs: tuple[str, ...] = (),
+    evidence_slot_ids: tuple[str, ...] = ("tool_evidence",),
+    numeric_values: tuple[str, ...] = (),
+    conclusion: str | None = None,
+) -> HcxGeneratedAnswer:
+    return HcxGeneratedAnswer(
+        answer,
+        citation_ids,
+        conclusion,
+        claims=({
+            "claim_id": "claim-1",
+            "text": answer,
+            "citation_ids": list(citation_ids),
+            "fact_refs": list(fact_refs),
+            "calculation_refs": list(calculation_refs),
+            "evidence_slot_ids": list(evidence_slot_ids),
+            "numeric_values": list(numeric_values),
+        },),
+        limitations=("historical_disclosure_only",),
+    )
+
+
 def _search_row(**updates: object) -> dict[str, object]:
     row: dict[str, object] = {
         "evidence_id": "ev-1",
@@ -67,7 +94,7 @@ class FakeHcxClient:
         generation_error: Exception | None = None,
     ) -> None:
         self.tool_call = tool_call
-        self.generated = generated or HcxGeneratedAnswer("근거 기반 답변입니다.", ("ev-1",))
+        self.generated = generated or _strict_answer("근거 기반 답변입니다.")
         self.generation_error = generation_error
         self._configured = configured
         self.selection_calls: list[tuple[str, list[dict[str, object]]]] = []
@@ -198,9 +225,11 @@ def _financial_response(values: list[tuple[str, str]], account: str = "매출액
         evidence_ids.append(evidence_id)
         filing_ids.append(receipt)
         facts.append({
+            "financial_fact_id": f"ff-{year}-{index}",
             "account_id": "revenue" if account == "매출액" else "operating_profit",
             "account_name": account,
             "value_numeric": value,
+            "display_value": f"{int(value):,}원",
             "scale": 1,
             "unit": "KRW",
             "period": {"period_type": "duration", "period_start": f"{year}-01-01", "period_end": f"{year}-12-31", "instant_date": None},
@@ -259,6 +288,7 @@ class PeriodFinancialRegistry:
         receipt = f"{year}0318000001"
         fact = response["data"]["facts"][0]
         fact.update({
+            "financial_fact_id": f"ff-{company}-{year}",
             "company_identifiers": {"company": company},
             "normalized_value": value,
             "display_value": f"{int(value):,}원",
@@ -360,6 +390,7 @@ class HcxFunctionCallingTests(unittest.TestCase):
                 receipt = f"{year}0318{index:06d}"
                 fact = response["data"]["facts"][0]
                 fact.update({
+                    "financial_fact_id": f"ff-{index}",
                     "company_identifiers": {"company": company},
                     "normalized_value": str(100 + index),
                     "display_value": f"{100 + index}원",
@@ -482,9 +513,11 @@ class HcxFunctionCallingTests(unittest.TestCase):
             "tool_name": "get_financial_facts",
             "data": {
                 "facts": [{
+                    "financial_fact_id": "ff-samsung-2025-revenue",
                     "account_id": "revenue",
                     "account_name": "매출액",
                     "value_numeric": "1234567",
+                    "display_value": "1,234,567원",
                     "scale": 1,
                     "unit": "KRW",
                     "period": {
@@ -495,6 +528,7 @@ class HcxFunctionCallingTests(unittest.TestCase):
                     },
                     "scope": "consolidated",
                     "company_identifiers": {"company": "삼성전자"},
+                    "evidence_ids": ["ev-fin"],
                 }],
             },
             "evidence_bundle": {
@@ -573,6 +607,12 @@ class HcxFunctionCallingTests(unittest.TestCase):
                 "requested_range": {"start_date": "2026-01-01", "end_date": "2026-12-31"},
                 "actual_aggregate_range": {"start_date": "2026-03-18", "end_date": "2026-03-18"},
                 "coverage_complete": False,
+                "event_facts": [{
+                    "event_fact_id": "event-trend-total",
+                    "predicate_id": "filing_count",
+                    "value": 3,
+                    "evidence_ids": ["ev-trend"],
+                }],
             },
             "evidence_bundle": {
                 "question_intent": "analyze_disclosure_trend",
@@ -889,6 +929,12 @@ class HcxFunctionCallingTests(unittest.TestCase):
                 "original_filing": {"filing_id": original},
                 "corrected_filings": [{"filing_id": corrected}],
                 "current_filing": {"filing_id": corrected},
+                "event_facts": [{
+                    "event_fact_id": "event-correction-lineage",
+                    "predicate_id": "correction_lineage",
+                    "value_raw": "original_to_corrected",
+                    "evidence_ids": ["ev-original", "ev-corrected"],
+                }],
             },
             "evidence_bundle": {
                 "evidence_ids": ["ev-original", "ev-corrected"],
@@ -906,7 +952,11 @@ class HcxFunctionCallingTests(unittest.TestCase):
         }
         client = FakeHcxClient(
             HcxToolCall("call-1", "get_correction_lineage", {"filing_id": corrected}),
-            generated=HcxGeneratedAnswer("정정 계보가 확인됩니다.", ("ev-corrected",)),
+            generated=_strict_answer(
+                "정정 계보가 확인됩니다.",
+                ("ev-original", "ev-corrected"),
+                fact_refs=("event-correction-lineage",),
+            ),
         )
         result = HcxFunctionCallingService(StaticRegistry(response), client).answer("정정 내역은?")  # type: ignore[arg-type]
 

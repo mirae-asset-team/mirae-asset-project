@@ -20,7 +20,7 @@ _NUMBER = re.compile(
     r"(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?"
 )
 _NONFINITE = re.compile(r"(?<![A-Za-z0-9_])[+-]?(?:nan|inf(?:inity)?)(?![A-Za-z0-9_])", re.I)
-_FACT_ID_FIELDS = ("financial_fact_id", "event_fact_id", "fact_id", "item_id")
+_FACT_ID_FIELDS = ("financial_fact_id", "event_fact_id", "fact_id")
 _CALCULATION_ID_FIELDS = ("calculation_id", "calculation_ref")
 _NUMERIC_FIELDS = frozenset({
     "value_numeric", "normalized_value", "structured_value", "display_value",
@@ -28,9 +28,7 @@ _NUMERIC_FIELDS = frozenset({
     "instant_date", "filed_at", "from_period", "to_period", "fiscal_year",
 })
 _TRACE_CHECKS = ("citations", "evidence_slots", "numeric_values", "calculations", "policy")
-_STRUCTURED_ROW_PATH = re.compile(
-    r"\.(?:facts|financial_facts|event_facts|validated_statement_values)\[\d+\]\Z"
-)
+_VALIDATED_STATEMENT_ROW_PATH = re.compile(r"\.validated_statement_values\[\d+\]\Z")
 
 
 def _ordered(values: Sequence[str]) -> tuple[str, ...]:
@@ -93,6 +91,15 @@ def _walk_mappings(value: object, path: str = "data"):
     elif isinstance(value, (list, tuple)):
         for index, item in enumerate(value):
             yield from _walk_mappings(item, f"{path}[{index}]")
+
+
+def _is_validated_statement_row(path: str, value: Mapping[str, object]) -> bool:
+    return bool(
+        _VALIDATED_STATEMENT_ROW_PATH.search(path)
+        and value.get("metric")
+        and value.get("period")
+        and value.get("display_value")
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +225,7 @@ class ClaimAdmission:
 
 
 def _slot_map(data: Mapping[str, object], admitted: set[str]) -> dict[str, tuple[str, ...]]:
+    has_explicit_slot_contract = "evidence_slots" in data
     raw_slots = data.get("evidence_slots")
     slots: dict[str, tuple[str, ...]] = {}
     if isinstance(raw_slots, list):
@@ -227,7 +235,7 @@ def _slot_map(data: Mapping[str, object], admitted: set[str]) -> dict[str, tuple
             ids = _evidence_ids(raw)
             if ids and set(ids).issubset(admitted):
                 slots[str(raw["slot_id"])] = ids
-    if not slots and admitted:
+    if not has_explicit_slot_contract and admitted:
         slots["tool_evidence"] = tuple(sorted(admitted))
     return slots
 
@@ -257,27 +265,12 @@ def build_claim_admission(tool_response: Mapping[str, object]) -> ClaimAdmission
     rejected_facts: dict[str, tuple[str, ...]] = {}
     synthetic_index = 0
     for path, value in _walk_mappings(data):
-        ids = _evidence_ids(value)
-        if not ids or "operation" in value and "operands" in value:
-            numeric_values = _numeric_tokens(value)
-            if (
-                not ids
-                and numeric_values
-                and admitted
-                and ".evidence_slots" not in path
-                and (
-                    _STRUCTURED_ROW_PATH.search(path) is not None
-                    or not any(fragment in path for fragment in (
-                        ".facts[", ".financial_facts[", ".event_facts[",
-                        ".validated_statement_values[",
-                    ))
-                )
-                and "operation" not in value
-            ):
-                ids = evidence_ids
-            else:
-                continue
+        if "operation" in value and "operands" in value:
+            continue
         direct = _direct_id(value, _FACT_ID_FIELDS)
+        if direct is None and not _is_validated_statement_row(path, value):
+            continue
+        ids = _evidence_ids(value)
         numeric_values = _numeric_tokens(value)
         if direct is None and not numeric_values:
             continue

@@ -8,6 +8,7 @@ from unittest.mock import patch
 from disclosure_db.api import create_app
 from disclosure_db.hcx_function_calling import (
     HcxFunctionCallingService,
+    HcxAnswerClaim,
     HcxGeneratedAnswer,
     HcxToolCall,
     HyperClovaFunctionClient,
@@ -61,7 +62,18 @@ class FakeClient:
 
     def generate_answer(self, question: str, tool_call: HcxToolCall, tool_response: object) -> HcxGeneratedAnswer:
         self.generation_calls += 1
-        return HcxGeneratedAnswer("테스트회사의 공시 근거가 확인됩니다.", ("ev-runtime",))
+        answer = "테스트회사의 공시 근거가 확인됩니다."
+        return HcxGeneratedAnswer(
+            answer,
+            ("ev-runtime",),
+            claims=(HcxAnswerClaim(
+                "claim-1",
+                answer,
+                ("ev-runtime",),
+                evidence_slot_ids=("tool_evidence",),
+            ),),
+            limitations=("historical_disclosure_only",),
+        )
 
     def generate_routed_answer(self, question: str, tool_call: HcxToolCall, tool_response: object) -> HcxGeneratedAnswer:
         return self.generate_answer(question, tool_call, tool_response)

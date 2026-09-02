@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from disclosure_db.claim_verification import build_claim_admission
 from disclosure_db.hcx_function_calling import (
     FINAL_ANSWER_TOOL_NAME,
     HcxFunctionCallingService,
@@ -238,6 +239,22 @@ def test_verified_claim_exposes_additive_support_and_bounded_trace() -> None:
     }
 
 
+def test_arbitrary_nested_numeric_object_is_not_admitted_as_synthetic_fact() -> None:
+    response = _response(facts=[])
+    response["data"]["summary"] = {  # type: ignore[index]
+        "value": "999",
+        "evidence_ids": ["ev-1"],
+    }
+
+    admission = build_claim_admission(response)
+
+    assert admission.facts == {}
+    assert admission.public_contract()["facts"] == []
+
+    response["data"]["summary"]["item_id"] = "not-a-fact-id"  # type: ignore[index]
+    assert build_claim_admission(response).facts == {}
+
+
 def test_ungrounded_prose_number_is_never_reused_and_generic_answer_abstains() -> None:
     bad = "공시 수치는 12345678901234원입니다."
     response = _response(facts=[])
@@ -409,6 +426,49 @@ def test_bounded_verification_failure_abstains_and_conclusion_metadata_agrees() 
     assert result.metadata["verification_trace"]["status"] == "abstained"
 
 
+def test_explicit_incomplete_slots_do_not_create_legacy_slot_for_bounded_analysis() -> None:
+    fact = _fact("fact-1", "200", "ev-1", year="2025")
+    response = _response(facts=[fact], slots=[{
+        "slot_id": "financial",
+        "mandatory": True,
+        "complete": False,
+        "evidence_ids": ["ev-1"],
+    }])
+    response["tool_name"] = "build_summary_context"
+    response["data"].update({  # type: ignore[union-attr]
+        "allowed_conclusions": ["risk_signal", "stable", "mixed", "insufficient_evidence"],
+        "conclusion": None,
+        "analysis_dimension": "business_risk",
+        "limitations": ["historical_disclosure_only"],
+    })
+    text = "삼성전자 2025년 연결 매출액 200원을 근거로 위험 신호입니다."
+    execution = _BoundedExecution(
+        response,
+        evidence_slots=tuple(response["data"]["evidence_slots"]),  # type: ignore[index]
+    )
+    service = HcxFunctionCallingService(
+        StaticRegistry(response),  # type: ignore[arg-type]
+        ClaimClient(_generated(
+            text,
+            conclusion="risk_signal",
+            claims=(_claim(
+                text,
+                fact_refs=("fact-1",),
+                slots=("tool_evidence",),
+                numeric_values=("2025", "200"),
+            ),),
+        )),  # type: ignore[arg-type]
+        analysis_executor=_BoundedExecutor(execution),  # type: ignore[arg-type]
+    )
+
+    result = service.answer("삼성전자 공시의 사업위험을 분석해줘")
+
+    assert result.status == "abstained"
+    assert text not in result.answer
+    assert build_claim_admission(response).evidence_slots == {}
+    assert result.metadata["conclusion"] == "insufficient_evidence"
+
+
 def test_legacy_generated_answer_without_claims_gets_safe_deterministic_fallback() -> None:
     fact = _fact("fact-1", "1234567", "ev-1", year="2025")
     fact.pop("display_value")
@@ -418,6 +478,37 @@ def test_legacy_generated_answer_without_claims_gets_safe_deterministic_fallback
 
     assert result.status == "answered"
     assert "1,234,567원입니다" in result.answer
+    assert "999원" not in result.answer
+    assert result.metadata["verification_trace"]["status"] == "fallback"
+
+
+def test_legacy_generated_qualitative_prose_without_claims_is_never_reused() -> None:
+    fact = _fact("fact-1", "200", "ev-1", year="2025")
+    bad = "공시를 보면 수익성이 뚜렷하게 개선됐습니다."
+    generated = HcxGeneratedAnswer(bad, ("ev-1",))
+
+    result = _service(_response(facts=[fact]), generated).answer("삼성전자 매출액은?")
+
+    assert result.status == "answered"
+    assert bad not in result.answer
+    assert "200원입니다" in result.answer
+    assert result.metadata["verification_trace"]["status"] == "fallback"
+    assert "claim_missing" in result.metadata["verification_trace"]["failure_codes"]
+
+
+def test_deterministic_fallback_excludes_row_without_fact_id_or_evidence() -> None:
+    admitted = _fact("fact-1", "200", "ev-1", year="2025")
+    orphan = dict(_fact("unused", "999", "ev-1", year="2025"))
+    orphan.pop("financial_fact_id")
+    orphan.pop("evidence_ids")
+    generated = HcxGeneratedAnswer("검증되지 않은 설명입니다.", ("ev-1",))
+
+    result = _service(
+        _response(facts=[admitted, orphan]), generated
+    ).answer("삼성전자 매출액은?")
+
+    assert result.status == "answered"
+    assert "200원입니다" in result.answer
     assert "999원" not in result.answer
     assert result.metadata["verification_trace"]["status"] == "fallback"
 
@@ -498,10 +589,12 @@ def test_concrete_routed_generation_forces_additive_claim_contract() -> None:
         "type": "function", "function": {"name": FINAL_ANSWER_TOOL_NAME},
     }
     parameters = payload["tools"][0]["function"]["parameters"]
+    assert parameters["additionalProperties"] is False
     assert parameters["required"] == [
         "answer", "citation_ids", "claims", "limitations",
     ]
     claim_schema = parameters["properties"]["claims"]["items"]
+    assert claim_schema["additionalProperties"] is False
     assert claim_schema["properties"]["fact_refs"]["items"]["enum"] == ["fact-1"]
     assert claim_schema["properties"]["evidence_slot_ids"]["items"]["enum"] == ["financial"]
 

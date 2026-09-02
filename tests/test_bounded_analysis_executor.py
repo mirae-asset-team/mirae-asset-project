@@ -5,6 +5,7 @@ from disclosure_db.bounded_analysis import BoundedAnalysisExecutor
 from disclosure_db.freeform_retrieval import AnalysisRetrieval, SlotRetrieval
 from disclosure_db.hcx_function_calling import (
     HcxFunctionCallingService,
+    HcxAnswerClaim,
     HcxGeneratedAnswer,
 )
 
@@ -271,7 +272,18 @@ class JudgmentClient:
 
     def generate_answer(self, question, tool_call, tool_response):
         self.generation_calls.append((question, tool_call, tool_response))
-        return HcxGeneratedAnswer(self.answer, ("ev-risk",), self.conclusion)
+        return HcxGeneratedAnswer(
+            self.answer,
+            ("ev-risk",),
+            self.conclusion,
+            claims=(HcxAnswerClaim(
+                "claim-1",
+                self.answer,
+                ("ev-risk",),
+                evidence_slot_ids=("disclosed_risk_factors",),
+            ),),
+            limitations=("historical_disclosure_only",),
+        )
 
     def generate_routed_answer(self, question, tool_call, tool_response):
         raise AssertionError("bounded analysis must use the constrained conclusion contract")

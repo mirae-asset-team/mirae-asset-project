@@ -27,7 +27,6 @@ from .claim_verification import (
     ClaimAdmission,
     HcxAnswerClaim,
     build_claim_admission,
-    extract_prose_numeric_values,
     verify_generated_claims,
 )
 from .disclosure_tools import format_financial_value
@@ -338,6 +337,7 @@ def _final_answer_tool(
             ),
             "parameters": {
                 "type": "object",
+                "additionalProperties": False,
                 "properties": properties,
                 "required": required,
             },
@@ -811,51 +811,17 @@ class HcxFunctionCallingService:
         return bundle if isinstance(bundle, Mapping) else {}
 
     @staticmethod
-    def _legacy_claims(
-        generated: object, admission: ClaimAdmission,
-    ) -> tuple[Mapping[str, object], ...]:
+    def _generated_claims(generated: object) -> tuple[object, ...]:
         raw_claims = getattr(generated, "claims", ())
-        if isinstance(raw_claims, (list, tuple)) and raw_claims:
+        if isinstance(raw_claims, (list, tuple)):
             return tuple(raw_claims)
-        citation_ids = tuple(str(item) for item in getattr(generated, "citation_ids", ()) if item)
-        citation_set = set(citation_ids)
-        owned_slots = [
-            slot_id for slot_id, evidence_ids in admission.evidence_slots.items()
-            if citation_set and citation_set.issubset(set(evidence_ids))
-        ]
-        answer = str(getattr(generated, "answer", ""))
-        prose_numbers = extract_prose_numeric_values(answer)
-        supporting_facts = [
-            fact for fact in admission.facts.values()
-            if set(fact.evidence_ids).issubset(citation_set)
-            and any(
-                Decimal(number) == Decimal(value)
-                for number in prose_numbers
-                for value in fact.numeric_values
-            )
-        ]
-        grounded = {
-            Decimal(value)
-            for fact in supporting_facts
-            for value in fact.numeric_values
-            if Decimal(value).is_finite()
-        }
-        all_numbers_grounded = all(Decimal(number) in grounded for number in prose_numbers)
-        return ({
-            "claim_id": "legacy-claim-1",
-            "text": answer,
-            "citation_ids": list(citation_ids),
-            "fact_refs": [fact.fact_ref for fact in supporting_facts] if all_numbers_grounded else [],
-            "calculation_refs": [],
-            "evidence_slot_ids": owned_slots,
-            "numeric_values": list(prose_numbers) if all_numbers_grounded else [],
-        },)
+        return ()
 
     @staticmethod
     def _fact_row_admitted(
         row: Mapping[str, object], admission: ClaimAdmission,
     ) -> bool:
-        for key in ("financial_fact_id", "event_fact_id", "fact_id", "item_id"):
+        for key in ("financial_fact_id", "event_fact_id", "fact_id"):
             if row.get(key):
                 return str(row[key]) in admission.facts
         raw_ids = row.get("evidence_ids")
@@ -863,7 +829,7 @@ class HcxFunctionCallingService:
             str(item) for item in raw_ids if item
         } if isinstance(raw_ids, (list, tuple)) else set()
         if not ids:
-            return bool(admission.facts)
+            return False
         return bool(ids) and any(
             ids == set(fact.evidence_ids) for fact in admission.facts.values()
         )
@@ -1950,7 +1916,7 @@ class HcxFunctionCallingService:
 
         failure_stage = "claim_verification"
         admission = build_claim_admission(tool_response)
-        raw_claims = self._legacy_claims(generated, admission)
+        raw_claims = self._generated_claims(generated)
         limitations = tuple(
             str(item) for item in getattr(generated, "limitations", ()) if item
         ) or tuple(
