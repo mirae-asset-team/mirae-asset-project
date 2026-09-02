@@ -782,3 +782,11 @@
 - 최종 verification: Dense/dependency/hybrid/client focused `34 passed, 1 skipped, 6 warnings, 3 subtests`; 전체 Python `543 passed, 2 skipped, 58 warnings, 74 subtests`; Web `12/12`를 통과했다. 경고는 기존 FastAPI `on_event` deprecation이다. `python -m compileall -q src`, `git diff --check`, commit 직전 staged-file 검사는 별도 fresh gate로 실행했다.
 - `BLOCKED_ENVIRONMENT`: Docker CLI client `29.7.2`는 있었지만 Docker Desktop Linux engine named pipe가 없어 server 연결에 실패했다. 사용자 지시대로 Docker를 재시도하지 않았다. 따라서 main image의 실제 NumPy 부재, Dense image의 실제 Python/NumPy/FAISS 조합, container manifest, container `/health`, restart behavior는 검증했다고 주장하지 않는다.
 - Release status: local dependency/identity/query-time fallback contract만 검증되었다. Dense artifact identity와 Sparse 대비 Recall@20 `+5%p`, wrong issuer/version `0`, p95 `<=2s`, cold-start fallback은 `UNVERIFIED`; Docker가 가능한 환경에서 별도 release gate로 실행한다.
+
+### 2026-09-02 — Task 1 fix round 1: validated Dense artifact/model identity
+
+- 원인: Dense runtime이 vector manifest의 `index.metric`과 `normalized_embeddings`, 실제 FAISS `metric_type`을 확인하지 않은 채 `inner_product`/`normalized=true`를 공개했다. 또한 model/revision은 vector manifest에서만 가져와 임의의 `model_path`가 같은 모델인지 확인하지 않았다.
+- TDD RED: incompatible vector metric, missing normalization contract, loaded FAISS metric mismatch, missing mounted-model identity, mismatched mounted-model identity의 5개 회귀를 먼저 추가했다. 기존 구현에서 의도대로 `5 failed, 7 passed`였다.
+- 최소 GREEN: vector manifest가 `IndexFlatIP`, `inner_product`, `normalized_embeddings=true`를 선언해야 하고, loaded FAISS index의 type/metric이 이를 확인해야 startup이 진행된다. `/model/model_identity.json`의 schema/model/revision도 pinned `BAAI/bge-m3` revision과 일치해야 한다. Runtime manifest와 `/health`는 이 검증된 값만 공개하며 기존 health 필드는 유지한다.
+- 검증: focused Dense runtime `12 passed, 6 warnings`; 전체 Python `548 passed, 2 skipped, 58 warnings, 74 subtests passed`; Web `12 passed`; `python -m compileall -q src scripts` 통과. 전체 Python/Web/compile 결과는 fix 구현 직후 실행한 완료 evidence이고, 사용자 지시에 따라 최종 단계에서는 focused suite만 재실행했다.
+- 문서/환경 경계: 2026-08-20 `dcf44b8` local Docker/compose evidence와 2026-08-21 `d3e909a` NCP image evidence를 `PASS_HISTORICAL`로 범위 지정했다. 현재 Task 1 compose/image/container 및 Dense image/health 측정은 Docker engine unavailable로 `BLOCKED_ENVIRONMENT`이며 Docker를 재시도하거나 image validation을 주장하지 않았다.

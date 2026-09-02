@@ -18,6 +18,8 @@ from typing import Any
 
 EXPECTED_MODEL = "BAAI/bge-m3"
 EXPECTED_MODEL_REVISION = "5617a9f61b028005a4858fdac845db406aefb181"
+MODEL_IDENTITY_FILENAME = "model_identity.json"
+MODEL_IDENTITY_SCHEMA_VERSION = "1.0.0"
 RUNTIME_MANIFEST_SCHEMA_VERSION = "1.0.0"
 RUNTIME_IDENTITY_FIELDS = (
     "runtime_manifest_schema_version",
@@ -247,13 +249,36 @@ class DenseRuntime:
         if manifest.get("model") != EXPECTED_MODEL or manifest.get("model_revision") != EXPECTED_MODEL_REVISION:
             raise ValueError("dense_model_identity_mismatch")
         dimension = int(manifest.get("dimension") or 0)
-        vector_count = int(manifest.get("index", {}).get("vector_count") or 0)
+        index_contract = manifest.get("index")
+        if not isinstance(index_contract, dict):
+            raise ValueError("dense_vector_contract_mismatch")
+        index_type = index_contract.get("type")
+        metric = index_contract.get("metric")
+        normalized = index_contract.get("normalized_embeddings")
+        if index_type != "IndexFlatIP" or metric != "inner_product" or normalized is not True:
+            raise ValueError("dense_vector_contract_mismatch")
+        vector_count = int(index_contract.get("vector_count") or 0)
         if dimension != 1024 or vector_count <= 0:
             raise ValueError("dense_manifest_invalid")
         for path, key in ((Path(index_path), "faiss_index"), (Path(metadata_path), "chunk_metadata")):
             expected = int(manifest.get("outputs", {}).get(key, {}).get("size_bytes") or -1)
             if not path.is_file() or path.stat().st_size != expected:
                 raise ValueError(f"dense_artifact_size_mismatch:{key}")
+
+        model_identity_path = Path(model_path) / MODEL_IDENTITY_FILENAME
+        if not model_identity_path.is_file():
+            raise ValueError("dense_model_identity_manifest_missing")
+        try:
+            model_identity = json.loads(model_identity_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError("dense_mounted_model_identity_mismatch") from exc
+        if (
+            not isinstance(model_identity, dict)
+            or model_identity.get("schema_version") != MODEL_IDENTITY_SCHEMA_VERSION
+            or model_identity.get("model") != EXPECTED_MODEL
+            or model_identity.get("model_revision") != EXPECTED_MODEL_REVISION
+        ):
+            raise ValueError("dense_mounted_model_identity_mismatch")
 
         import faiss  # type: ignore[import-not-found]
         import numpy as np  # type: ignore[import-not-found]
@@ -264,6 +289,10 @@ class DenseRuntime:
         self.index = faiss.read_index(str(index_path))
         if int(self.index.d) != dimension or int(self.index.ntotal) != vector_count:
             raise ValueError("dense_faiss_identity_mismatch")
+        if type(self.index).__name__ != index_type:
+            raise ValueError("dense_faiss_identity_mismatch")
+        if int(getattr(self.index, "metric_type", -1)) != int(faiss.METRIC_INNER_PRODUCT):
+            raise ValueError("dense_faiss_metric_mismatch")
         self.metadata = JsonlOffsetIndex(metadata_path, offsets_path, expected_count=vector_count)
         self.filing_vectors = FilingVectorIndex(
             metadata_path,
@@ -271,7 +300,7 @@ class DenseRuntime:
             expected_count=vector_count,
         )
         self.model = BGEM3FlagModel(str(model_path), use_fp16=False)
-        self.model_revision = str(manifest["model_revision"])
+        self.model_revision = str(model_identity["model_revision"])
         self.vector_count = vector_count
         self.dimension = dimension
         self.runtime_identity = {
@@ -279,13 +308,13 @@ class DenseRuntime:
             "python_version": platform.python_version(),
             "numpy_version": str(np.__version__),
             "faiss_version": str(faiss.__version__),
-            "model": EXPECTED_MODEL,
+            "model": str(model_identity["model"]),
             "model_revision": self.model_revision,
             "dimension": self.dimension,
             "vector_count": self.vector_count,
-            "index_type": type(self.index).__name__,
-            "metric": "inner_product",
-            "normalized": True,
+            "index_type": str(index_type),
+            "metric": str(metric),
+            "normalized": normalized,
         }
         self._lock = threading.Lock()
 

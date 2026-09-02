@@ -72,6 +72,99 @@ _EXPECTED_RUNTIME_IDENTITY = {
     "normalized": True,
 }
 
+_DENSE_MODEL = "BAAI/bge-m3"
+_DENSE_MODEL_REVISION = "5617a9f61b028005a4858fdac845db406aefb181"
+
+
+def _write_dense_runtime_fixture(root: Path) -> dict[str, Path]:
+    index_path = root / "index.faiss"
+    metadata_path = root / "metadata.jsonl"
+    manifest_path = root / "manifest.json"
+    model_path = root / "model"
+    index_path.write_bytes(b"index")
+    metadata_path.write_text(
+        json.dumps({"vector_id": 0, "filing_id": "f-1", "evidence_ids": ["ev-1"]}) + "\n",
+        encoding="utf-8",
+    )
+    manifest_path.write_text(json.dumps({
+        "status": "complete",
+        "model": _DENSE_MODEL,
+        "model_revision": _DENSE_MODEL_REVISION,
+        "dimension": 1024,
+        "index": {
+            "type": "IndexFlatIP",
+            "metric": "inner_product",
+            "normalized_embeddings": True,
+            "vector_count": 1,
+        },
+        "outputs": {
+            "faiss_index": {"size_bytes": index_path.stat().st_size},
+            "chunk_metadata": {"size_bytes": metadata_path.stat().st_size},
+        },
+    }), encoding="utf-8")
+    model_path.mkdir()
+    (model_path / "model_identity.json").write_text(json.dumps({
+        "schema_version": "1.0.0",
+        "model": _DENSE_MODEL,
+        "model_revision": _DENSE_MODEL_REVISION,
+    }), encoding="utf-8")
+    return {
+        "index_path": index_path,
+        "metadata_path": metadata_path,
+        "manifest_path": manifest_path,
+        "model_path": model_path,
+    }
+
+
+def _fake_dense_modules(*, metric_type: int = 0) -> dict[str, object]:
+    fake_index = type(
+        "IndexFlatIP",
+        (),
+        {"d": 1024, "ntotal": 1, "metric_type": metric_type},
+    )()
+    return {
+        "faiss": SimpleNamespace(
+            METRIC_INNER_PRODUCT=0,
+            METRIC_L2=1,
+            __version__="1.15.0",
+            read_index=lambda _: fake_index,
+        ),
+        "numpy": SimpleNamespace(__version__="2.5.2"),
+        "FlagEmbedding": SimpleNamespace(BGEM3FlagModel=lambda *_args, **_kwargs: object()),
+    }
+
+
+def _load_dense_runtime(root: Path, paths: dict[str, Path], *, metric_type: int = 0) -> DenseRuntime:
+    with patch.dict(sys.modules, _fake_dense_modules(metric_type=metric_type)):
+        return DenseRuntime(
+            index_path=paths["index_path"],
+            metadata_path=paths["metadata_path"],
+            manifest_path=paths["manifest_path"],
+            offsets_path=root / "metadata.offsets.u64",
+            filing_index_path=root / "filing.sqlite",
+            model_path=paths["model_path"],
+        )
+
+
+def _assert_dense_runtime_rejected(
+    test: unittest.TestCase,
+    root: Path,
+    paths: dict[str, Path],
+    expected_error: str,
+    *,
+    metric_type: int = 0,
+) -> None:
+    runtime = None
+    try:
+        runtime = _load_dense_runtime(root, paths, metric_type=metric_type)
+    except ValueError as exc:
+        test.assertRegex(str(exc), expected_error)
+    else:
+        test.fail(f"ValueError matching {expected_error!r} was not raised")
+    finally:
+        if runtime is not None:
+            runtime.metadata.close()
+
 
 class _FakeRuntime:
     model_revision = "revision"
@@ -129,45 +222,8 @@ class DenseRuntimeIdentityTests(unittest.TestCase):
     def test_loaded_runtime_records_dependency_model_and_vector_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            index_path = root / "index.faiss"
-            metadata_path = root / "metadata.jsonl"
-            manifest_path = root / "manifest.json"
-            model_path = root / "model"
-            index_path.write_bytes(b"index")
-            metadata_path.write_text(
-                json.dumps({"vector_id": 0, "filing_id": "f-1", "evidence_ids": ["ev-1"]}) + "\n",
-                encoding="utf-8",
-            )
-            manifest_path.write_text(json.dumps({
-                "status": "complete",
-                "model": "BAAI/bge-m3",
-                "model_revision": "5617a9f61b028005a4858fdac845db406aefb181",
-                "dimension": 1024,
-                "index": {"vector_count": 1},
-                "outputs": {
-                    "faiss_index": {"size_bytes": index_path.stat().st_size},
-                    "chunk_metadata": {"size_bytes": metadata_path.stat().st_size},
-                },
-            }), encoding="utf-8")
-            model_path.mkdir()
-
-            fake_index = type("IndexFlatIP", (), {"d": 1024, "ntotal": 1})()
-            fake_faiss = SimpleNamespace(__version__="1.15.0", read_index=lambda _: fake_index)
-            fake_numpy = SimpleNamespace(__version__="2.5.2")
-            fake_flag_embedding = SimpleNamespace(BGEM3FlagModel=lambda *_args, **_kwargs: object())
-            with patch.dict(sys.modules, {
-                "faiss": fake_faiss,
-                "numpy": fake_numpy,
-                "FlagEmbedding": fake_flag_embedding,
-            }):
-                runtime = DenseRuntime(
-                    index_path=index_path,
-                    metadata_path=metadata_path,
-                    manifest_path=manifest_path,
-                    offsets_path=root / "metadata.offsets.u64",
-                    filing_index_path=root / "filing.sqlite",
-                    model_path=model_path,
-                )
+            paths = _write_dense_runtime_fixture(root)
+            runtime = _load_dense_runtime(root, paths)
 
             try:
                 identity = runtime.runtime_identity
@@ -182,6 +238,78 @@ class DenseRuntimeIdentityTests(unittest.TestCase):
                 self.assertTrue(identity["normalized"])
             finally:
                 runtime.metadata.close()
+
+    def test_runtime_rejects_incompatible_vector_metric_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = _write_dense_runtime_fixture(root)
+            manifest = json.loads(paths["manifest_path"].read_text(encoding="utf-8"))
+            manifest["index"]["metric"] = "l2"
+            paths["manifest_path"].write_text(json.dumps(manifest), encoding="utf-8")
+
+            _assert_dense_runtime_rejected(
+                self,
+                root,
+                paths,
+                "dense_vector_contract_mismatch",
+            )
+
+    def test_runtime_rejects_missing_normalization_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = _write_dense_runtime_fixture(root)
+            manifest = json.loads(paths["manifest_path"].read_text(encoding="utf-8"))
+            del manifest["index"]["normalized_embeddings"]
+            paths["manifest_path"].write_text(json.dumps(manifest), encoding="utf-8")
+
+            _assert_dense_runtime_rejected(
+                self,
+                root,
+                paths,
+                "dense_vector_contract_mismatch",
+            )
+
+    def test_runtime_rejects_loaded_faiss_metric_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = _write_dense_runtime_fixture(root)
+
+            _assert_dense_runtime_rejected(
+                self,
+                root,
+                paths,
+                "dense_faiss_metric_mismatch",
+                metric_type=1,
+            )
+
+    def test_runtime_rejects_missing_mounted_model_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = _write_dense_runtime_fixture(root)
+            (paths["model_path"] / "model_identity.json").unlink()
+
+            _assert_dense_runtime_rejected(
+                self,
+                root,
+                paths,
+                "dense_model_identity_manifest_missing",
+            )
+
+    def test_runtime_rejects_mismatched_mounted_model_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = _write_dense_runtime_fixture(root)
+            identity_path = paths["model_path"] / "model_identity.json"
+            identity = json.loads(identity_path.read_text(encoding="utf-8"))
+            identity["model_revision"] = "wrong-revision"
+            identity_path.write_text(json.dumps(identity), encoding="utf-8")
+
+            _assert_dense_runtime_rejected(
+                self,
+                root,
+                paths,
+                "dense_mounted_model_identity_mismatch",
+            )
 
 
 if __name__ == "__main__":
