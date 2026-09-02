@@ -429,6 +429,40 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(result.metadata["route_source"], "deterministic")
         self.assertEqual(registry.calls[0][0], "get_financial_facts")
 
+    def test_missing_structured_fact_abstention_names_the_data_gap(self) -> None:
+        response: dict[str, object] = {
+            "status": "success",
+            "tool_name": "get_financial_facts",
+            "data": {"facts": [], "account_resolution": {"status": "resolved"}},
+            "evidence_bundle": {"evidence_ids": [], "items": []},
+            "warnings": [],
+            "metadata": {
+                "sufficiency_check": {
+                    "status": "insufficient",
+                    "answer_allowed": False,
+                    "recommended_action": "abstain",
+                    "reasons": ["financial_fact_contract_not_met"],
+                    "missing_requirements": [
+                        "validated_structured_financial_fact", "citable_evidence", "evidence_items",
+                    ],
+                }
+            },
+        }
+        registry = StaticRegistry(response)
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry,  # type: ignore[arg-type]
+            client,
+            router=DeterministicQuestionRouter(["신한지주"]),
+        )
+
+        result = service.answer("신한지주의 2025년 연결 매출액은 얼마인가요?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertIn("검증된 재무 수치가 공시 코퍼스에서 확인되지 않아", result.answer)
+        self.assertIn("금융지주", result.answer)
+        self.assertEqual(client.generation_calls, [])
+
     def test_mis_scaled_final_amount_is_replaced_by_deterministic_rendering(self) -> None:
         receipt = "20250318000001"
         response: dict[str, object] = {
