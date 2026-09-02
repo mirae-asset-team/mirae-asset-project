@@ -98,6 +98,69 @@ class FinancialExtractionTests(unittest.TestCase):
         self.assertIsNone(parse_numeric_value("-"))
         self.assertIsNone(parse_numeric_value("해당 없음"))
 
+    def test_blank_net_income_row_is_recovered_from_attribution_rows(self) -> None:
+        cells = [
+            _cell(0, 0, "", kind="header"),
+            _cell(0, 1, "제 5 기", kind="header"),
+            _cell(0, 2, "제 4 기", kind="header"),
+            _cell(0, 3, "제 3 기", kind="header"),
+            _cell(1, 0, "당기순이익(손실)"),
+            _cell(1, 1, ""), _cell(1, 2, ""), _cell(1, 3, ""),
+            _cell(2, 0, "지배기업 소유주지분"),
+            _cell(2, 1, "1,421,503,230"), _cell(2, 2, "2,135,370,753"), _cell(2, 3, "(894,565,685)"),
+            _cell(3, 0, "비지배지분"),
+            _cell(3, 1, "0"), _cell(3, 2, "0"), _cell(3, 3, "51,885,214"),
+        ]
+        facts, rejects = extract_table_candidates(
+            _table(caption="2-2. 연결 포괄손익계산서"), cells, fiscal_year=2025,
+        )
+        by_year = {fact["fiscal_year"]: fact for fact in facts if fact["account_id"] == "net_income"}
+        self.assertEqual(by_year[2025]["value_numeric"], "1421503230")
+        self.assertEqual(by_year[2024]["value_numeric"], "2135370753")
+        self.assertEqual(by_year[2023]["value_numeric"], "-842680471")
+        self.assertEqual(set(by_year[2025]["evidence_ids"]), {"ev-2-1", "ev-3-1"})
+        self.assertEqual(by_year[2025]["extraction_method"], "annual_statement_attribution_sum_v1")
+        self.assertEqual(by_year[2025]["account_name_raw"], "당기순이익(손실)")
+        self.assertFalse(any(reject["reason_code"] == "metric_row_without_values" for reject in rejects))
+        self.assertFalse(any(reject["reason_code"] == "metric_value_unparseable" for reject in rejects))
+
+    def test_blank_net_income_without_attribution_rows_stays_rejected(self) -> None:
+        cells = [
+            _cell(0, 0, "", kind="header"),
+            _cell(0, 1, "제 5 기", kind="header"),
+            _cell(0, 2, "제 4 기", kind="header"),
+            _cell(0, 3, "제 3 기", kind="header"),
+            _cell(1, 0, "당기순이익(손실)"),
+            _cell(1, 1, ""), _cell(1, 2, ""), _cell(1, 3, ""),
+            _cell(2, 0, "기타포괄손익"),
+            _cell(2, 1, "1"), _cell(2, 2, "2"), _cell(2, 3, "3"),
+        ]
+        facts, rejects = extract_table_candidates(
+            _table(caption="2-2. 연결 포괄손익계산서"), cells, fiscal_year=2025,
+        )
+        self.assertFalse([fact for fact in facts if fact["account_id"] == "net_income"])
+        self.assertTrue(any(reject["reason_code"] == "metric_row_without_values" for reject in rejects))
+
+    def test_populated_net_income_row_is_not_replaced_by_attribution_sum(self) -> None:
+        cells = [
+            _cell(0, 0, "", kind="header"),
+            _cell(0, 1, "제 5 기", kind="header"),
+            _cell(0, 2, "제 4 기", kind="header"),
+            _cell(0, 3, "제 3 기", kind="header"),
+            _cell(1, 0, "당기순이익(손실)"),
+            _cell(1, 1, "100"), _cell(1, 2, "200"), _cell(1, 3, "300"),
+            _cell(2, 0, "지배기업 소유주지분"),
+            _cell(2, 1, "90"), _cell(2, 2, "180"), _cell(2, 3, "270"),
+            _cell(3, 0, "비지배지분"),
+            _cell(3, 1, "10"), _cell(3, 2, "20"), _cell(3, 3, "30"),
+        ]
+        facts, _ = extract_table_candidates(
+            _table(caption="2-2. 연결 포괄손익계산서"), cells, fiscal_year=2025,
+        )
+        by_year = {fact["fiscal_year"]: fact for fact in facts if fact["account_id"] == "net_income"}
+        self.assertEqual(by_year[2025]["value_numeric"], "100")
+        self.assertEqual(by_year[2025]["extraction_method"], "annual_statement_rule_v1")
+
     def test_only_exact_main_statement_sections_are_eligible(self) -> None:
         consolidated = classify_statement_table(_table(caption="2-2. 연결 손익계산서"))
         self.assertEqual(consolidated, {"scope": "consolidated", "statement_type": "IS", "priority": 0, "unit_raw": "백만원", "scale": 1_000_000})
