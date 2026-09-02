@@ -960,3 +960,13 @@
 - Evidence: 로컬에서는 `PYTHONPATH=src python -m pytest -q`가 `877 passed, 2 skipped, 240 subtests`, Web이 `13 passed`였지만 최초 GitHub Actions run `33706316028`은 collection에서 `numpy`와 `yaml`을 찾지 못해 4 errors로 실패했다. workflow가 `.[agent] pytest httpx`만 설치하면서 Dense 단위 테스트와 compose 계약 테스트도 모두 수집한 것이 원인이다.
 - Finding: 운영 main API의 `[agent]` extra와 `Dockerfile`에 NumPy를 추가하는 것은 기존 런타임 경계를 깨고 불필요한 의존성을 늘린다. CI 테스트 환경에만 현재 검증 버전 `numpy==2.5.2`, `PyYAML==6.0.3`을 설치하고, `[dense]` 전체(FAISS/모델 포함)는 설치하지 않는 최소 변경을 선택했다.
 - TDD: workflow 계약 테스트를 먼저 바꿔 누락 설치 명령으로 `1 failed`를 확인했고, workflow 수정 후 같은 테스트가 `1 passed`로 전환됐다. D 드라이브 원본 DB, live overlay/index, credential, `.env`, PEM, NCP 설정과 운영 이미지는 변경하지 않았다.
+
+## 2026-09-02T21:20+09:00 — 대량 QA 파이프라인 1차 사이클 (judge-stress-v2 병합 후)
+
+- 통합: `origin/agent/judge-stress-v2` 23커밋을 `agent/disclosure-db-foundation`에 병합(d8cc643). 로컬 QA lab·dense WIP는 스냅샷 커밋(3139c35) 후 병합해 보존. 충돌 16개 파일은 코어 검색·평가는 팀원 일반화판, 라우트·테스트·문서는 union으로 해소. 전체 회귀 `576 passed, 2 skipped`, Web `12/12`.
+- 하네스: `scripts/run_mass_qa.py`(69개사×21템플릿=1,460문항, 결정론 검증기: 기대행동·인용·금액표시 일관성·metamorphic 쌍·안전 프로브)와 `scripts/report_mass_qa.py`, 원장 `runs/qa_mass.sqlite`(Git 제외)를 추가했다.
+- 프로덕션(:8000) 1,460문항 실측: pass 1,017 / fail 230 / error 213. error는 전부 HCX `hcx_final_generation_failed` 즉시 거절(0.1~0.3초)로, 분당 85~105건 페이스가 CLOVA QPM을 초과한 것이다. 대량 QA 지속 페이스는 concurrency 1·pace 1.3s에서도 일부 거절이 남는다.
+- 판정: sonnet 배치 7 + opus 클러스터러 1 워크플로로 실패 102건 전수 판정 후 8개 근본원인 클래스 확정. 잔여 신규 실패 151건도 동일 클래스 분포(표시 오류 111·띄어쓰기 보류 24·metamorphic 16)로 확인했다.
+- 클래스와 조치: A+B 금액 표시 오류(전체 실패의 대부분, 10×/100×/1000×)는 병합 코드의 `format_financial_value`+`display_value` 계약이 이미 해결하며 배포 대기. C 회사명 띄어쓰기 변형은 `question_routing._collapse_spaced_companies`로 TDD 수정(bfbe647). D "금융지주·보험 매출액 결손"은 신한지주 CIS 실측으로 재판정 — 순액 표시라 매출액 계정이 원래 없어 보류가 정답이며, 질문뱅크를 업종 인지형으로 보정(d7419f4)하고 런 24건을 소급 정정. E KB금융 18/18 결손은 유니버스가 고른 최신 정정본(20260619000667)이 PDF 원문이라 table_record 0건(이전 XML판 20260324000835에 4개 본표 존재), 하나금융지주는 본표 unit_text 부재로 분류 탈락 — 계보 내 표 보유 버전 fallback+출처 명시는 서빙 수치 정책이라 팀 결정 대기로 남긴다.
+- 하네스 자체 결함 수정: 서버 오류를 abstain 통과로 세던 거짓 정상 제거(cc0926d).
+- 미실행·경계: NCP 배포·스테이징 접근·overlay/검색 인덱스 확보는 하지 않았다. 원본 코퍼스는 ro/immutable로만 열었다. push는 하지 않았다.
