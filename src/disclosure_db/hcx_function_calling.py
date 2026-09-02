@@ -23,6 +23,13 @@ from .generation import UNANSWERABLE_TEXT
 from .bounded_analysis import BoundedAnalysisExecution, BoundedAnalysisExecutor
 from .analysis_planner import classify_policy
 from .calculator import calculate
+from .claim_verification import (
+    ClaimAdmission,
+    HcxAnswerClaim,
+    build_claim_admission,
+    extract_prose_numeric_values,
+    verify_generated_claims,
+)
 from .disclosure_tools import format_financial_value
 from .evidence_sufficiency import EvidenceSufficiencyChecker
 from .hcx_prompts import (
@@ -123,6 +130,8 @@ class HcxGeneratedAnswer:
     answer: str
     citation_ids: tuple[str, ...]
     conclusion: str | None = None
+    claims: tuple[HcxAnswerClaim, ...] = ()
+    limitations: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.answer, str) or not self.answer.strip() or len(self.answer) > 10_000:
@@ -131,6 +140,14 @@ class HcxGeneratedAnswer:
             raise ValueError("hcx_final_citation_ids_invalid")
         if self.conclusion is not None and not isinstance(self.conclusion, str):
             raise ValueError("hcx_final_conclusion_invalid")
+        try:
+            claims = tuple(HcxAnswerClaim.from_value(item) for item in self.claims)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("hcx_final_claims_invalid") from exc
+        if not all(isinstance(item, str) and item for item in self.limitations):
+            raise ValueError("hcx_final_limitations_invalid")
+        object.__setattr__(self, "claims", claims)
+        object.__setattr__(self, "limitations", tuple(dict.fromkeys(self.limitations)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -236,6 +253,10 @@ def hcx_tool_schemas(registry: ToolRegistry) -> list[dict[str, object]]:
 def _final_answer_tool(
     evidence_ids: Sequence[str],
     allowed_conclusions: Sequence[str] = (),
+    *,
+    fact_refs: Sequence[str] = (),
+    calculation_refs: Sequence[str] = (),
+    evidence_slot_ids: Sequence[str] = (),
 ) -> dict[str, object]:
     """Build the private HCX output contract from admitted Evidence IDs."""
 
@@ -255,8 +276,49 @@ def _final_answer_tool(
             "items": {"type": "string", "enum": allowed_ids},
             "minItems": 1,
         },
+        "claims": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "claim_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                    "text": {"type": "string", "minLength": 1, "maxLength": 4000},
+                    "citation_ids": {
+                        "type": "array", "minItems": 1,
+                        "items": {"type": "string", "enum": allowed_ids},
+                    },
+                    "fact_refs": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(fact_refs)},
+                    },
+                    "calculation_refs": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(calculation_refs)},
+                    },
+                    "evidence_slot_ids": {
+                        "type": "array", "minItems": 1,
+                        "items": {"type": "string", "enum": list(evidence_slot_ids)},
+                    },
+                    "numeric_values": {
+                        "type": "array", "items": {"type": "string"},
+                    },
+                },
+                "required": [
+                    "claim_id", "text", "citation_ids", "fact_refs",
+                    "calculation_refs", "evidence_slot_ids", "numeric_values",
+                ],
+            },
+        },
+        "limitations": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {"type": "string", "maxLength": 256},
+        },
     }
-    required = ["answer", "citation_ids"]
+    required = ["answer", "citation_ids", "claims", "limitations"]
     bounded_conclusions = list(dict.fromkeys(
         str(item) for item in allowed_conclusions if item != "insufficient_evidence"
     ))
@@ -429,8 +491,23 @@ class HyperClovaFunctionClient:
             if isinstance(raw_conclusions, (list, tuple))
             else []
         )
-        final_tool = _final_answer_tool(evidence_ids, allowed_conclusions)
-        tool_content = json.dumps(tool_response, ensure_ascii=False, separators=(",", ":"))
+        admission = build_claim_admission(tool_response)
+        final_tool = _final_answer_tool(
+            evidence_ids,
+            allowed_conclusions,
+            fact_refs=tuple(admission.facts),
+            calculation_refs=tuple(admission.calculations),
+            evidence_slot_ids=tuple(admission.evidence_slots),
+        )
+        provider_tool_response = dict(tool_response)
+        raw_metadata = tool_response.get("metadata")
+        provider_tool_response["metadata"] = {
+            **(dict(raw_metadata) if isinstance(raw_metadata, Mapping) else {}),
+            "claim_contract": admission.public_contract(),
+        }
+        tool_content = json.dumps(
+            provider_tool_response, ensure_ascii=False, separators=(",", ":")
+        )
         data = self._chat({
             "model": self.model,
             "messages": [
@@ -458,7 +535,7 @@ class HyperClovaFunctionClient:
             stage="final_generation_response",
             expected_name=FINAL_ANSWER_TOOL_NAME,
         )
-        expected_fields = {"answer", "citation_ids"}
+        expected_fields = {"answer", "citation_ids", "claims", "limitations"}
         if allowed_conclusions:
             expected_fields.add("conclusion")
         if set(final_call.arguments) != expected_fields:
@@ -468,8 +545,12 @@ class HyperClovaFunctionClient:
         answer = final_call.arguments.get("answer")
         citations = final_call.arguments.get("citation_ids")
         conclusion = final_call.arguments.get("conclusion")
+        claims = final_call.arguments.get("claims")
+        limitations = final_call.arguments.get("limitations")
         if not isinstance(answer, str) or not isinstance(citations, list) or not all(
             isinstance(item, str) for item in citations
+        ) or not isinstance(claims, list) or not isinstance(limitations, list) or not all(
+            isinstance(item, str) for item in limitations
         ) or (allowed_conclusions and not isinstance(conclusion, str)):
             raise HcxProtocolError(
                 "hcx_final_output_schema_mismatch", stage="final_generation_response"
@@ -479,6 +560,8 @@ class HyperClovaFunctionClient:
                 answer,
                 tuple(citations),
                 str(conclusion) if conclusion is not None else None,
+                tuple(HcxAnswerClaim.from_value(item) for item in claims),
+                tuple(limitations),
             )
         except ValueError as exc:
             raise HcxProtocolError(str(exc), stage="final_generation_response") from exc
@@ -486,7 +569,7 @@ class HyperClovaFunctionClient:
     def generate_routed_answer(
         self, question: str, tool_call: HcxToolCall, tool_response: Mapping[str, object],
     ) -> HcxGeneratedAnswer:
-        """Generate once after a deterministic route without another Tool Call."""
+        """Generate once after a deterministic route using the private final Tool."""
 
         bundle = tool_response.get("evidence_bundle")
         raw_evidence_ids = bundle.get("evidence_ids") if isinstance(bundle, Mapping) else None
@@ -497,6 +580,80 @@ class HyperClovaFunctionClient:
             raise HcxProtocolError(
                 "hcx_final_evidence_ids_empty", stage="final_generation_preflight"
             )
+        metadata = tool_response.get("metadata")
+        strict_contract = (
+            tool_response.get("status") is not None
+            and isinstance(metadata, Mapping)
+            and isinstance(metadata.get("sufficiency_check"), Mapping)
+        )
+        if strict_contract:
+            admission = build_claim_admission(tool_response)
+            final_tool = _final_answer_tool(
+                evidence_ids,
+                fact_refs=tuple(admission.facts),
+                calculation_refs=tuple(admission.calculations),
+                evidence_slot_ids=tuple(admission.evidence_slots),
+            )
+            data = self._chat({
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": json.dumps({
+                            "question": question,
+                            "tool_name": tool_call.name,
+                            "tool_result": tool_response,
+                            "claim_contract": admission.public_contract(),
+                        }, ensure_ascii=False, separators=(",", ":")),
+                    },
+                ],
+                "tools": [final_tool],
+                "tool_choice": {
+                    "type": "function",
+                    "function": {"name": FINAL_ANSWER_TOOL_NAME},
+                },
+                "temperature": 0,
+                "max_tokens": FUNCTION_CALLING_MAX_TOKENS,
+            }, stage="routed_final_generation_request")
+            final_call = self._tool_call(
+                self._message(data, stage="routed_final_generation_response"),
+                stage="routed_final_generation_response",
+                expected_name=FINAL_ANSWER_TOOL_NAME,
+            )
+            expected_fields = {"answer", "citation_ids", "claims", "limitations"}
+            if set(final_call.arguments) != expected_fields:
+                raise HcxProtocolError(
+                    "hcx_final_output_schema_mismatch",
+                    stage="routed_final_generation_response",
+                )
+            answer = final_call.arguments.get("answer")
+            citations = final_call.arguments.get("citation_ids")
+            claims = final_call.arguments.get("claims")
+            limitations = final_call.arguments.get("limitations")
+            if (
+                not isinstance(answer, str)
+                or not isinstance(citations, list)
+                or not all(isinstance(item, str) for item in citations)
+                or not isinstance(claims, list)
+                or not isinstance(limitations, list)
+                or not all(isinstance(item, str) for item in limitations)
+            ):
+                raise HcxProtocolError(
+                    "hcx_final_output_schema_mismatch",
+                    stage="routed_final_generation_response",
+                )
+            try:
+                return HcxGeneratedAnswer(
+                    answer,
+                    tuple(citations),
+                    claims=tuple(HcxAnswerClaim.from_value(item) for item in claims),
+                    limitations=tuple(limitations),
+                )
+            except ValueError as exc:
+                raise HcxProtocolError(
+                    str(exc), stage="routed_final_generation_response"
+                ) from exc
         data = self._chat({
             "model": self.model,
             "messages": [
@@ -652,6 +809,146 @@ class HcxFunctionCallingService:
     def _bundle_from_response(response: Mapping[str, object]) -> Mapping[str, object]:
         bundle = response.get("evidence_bundle")
         return bundle if isinstance(bundle, Mapping) else {}
+
+    @staticmethod
+    def _legacy_claims(
+        generated: object, admission: ClaimAdmission,
+    ) -> tuple[Mapping[str, object], ...]:
+        raw_claims = getattr(generated, "claims", ())
+        if isinstance(raw_claims, (list, tuple)) and raw_claims:
+            return tuple(raw_claims)
+        citation_ids = tuple(str(item) for item in getattr(generated, "citation_ids", ()) if item)
+        citation_set = set(citation_ids)
+        owned_slots = [
+            slot_id for slot_id, evidence_ids in admission.evidence_slots.items()
+            if citation_set and citation_set.issubset(set(evidence_ids))
+        ]
+        answer = str(getattr(generated, "answer", ""))
+        prose_numbers = extract_prose_numeric_values(answer)
+        supporting_facts = [
+            fact for fact in admission.facts.values()
+            if set(fact.evidence_ids).issubset(citation_set)
+            and any(
+                Decimal(number) == Decimal(value)
+                for number in prose_numbers
+                for value in fact.numeric_values
+            )
+        ]
+        grounded = {
+            Decimal(value)
+            for fact in supporting_facts
+            for value in fact.numeric_values
+            if Decimal(value).is_finite()
+        }
+        all_numbers_grounded = all(Decimal(number) in grounded for number in prose_numbers)
+        return ({
+            "claim_id": "legacy-claim-1",
+            "text": answer,
+            "citation_ids": list(citation_ids),
+            "fact_refs": [fact.fact_ref for fact in supporting_facts] if all_numbers_grounded else [],
+            "calculation_refs": [],
+            "evidence_slot_ids": owned_slots,
+            "numeric_values": list(prose_numbers) if all_numbers_grounded else [],
+        },)
+
+    @staticmethod
+    def _fact_row_admitted(
+        row: Mapping[str, object], admission: ClaimAdmission,
+    ) -> bool:
+        for key in ("financial_fact_id", "event_fact_id", "fact_id", "item_id"):
+            if row.get(key):
+                return str(row[key]) in admission.facts
+        raw_ids = row.get("evidence_ids")
+        ids = {
+            str(item) for item in raw_ids if item
+        } if isinstance(raw_ids, (list, tuple)) else set()
+        if not ids:
+            return bool(admission.facts)
+        return bool(ids) and any(
+            ids == set(fact.evidence_ids) for fact in admission.facts.values()
+        )
+
+    def _deterministic_claim_fallback(
+        self,
+        tool_response: Mapping[str, object],
+        admission: ClaimAdmission,
+        available_evidence_ids: Sequence[str],
+        route: QuestionRoute | None,
+    ) -> HcxGeneratedAnswer | None:
+        if not admission.facts:
+            return None
+        safe_response = dict(tool_response)
+        raw_data = tool_response.get("data")
+        data = dict(raw_data) if isinstance(raw_data, Mapping) else {}
+        raw_facts = data.get("facts")
+        if isinstance(raw_facts, list):
+            safe_facts: list[dict[str, object]] = []
+            for raw_row in raw_facts:
+                if not isinstance(raw_row, Mapping) or not self._fact_row_admitted(raw_row, admission):
+                    continue
+                row = dict(raw_row)
+                if not row.get("display_value") and row.get("value_numeric") is not None:
+                    unit = str(row.get("unit") or "KRW")
+                    scale = Decimal(str(row.get("scale") or 1))
+                    raw_value = Decimal(str(row["value_numeric"]))
+                    if unit in {"KRW", "원"} and scale == 1 and raw_value.is_finite():
+                        rendered = (
+                            f"{int(raw_value):,}원"
+                            if raw_value == raw_value.to_integral_value()
+                            else f"{raw_value:,}원"
+                        )
+                    else:
+                        rendered = format_financial_value(raw_value, scale, unit)
+                    if rendered:
+                        row["display_value"] = rendered
+                safe_facts.append(row)
+            data["facts"] = safe_facts
+        if admission.rejected_calculations:
+            data["calculations"] = []
+            comparison = data.get("comparison")
+            if isinstance(comparison, Mapping):
+                data["comparison"] = {**dict(comparison), "calculations": []}
+        safe_response["data"] = data
+        safe_ids = [
+            evidence_id for evidence_id in available_evidence_ids
+            if any(evidence_id in fact.evidence_ids for fact in admission.facts.values())
+        ]
+        if not safe_ids:
+            safe_ids = list(available_evidence_ids)
+        comparison = data.get("comparison")
+        if isinstance(comparison, Mapping) and comparison.get("status") == "complete":
+            return self._deterministic_financial_comparison_answer(safe_response, safe_ids)
+        if isinstance(data.get("facts"), list) and data["facts"]:
+            return self._deterministic_financial_answer(safe_response, safe_ids)
+        if data.get("total_count") is not None or (
+            isinstance(data.get("quantitative_trend"), Mapping)
+            and data["quantitative_trend"].get("total_count") is not None
+        ):
+            trend_data = data.get("quantitative_trend")
+            if isinstance(trend_data, Mapping):
+                safe_response["data"] = dict(trend_data)
+            return self._deterministic_trend_answer(safe_response, safe_ids)
+        if route is not None and route.workflow == "financial_statement_metric":
+            values = data.get("validated_statement_values")
+            rows = [row for row in values if isinstance(row, Mapping)] if isinstance(values, list) else []
+            if rows:
+                text = "\n".join(
+                    f"{row.get('period') or ''} {row.get('metric') or '재무 수치'}은 {row.get('display_value')}입니다.".strip()
+                    for row in rows if row.get("display_value")
+                )
+                if text:
+                    return HcxGeneratedAnswer(text, tuple(safe_ids[:5]))
+        return None
+
+    @staticmethod
+    def _claim_metadata(
+        claims: Sequence[HcxAnswerClaim], limitations: Sequence[str], trace: Mapping[str, object],
+    ) -> dict[str, object]:
+        return {
+            "claim_support": [claim.to_dict() for claim in claims],
+            "limitations": list(dict.fromkeys(str(item) for item in limitations if item)),
+            "verification_trace": dict(trace),
+        }
 
     def _merged_response(
         self,
@@ -1642,57 +1939,6 @@ class HcxFunctionCallingService:
                 if analysis_execution is not None
                 else self.client.generate_routed_answer(question, tool_call, tool_response)
             )
-            failure_stage = "final_citation_validation"
-            if analysis_execution is not None:
-                if (
-                    generated.conclusion is None
-                    or generated.conclusion == "insufficient_evidence"
-                    or generated.conclusion not in analysis_execution.plan.allowed_conclusions
-                ):
-                    raise HcxProtocolError("hcx_final_conclusion_not_allowed")
-                generated_policy = classify_policy(generated.answer)
-                if generated_policy.action in {"refuse_recommendation", "refuse_forecast"}:
-                    raise HcxProtocolError("hcx_final_policy_violation")
-                if _FORECAST_CLAIM.search(generated.answer):
-                    raise HcxProtocolError("hcx_final_forecast_not_allowed")
-                common["metadata"]["conclusion"] = generated.conclusion  # type: ignore[index]
-            data = tool_response.get("data")
-            facts = data.get("facts") if isinstance(data, Mapping) else None
-            has_validated_actual = isinstance(facts, list) and any(
-                isinstance(fact, Mapping)
-                and fact.get("support_level") == "structured"
-                and fact.get("validation_status") == "validated"
-                and bool(fact.get("display_value"))
-                for fact in facts
-            )
-            if has_validated_actual and _FORECAST_CLAIM.search(generated.answer):
-                available_ids = list(
-                    tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
-                )
-                grounded = (
-                    self._deterministic_financial_answer(tool_response, available_ids)
-                    if route is not None and route.workflow == "single"
-                    else self._deterministic_financial_comparison_answer(tool_response, available_ids)
-                    if route is not None and route.workflow == "financial_comparison"
-                    else None
-                )
-                if grounded is None:
-                    raise HcxProtocolError("hcx_final_forecast_conflicts_with_validated_actual")
-                generated = grounded
-            known_ids = {
-                str(item) for item in (
-                    tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
-                ) if item
-            }
-            if not generated.citation_ids or any(item not in known_ids for item in generated.citation_ids):
-                raise HcxProtocolError("hcx_final_citations_not_in_evidence_bundle")
-            if _DART_RCEPT_NO_IN_TEXT.search(generated.answer):
-                raise HcxProtocolError("hcx_final_answer_contains_provider_rendered_rcept_no")
-            citations = self._selected_citations(
-                tool_call.name, generated.citation_ids, available_citations
-            )
-            if not citations:
-                raise HcxProtocolError("hcx_final_citations_missing_valid_rcept_no")
         except Exception as exc:
             common["metadata"].update(  # type: ignore[union-attr]
                 self._record_failure(failure_stage, exc, tool_name=tool_call.name)
@@ -1701,8 +1947,158 @@ class HcxFunctionCallingService:
             return self._result(
                 "error", UNANSWERABLE_TEXT, warnings=["hcx_final_generation_failed"], **common,
             )
+
+        failure_stage = "claim_verification"
+        admission = build_claim_admission(tool_response)
+        raw_claims = self._legacy_claims(generated, admission)
+        limitations = tuple(
+            str(item) for item in getattr(generated, "limitations", ()) if item
+        ) or tuple(
+            str(item) for item in (
+                tool_response.get("data", {}).get("limitations", [])  # type: ignore[union-attr]
+            ) if item
+        ) or (
+            "historical_disclosure_only",
+            "no_transaction_recommendation",
+            "no_forecast",
+        )
+        generated_text = str(getattr(generated, "answer", ""))
+        generated_policy = classify_policy(generated_text)
+        policy_ok = (
+            generated_policy.action not in {"refuse_recommendation", "refuse_forecast"}
+            and _FORECAST_CLAIM.search(generated_text) is None
+            and _DART_RCEPT_NO_IN_TEXT.search(generated_text) is None
+        )
+        generated_conclusion = getattr(generated, "conclusion", None)
+        response_data = tool_response.get("data")
+        response_conclusion = (
+            response_data.get("conclusion") if isinstance(response_data, Mapping) else None
+        )
+        conclusion_ok = True
+        if analysis_execution is not None:
+            conclusion_ok = (
+                isinstance(generated_conclusion, str)
+                and generated_conclusion != "insufficient_evidence"
+                and generated_conclusion in analysis_execution.plan.allowed_conclusions
+                and response_conclusion in (None, generated_conclusion)
+            )
+        elif generated_conclusion is not None:
+            conclusion_ok = response_conclusion == generated_conclusion
+        verification = verify_generated_claims(
+            answer=generated_text,
+            citation_ids=tuple(str(item) for item in getattr(generated, "citation_ids", ()) if item),
+            raw_claims=raw_claims,
+            raw_limitations=limitations,
+            admission=admission,
+            policy_ok=policy_ok,
+            conclusion_ok=conclusion_ok,
+        )
+        if not verification.verified:
+            available_ids = list(admission.evidence_ids)
+            fallback = (
+                None
+                if analysis_execution is not None
+                else self._deterministic_claim_fallback(
+                    tool_response, admission, available_ids, route
+                )
+            )
+            trace_status = "fallback" if fallback is not None else "abstained"
+            common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
+                (),
+                (*limitations, "provider_output_rejected"),
+                verification.trace(trace_status),
+            ))
+            failure_warnings = [
+                "claim_verification_failed", *verification.failure_codes,
+            ]
+            if analysis_execution is not None:
+                safe_data = dict(response_data) if isinstance(response_data, Mapping) else {}
+                safe_data["conclusion"] = "insufficient_evidence"
+                tool_response = {**tool_response, "data": safe_data}
+                common["tool_response"] = tool_response
+                common["metadata"]["conclusion"] = "insufficient_evidence"  # type: ignore[index]
+            if fallback is None:
+                common["recommended_action"] = "abstain"
+                return self._result(
+                    "abstained",
+                    UNANSWERABLE_TEXT,
+                    warnings=failure_warnings,
+                    **common,
+                )
+            citations = self._selected_citations(
+                tool_call.name, fallback.citation_ids, available_citations
+            )
+            if not citations:
+                common["recommended_action"] = "abstain"
+                return self._result(
+                    "abstained",
+                    UNANSWERABLE_TEXT,
+                    warnings=failure_warnings,
+                    **common,
+                )
+            citation_ids = tuple(item.evidence_id for item in citations)
+            owned_slots = tuple(
+                slot_id for slot_id, evidence_ids in admission.evidence_slots.items()
+                if set(citation_ids).issubset(set(evidence_ids))
+            ) or tuple(admission.evidence_slots)
+            fallback_claim = HcxAnswerClaim(
+                "deterministic-fallback-1",
+                fallback.answer,
+                citation_ids,
+                tuple(admission.facts),
+                tuple(admission.calculations),
+                owned_slots,
+                tuple(dict.fromkeys(
+                    value
+                    for fact in admission.facts.values()
+                    for value in fact.numeric_values
+                )),
+            )
+            common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
+                (fallback_claim,),
+                (*limitations, "provider_output_rejected", "deterministic_fallback"),
+                verification.trace("fallback"),
+            ))
+            return self._result(
+                "answered",
+                self._render_answer(fallback.answer, citations),
+                answer_allowed=True,
+                citation_ids=list(citation_ids),
+                citations=[item.to_dict() for item in citations],
+                warnings=failure_warnings,
+                **common,
+            )
+
+        verified_text = "\n".join(claim.text for claim in verification.claims)
+        citations = self._selected_citations(
+            tool_call.name,
+            tuple(str(item) for item in getattr(generated, "citation_ids", ()) if item),
+            available_citations,
+        )
+        if not citations:
+            common["recommended_action"] = "abstain"
+            common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
+                (), (*limitations, "provider_output_rejected"),
+                verification.trace("abstained"),
+            ))
+            return self._result(
+                "abstained", UNANSWERABLE_TEXT,
+                warnings=["claim_verification_failed", "citation_receipt_missing"],
+                **common,
+            )
+        if analysis_execution is not None:
+            safe_data = dict(response_data) if isinstance(response_data, Mapping) else {}
+            safe_data["conclusion"] = generated_conclusion
+            tool_response = {**tool_response, "data": safe_data}
+            common["tool_response"] = tool_response
+            common["metadata"]["conclusion"] = generated_conclusion  # type: ignore[index]
+        common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
+            verification.claims,
+            verification.limitations,
+            verification.trace("verified"),
+        ))
         return self._result(
-            "answered", self._render_answer(generated.answer, citations), answer_allowed=True,
+            "answered", self._render_answer(verified_text, citations), answer_allowed=True,
             citation_ids=[item.evidence_id for item in citations],
             citations=[item.to_dict() for item in citations], **common,
         )

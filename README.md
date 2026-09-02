@@ -217,6 +217,15 @@ read-only SafeSearch를 재사용해 5개 Tool Registry를 조립합니다. 기�
 실제 local credential로 5개 Function schema, HCX Tool Call, Registry argument schema 호환 smoke는
 통과했습니다. NCP의 Sparse/Structured 실제 smoke에서도 `answered`, `answer_allowed=true`, 구조화된
 `citations[].rcept_no` 보존을 확인했습니다.
+
+Judge Stress V2 Task 6부터 HCX 최종 생성은 claim 단위의 추가 계약을 사용합니다. 기존 최상위
+응답 필드는 그대로 유지하면서 `metadata.claim_support`, `metadata.limitations`,
+`metadata.verification_trace`를 추가합니다. 각 claim의 citation·evidence slot·DB fact·Decimal 계산
+참조와 본문 숫자가 모두 일치할 때만 HCX 문장을 반환합니다. 미등록 citation, 다른 slot의 근거,
+누락된 계산 피연산자, 알 수 없는 숫자, `NaN`/`Infinity`, 허용 범위 밖 결론이 하나라도 있으면 해당
+HCX 문장은 폐기되고 검증된 구조화 fact/계산으로 결정론적 답변을 만들거나 답변을 보류합니다.
+검증 추적은 고정된 상태·개수·검사 결과·사유 코드만 공개하며 prompt, 원문 evidence, provider
+content, 숨은 사고과정은 포함하지 않습니다.
 현재 runtime composition은 환경에 Dense URL이 있으면 remote full-corpus sidecar를 사용하고,
 query-time Dense 실패에는 Sparse 결과를 유지합니다. Task 1의 runtime manifest/health identity는 로컬 계약만
 검증됐고 새 Docker image 및 NCP runtime에서는 아직 확인하지 않았습니다. 상세 계약은

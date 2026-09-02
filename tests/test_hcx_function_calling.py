@@ -839,7 +839,7 @@ class HcxFunctionCallingTests(unittest.TestCase):
         )
         result = HcxFunctionCallingService(registry, client).answer("테스트회사 사업 내용은?")
 
-        self.assertEqual(result.status, "error")
+        self.assertEqual(result.status, "abstained")
         self.assertFalse(result.answer_allowed)
         self.assertEqual(result.recommended_action, "abstain")
         self.assertEqual(result.citation_ids, [])
@@ -864,11 +864,11 @@ class HcxFunctionCallingTests(unittest.TestCase):
         )
         result = HcxFunctionCallingService(registry, client).answer("테스트회사 사업 내용은?")
 
-        self.assertEqual(result.status, "error")
+        self.assertEqual(result.status, "abstained")
         self.assertEqual(result.citations, [])
         self.assertNotIn("20240101999999", result.answer)
 
-    def test_fourteen_digit_financial_value_is_not_mistaken_for_receipt_number(self) -> None:
+    def test_ungrounded_fourteen_digit_financial_value_is_rejected(self) -> None:
         registry, _ = self._registry([_search_row()])
         client = FakeHcxClient(
             self._search_call(),
@@ -876,8 +876,8 @@ class HcxFunctionCallingTests(unittest.TestCase):
         )
         result = HcxFunctionCallingService(registry, client).answer("테스트회사 공시 수치는?")
 
-        self.assertEqual(result.status, "answered")
-        self.assertIn("12345678901234원", result.answer)
+        self.assertEqual(result.status, "abstained")
+        self.assertNotIn("12345678901234원", result.answer)
 
     def test_correction_answer_lists_original_and_corrected_receipts_with_roles(self) -> None:
         original = "20240301000001"
@@ -946,7 +946,13 @@ class HcxFunctionCallingTests(unittest.TestCase):
                         "id": "call-final", "type": "function",
                         "function": {
                             "name": FINAL_ANSWER_TOOL_NAME,
-                            "arguments": '{"answer":"근거 기반 답변","citation_ids":["ev-1"]}',
+                            "arguments": (
+                                '{"answer":"근거 기반 답변","citation_ids":["ev-1"],'
+                                '"claims":[{"claim_id":"claim-1","text":"근거 기반 답변",'
+                                '"citation_ids":["ev-1"],"fact_refs":[],"calculation_refs":[],'
+                                '"evidence_slot_ids":["tool_evidence"],"numeric_values":[]}],'
+                                '"limitations":["historical_disclosure_only"]}'
+                            ),
                         },
                     }],
                 }}],
@@ -964,6 +970,7 @@ class HcxFunctionCallingTests(unittest.TestCase):
 
         self.assertEqual(call.name, "search_disclosures")
         self.assertEqual(generated.citation_ids, ("ev-1",))
+        self.assertEqual(generated.claims[0].claim_id, "claim-1")
         selection_payload = opener.requests[0][2]
         final_payload = opener.requests[1][2]
         self.assertEqual(selection_payload["tool_choice"], "auto")
@@ -971,6 +978,8 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(len(selection_payload["tools"]), 5)
         self.assertIn("DART", selection_payload["messages"][0]["content"])
         self.assertIn("접수번호", final_payload["messages"][0]["content"])
+        self.assertIn("fact_refs", final_payload["messages"][0]["content"])
+        self.assertIn("numeric_values", final_payload["messages"][0]["content"])
         self.assertEqual(
             final_payload["tool_choice"],
             {"type": "function", "function": {"name": FINAL_ANSWER_TOOL_NAME}},
@@ -991,6 +1000,15 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(final_payload["messages"][-1]["role"], "tool")
         self.assertEqual(final_payload["messages"][-1]["tool_call_id"], "call-1")
         self.assertIsInstance(final_payload["messages"][-1]["content"], str)
+        admitted_tool_result = json.loads(final_payload["messages"][-1]["content"])
+        self.assertEqual(
+            admitted_tool_result["metadata"]["claim_contract"]["schema_version"],
+            "claim-verification-v1",
+        )
+        self.assertEqual(
+            admitted_tool_result["metadata"]["claim_contract"]["evidence_slots"],
+            [{"slot_id": "tool_evidence", "evidence_ids": ["ev-1"]}],
+        )
 
     def test_plain_text_final_response_is_rejected_at_named_response_stage(self) -> None:
         opener = FakeUrlOpen([{

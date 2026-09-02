@@ -61,10 +61,22 @@ Independent review rejected the first Task 5 commit because its adoption artifac
 
 ## Task 6 — Claim-level verification
 
-- Represent conclusion, claims, calculations, citation IDs, evidence-slot ownership, and limitations explicitly.
-- Require every claim to cite admitted evidence and every number to match DB facts or Decimal calculations.
-- Fall back to deterministic facts or abstention when HCX output fails verification.
-- Return a bounded verification trace, never private chain-of-thought.
+- [x] Represent conclusion, claims, calculations, citation IDs, evidence-slot ownership, and limitations explicitly.
+- [x] Require every claim to cite admitted evidence and every number to match DB facts or Decimal calculations.
+- [x] Fall back to deterministic facts or abstention when HCX output fails verification.
+- [x] Return a bounded verification trace, never private chain-of-thought.
+
+Completed locally on 2026-09-03 from reviewed Task 5 base
+`39649d3dd696ba156700cf80aa65d4515d56bd08`. The private HCX final Tool now requires
+typed claims and limitations while all existing public top-level response fields and exactly five
+public Tools remain unchanged. Provider prose is rendered only after citation, slot, fact,
+calculation, finite-Decimal, all-operand, policy, and bounded-conclusion verification. Any failure
+discards the provider prose and uses admitted deterministic facts/calculations or abstains; generic
+and bounded-judgment failures never reuse rejected prose. `verification_trace` contains only a fixed
+schema version, outcome, counts, five check statuses, and stable failure codes—never prompts, raw
+evidence, provider content, or private reasoning. Focused Task 6 verification passed `60` tests with
+`6` subtests; full Python passed `678` tests with `2` existing optional skips and `146` subtests;
+Web passed `12/12`; compile and diff checks passed. No external/provider/live evaluation is claimed.
 
 ## Task 7 — Automated judge and security evaluation
 

@@ -370,7 +370,7 @@ def test_public_hcx_rejects_unbounded_conclusion_or_provider_forecast() -> None:
 
         result = service.answer("삼성전자 공시의 사업위험을 분석해줘")
 
-        assert result.status == "error"
+        assert result.status == "abstained"
         assert result.answer_allowed is False
         assert result.recommended_action == "abstain"
-        assert "hcx_final_generation_failed" in result.warnings
+        assert "claim_verification_failed" in result.warnings
