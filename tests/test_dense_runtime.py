@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from disclosure_db.dense_runtime import FilingVectorIndex, JsonlOffsetIndex, create_app
+from disclosure_db.dense_runtime import DenseRuntime, FilingVectorIndex, JsonlOffsetIndex, create_app
 
 
 def _write_metadata(path: Path) -> None:
@@ -55,10 +58,26 @@ class DenseRuntimeIndexTests(unittest.TestCase):
             self.assertEqual(index.vector_ids(["missing"]), [])
 
 
+_EXPECTED_RUNTIME_IDENTITY = {
+    "runtime_manifest_schema_version": "1.0.0",
+    "python_version": "3.11.13",
+    "numpy_version": "2.5.2",
+    "faiss_version": "1.15.0",
+    "model": "BAAI/bge-m3",
+    "model_revision": "revision",
+    "dimension": 1024,
+    "vector_count": 3,
+    "index_type": "IndexFlatIP",
+    "metric": "inner_product",
+    "normalized": True,
+}
+
+
 class _FakeRuntime:
     model_revision = "revision"
     dimension = 1024
     vector_count = 3
+    runtime_identity = {**_EXPECTED_RUNTIME_IDENTITY, "credential": "must-not-be-published"}
 
     def search(self, question: str, *, limit: int, filing_ids: list[str]) -> list[dict[str, object]]:
         return [{"vector_id": 1, "score": 0.8, "question": question, "limit": limit, "filing_ids": filing_ids}]
@@ -81,6 +100,88 @@ class DenseRuntimeApiTests(unittest.TestCase):
             schema = client.get("/openapi.json")
             self.assertEqual(schema.status_code, 200)
             self.assertIn("/search", schema.json()["paths"])
+
+    def test_health_exposes_allowlisted_runtime_identity_without_removing_existing_fields(self) -> None:
+        with TestClient(create_app(_FakeRuntime())) as client:
+            body = client.get("/health").json()
+
+        for name, value in _EXPECTED_RUNTIME_IDENTITY.items():
+            self.assertEqual(body[name], value)
+        self.assertTrue(body["ready"])
+        self.assertEqual(body["model_revision"], _FakeRuntime.model_revision)
+        self.assertEqual(body["dimension"], _FakeRuntime.dimension)
+        self.assertEqual(body["vector_count"], _FakeRuntime.vector_count)
+        self.assertFalse({"path", "api_key", "credential", "environment"} & body.keys())
+
+    def test_startup_persists_the_same_runtime_identity_as_health(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            manifest_path = Path(temp) / "dense-runtime.json"
+            with TestClient(create_app(_FakeRuntime(), runtime_manifest_path=manifest_path)) as client:
+                body = client.get("/health").json()
+
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(manifest, _EXPECTED_RUNTIME_IDENTITY)
+        self.assertEqual(manifest, {name: body[name] for name in manifest})
+
+
+class DenseRuntimeIdentityTests(unittest.TestCase):
+    def test_loaded_runtime_records_dependency_model_and_vector_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            index_path = root / "index.faiss"
+            metadata_path = root / "metadata.jsonl"
+            manifest_path = root / "manifest.json"
+            model_path = root / "model"
+            index_path.write_bytes(b"index")
+            metadata_path.write_text(
+                json.dumps({"vector_id": 0, "filing_id": "f-1", "evidence_ids": ["ev-1"]}) + "\n",
+                encoding="utf-8",
+            )
+            manifest_path.write_text(json.dumps({
+                "status": "complete",
+                "model": "BAAI/bge-m3",
+                "model_revision": "5617a9f61b028005a4858fdac845db406aefb181",
+                "dimension": 1024,
+                "index": {"vector_count": 1},
+                "outputs": {
+                    "faiss_index": {"size_bytes": index_path.stat().st_size},
+                    "chunk_metadata": {"size_bytes": metadata_path.stat().st_size},
+                },
+            }), encoding="utf-8")
+            model_path.mkdir()
+
+            fake_index = type("IndexFlatIP", (), {"d": 1024, "ntotal": 1})()
+            fake_faiss = SimpleNamespace(__version__="1.15.0", read_index=lambda _: fake_index)
+            fake_numpy = SimpleNamespace(__version__="2.5.2")
+            fake_flag_embedding = SimpleNamespace(BGEM3FlagModel=lambda *_args, **_kwargs: object())
+            with patch.dict(sys.modules, {
+                "faiss": fake_faiss,
+                "numpy": fake_numpy,
+                "FlagEmbedding": fake_flag_embedding,
+            }):
+                runtime = DenseRuntime(
+                    index_path=index_path,
+                    metadata_path=metadata_path,
+                    manifest_path=manifest_path,
+                    offsets_path=root / "metadata.offsets.u64",
+                    filing_index_path=root / "filing.sqlite",
+                    model_path=model_path,
+                )
+
+            try:
+                identity = runtime.runtime_identity
+                self.assertEqual(identity["numpy_version"], "2.5.2")
+                self.assertEqual(identity["faiss_version"], "1.15.0")
+                self.assertEqual(identity["model"], "BAAI/bge-m3")
+                self.assertEqual(identity["model_revision"], "5617a9f61b028005a4858fdac845db406aefb181")
+                self.assertEqual(identity["dimension"], 1024)
+                self.assertEqual(identity["vector_count"], 1)
+                self.assertEqual(identity["index_type"], "IndexFlatIP")
+                self.assertEqual(identity["metric"], "inner_product")
+                self.assertTrue(identity["normalized"])
+            finally:
+                runtime.metadata.close()
 
 
 if __name__ == "__main__":

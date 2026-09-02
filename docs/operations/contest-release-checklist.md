@@ -1,9 +1,10 @@
 # Contest server release checklist
 
-Last updated: 2026-08-21 KST
+Last updated: 2026-09-02 KST
 
 This checklist records binary evidence without credentials or raw provider responses. `BLOCKED_EXTERNAL` means the local gate is defined but the required external resource is unavailable; it is not treated as a pass.
 `BLOCKED_LOCAL_RUNTIME` means a local runtime limitation prevented evidence collection; it is not treated as a pass.
+`BLOCKED_ENVIRONMENT` means the required local service or engine was unavailable; static or unit evidence must not be reported as image/runtime validation.
 
 | Item | Status | Evidence |
 |---|---|---|
@@ -15,11 +16,14 @@ This checklist records binary evidence without credentials or raw provider respo
 | Validated financial-fact seed coverage | PASS_SCOPE_LIMITED | Strict seed-to-audited-Gold match `8/8`, all trust tier `agent_audited`; exact question/fact ID, filing, value, scale, and evidence set; `corpus_wide_complete=false` |
 | Sparse retrieval Recall@20 | PASS_RECORDED | Existing FTS+RRF metric preserved at `13/17 = 0.7647058824`; complete-question recall `0.75`; MRR `0.3449449856`; no threshold was reduced |
 | Hybrid evidence retrieval | PASS | Requested K `20`, effective safe-bundle K `8`; same 17 targets recovered `17/17`; complete-question recall `1.0`; routes financial `8`, event `7`, text `2`; service errors, dependency failures, and residual targets `0` |
-| Dense embedding/vector pilot | DEFERRED_NO_EVIDENCE | Residual text targets `0`; no paid embedding call or dense manifest was created because the current Gold gate shows no eligible miss |
+| Main `[agent]` NumPy boundary | PASS_LOCAL_CONTRACT / BLOCKED_ENVIRONMENT | `agent` extra has no NumPy declaration and the main `Dockerfile` installs only `.[agent]`; Dense alone pins `numpy==2.5.2`. Focused artifact tests pass, but Docker engine was unavailable, so no Task 1 image package inventory was measured. |
+| Dense runtime identity contract | PASS_LOCAL_CONTRACT / BLOCKED_ENVIRONMENT | Allowlisted Python/NumPy/FAISS/model revision/vector dimension/count/index metric are identical in the atomic runtime manifest and Dense `/health`; existing health fields remain. Fake-runtime/API tests pass. No new Dense image or deployed health response was validated. |
+| Dense embedding/vector adoption | UNVERIFIED | Compose declares `2,571,506` vectors and prior staging observations reported full-corpus Dense use, but Task 1 did not remeasure artifact identity, Recall@20 gain, wrong issuer/version count, or p95. Dense is not release-adopted on configuration evidence alone. |
+| Sparse fallback | PASS_LOCAL_QUERY / UNVERIFIED_COLD_START | Missing index, invalid index, empty filtered result, and unavailable sidecar all preserve Sparse results in four focused tests. Compose still gates agent cold start on Dense `service_healthy`; restart/cold-start fallback is not yet demonstrated. |
 | PostgreSQL/pgvector/OpenSearch serving | DEFERRED_NO_EVIDENCE | SQLite remains attested SSOT/rollback; no serving sidecar or OpenSearch resource is justified by current residual evidence, provisioned, or claimed complete |
 | 300-case manifest | PASS | SHA-256 `1b014f0bfca75c8db6f6306dcdab80fff4cafb80dfb3709bf1e9d3bb8d8dd2a0`; fresh final provider-disabled run `20260819T174202Z-1b014f0bfca7`; `300/300` pass; evaluator error and all hard counters `0`; all four quality metrics `1.0`; p95 `5193.46ms`; failures `0` bytes; summary SHA-256 `3ab5b0a5823112157a4be4219883bcdba46f4f859d47f5fc2c65b8a0d73230ce` |
-| Full local regression | PASS | corpus-wide final run `304 passed, 1 skipped, 19 subtests passed`; compileall passed |
-| Frontend logic regression | PASS | history/API suites `16/16` passed with the bundled Node runtime |
+| Full local regression | PASS | Judge Stress V2 Task 1 run `543 passed, 2 skipped, 58 warnings, 74 subtests passed`; warnings are existing FastAPI `on_event` deprecations. |
+| Frontend logic regression | PASS | Current history/API suites `12/12` passed with Node `v24.14.0`. |
 | Wheel web assets | PASS | wheel SHA-256 `78056aee8b9d800dae964ae4624848ec05622a0adb922ff15afbe50f2e2e58f2`; `index.html`, `app.css`, `app.js`, `history.js`, `api.js` present (`5/5`) |
 | Local Docker image/UI smoke | PASS | Docker Engine `29.7.2`; image `sha256:c0adf3adcc07dfb09e2e0fdb8f235b973c1036592c5cc262d3760b6ac1721cd9`; container healthy; web/CSP and three query probes passed |
 | Local Docker request IDs | PASS | health `3029125d830a488ca62743bc4e0f71a3`; verified `84799fc1e0304306a9ee230d68ace408`; abstention `d5838369907941b4b0bb520eaea6e0b6`; injection `104d496d9b014b328720d37fe174b9ee` |
@@ -76,3 +80,5 @@ The previous local live overlay is preserved at `D:\mirae-asset-project\db\agent
 Local deterministic and corpus-wide financial hard gates: GO. Local and NCP atomic promotion: GO. Public API/UI, post-restart recovery, immutable-hash re-attestation, and GitHub publication: GO.
 
 Final contest submission: NO-GO until a rotated HyperCLOVA X credential passes the bounded schema/provider 300 gate. The public UI/`GET /answer`/restart checks, technical proposal, and API specification are complete; no external gate was relaxed.
+
+Judge Stress V2 Task 1: local dependency, manifest, health, and query-time fallback contracts are ready; Docker image/runtime validation is `BLOCKED_ENVIRONMENT` and remains a release gate.

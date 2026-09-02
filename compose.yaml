@@ -12,6 +12,7 @@ services:
       DENSE_OFFSETS_PATH: /runtime/dense_metadata.offsets.u64
       DENSE_FILING_INDEX_PATH: /runtime/dense_filing_vectors.sqlite
       DENSE_MODEL_PATH: /model
+      DENSE_RUNTIME_MANIFEST_PATH: /runtime/dense_runtime_manifest.json
     volumes:
       - "/srv/mirae/data/dense:/data/dense:ro"
       - "/srv/mirae/data/model/bge-m3:/model:ro"

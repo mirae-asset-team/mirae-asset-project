@@ -8,6 +8,7 @@ import json
 import mmap
 import os
 from pathlib import Path
+import platform
 import sqlite3
 import struct
 import sys
@@ -17,6 +18,36 @@ from typing import Any
 
 EXPECTED_MODEL = "BAAI/bge-m3"
 EXPECTED_MODEL_REVISION = "5617a9f61b028005a4858fdac845db406aefb181"
+RUNTIME_MANIFEST_SCHEMA_VERSION = "1.0.0"
+RUNTIME_IDENTITY_FIELDS = (
+    "runtime_manifest_schema_version",
+    "python_version",
+    "numpy_version",
+    "faiss_version",
+    "model",
+    "model_revision",
+    "dimension",
+    "vector_count",
+    "index_type",
+    "metric",
+    "normalized",
+)
+
+
+def _public_runtime_identity(runtime: object) -> dict[str, object]:
+    identity = getattr(runtime, "runtime_identity")
+    return {name: identity[name] for name in RUNTIME_IDENTITY_FIELDS}
+
+
+def _write_runtime_manifest(path: Path, identity: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    os.replace(temporary, path)
 
 
 class JsonlOffsetIndex:
@@ -243,6 +274,19 @@ class DenseRuntime:
         self.model_revision = str(manifest["model_revision"])
         self.vector_count = vector_count
         self.dimension = dimension
+        self.runtime_identity = {
+            "runtime_manifest_schema_version": RUNTIME_MANIFEST_SCHEMA_VERSION,
+            "python_version": platform.python_version(),
+            "numpy_version": str(np.__version__),
+            "faiss_version": str(faiss.__version__),
+            "model": EXPECTED_MODEL,
+            "model_revision": self.model_revision,
+            "dimension": self.dimension,
+            "vector_count": self.vector_count,
+            "index_type": type(self.index).__name__,
+            "metric": "inner_product",
+            "normalized": True,
+        }
         self._lock = threading.Lock()
 
     def search(
@@ -296,7 +340,11 @@ class DenseRuntime:
         ]
 
 
-def create_app(runtime: DenseRuntime | None = None):
+def create_app(
+    runtime: DenseRuntime | None = None,
+    *,
+    runtime_manifest_path: Path | None = None,
+):
     from fastapi import FastAPI
     from pydantic import BaseModel, Field
 
@@ -310,7 +358,7 @@ def create_app(runtime: DenseRuntime | None = None):
 
     @app.on_event("startup")
     def load_runtime() -> None:
-        holder["runtime"] = runtime or DenseRuntime(
+        active = runtime or DenseRuntime(
             index_path=Path(os.environ["DENSE_INDEX_PATH"]),
             metadata_path=Path(os.environ["DENSE_METADATA_PATH"]),
             manifest_path=Path(os.environ["DENSE_MANIFEST_PATH"]),
@@ -318,16 +366,19 @@ def create_app(runtime: DenseRuntime | None = None):
             filing_index_path=Path(os.environ["DENSE_FILING_INDEX_PATH"]),
             model_path=Path(os.environ["DENSE_MODEL_PATH"]),
         )
+        holder["runtime"] = active
+        configured_manifest_path = runtime_manifest_path
+        if configured_manifest_path is None and os.environ.get("DENSE_RUNTIME_MANIFEST_PATH", "").strip():
+            configured_manifest_path = Path(os.environ["DENSE_RUNTIME_MANIFEST_PATH"])
+        if configured_manifest_path is not None:
+            _write_runtime_manifest(configured_manifest_path, _public_runtime_identity(active))
 
     @app.get("/health")
     def health() -> dict[str, object]:
         active = holder["runtime"]
         return {
             "ready": True,
-            "model": EXPECTED_MODEL,
-            "model_revision": active.model_revision,
-            "dimension": active.dimension,
-            "vector_count": active.vector_count,
+            **_public_runtime_identity(active),
         }
 
     def search(payload: SearchRequest) -> dict[str, object]:

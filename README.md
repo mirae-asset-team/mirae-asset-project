@@ -8,7 +8,7 @@
 
 ## 현재 개발 상태와 인수인계
 
-> **2026-08-25 기준:** 재무계정 카탈로그, chunk-v1, BGE-M3/FAISS pilot 코드, Sparse/Dense/Hybrid retrieval, 5개 Tool Registry, Evidence Gate, HCX Function Calling V1.1, FastAPI runtime 연결과 팀용 Web까지 구현했습니다. 실제 NCP HCX smoke에서 `answered`, `answer_allowed=true`, citation과 DART `rcept_no` 보존을 확인했습니다. 현재 운영 검색은 안전한 Sparse/Structured 경로이며, 전체 corpus Dense embedding과 운영 runtime 연결은 아직 남아 있습니다.
+> **2026-09-02 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, HCX Function Calling V1.1, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결이 구현되어 있습니다. Compose에는 full-corpus Dense sidecar가 선언되어 있지만, 이번 Task 1에서는 Docker/NCP를 실행하거나 변경하지 않았습니다. 새 image의 Python/NumPy/FAISS/model/vector identity와 Dense Recall@20·issuer/version·p95 채택 gate는 아직 검증되지 않았습니다.
 
 ### 현재 한눈에 보기
 
@@ -17,33 +17,35 @@
 → POST /v1/hcx/function-answer
 → HCX가 등록된 Tool 선택
 → ToolRegistry가 argument 검증 후 Tool 실행
-→ EvidenceService / Sparse retrieval / read-only SQLite 조회
+→ EvidenceService / Sparse + 선택적 Dense retrieval / read-only SQLite 조회
 → Evidence 충분성과 실제 rcept_no 검증
 → answer_allowed=true인 경우에만 HCX 최종 답변 생성
 → backend가 검증된 citation과 접수번호를 Web에 반환
 ```
 
-| 영역 | 2026-08-25 상태 | 다음 작업 |
+| 영역 | 2026-09-02 상태 | 다음 작업 |
 |---|---|---|
-| 작업 브랜치 | `agent/financial-account-catalog-v1` | 이 브랜치에서 계속 작업 |
-| 최신 공유 커밋 | `84cbb22` | HCX V1.1·Web·문서 기준점으로 유지 |
+| 작업 브랜치 | `agent/judge-stress-v2` | Task별 독립 commit 유지 |
+| 기준 커밋 | `99893d4` | Judge Stress V2 Task 1 기준점 |
 | 재무계정 카탈로그 | 구현·테스트 완료 | 신규 계정 추가 시 중앙 카탈로그만 확장 |
 | Embedding Chunk v1 | XML/HTML/PDF, streaming, checkpoint/resume 구현 완료 | 전체 corpus 산출물의 manifest와 count 확인 |
-| Sparse 검색 | 운영 기본 경로, 기존 품질·metadata 정책 유지 | Dense 도입 후에도 fallback으로 유지 |
-| BGE-M3/FAISS | 실제 모델 builder와 10/100개 smoke 계약 구현 | 전체 corpus vector artifact 생성·검증 |
-| Hybrid retrieval | RRF, 중복 제거, filter, Sparse fallback 구현 | 전체 Dense 품질 gate 통과 후 runtime 주입 |
+| Sparse 검색 | 운영 안전 경로, query-time fallback 회귀 통과 | Dense 장애·재시작 평가에서 계속 hard gate로 확인 |
+| BGE-M3/FAISS | full-corpus sidecar와 identity 계약 구현; Compose vector count `2,571,506`은 선언값 | 새 image/runtime manifest와 실제 artifact identity 대조 |
+| Hybrid retrieval | remote Dense adapter, RRF, 중복 제거, filter, query-time Sparse fallback 구현 | cold start/restart fallback과 Dense 품질 gate 측정 |
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
 | HCX Function Calling | V1.1 실제 smoke 성공 | 운영 5종 질문 반복 smoke와 장애율 측정 |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
-| 테스트 | Python `486 passed, 2 skipped`; Web JS `12 passed` | Dense artifact 준비 후 skip된 통합 테스트 실행 |
+| 테스트 | Task 1 최종 Python `543 passed, 2 skipped`; Web JS `12 passed`; focused Dense/dependency/hybrid/client `34 passed, 1 skipped` | 새 image가 가능한 환경에서 container identity 검증 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
 ### 현재 품질 경계
 
-- 독립 free-form 기준선의 Sparse Recall@20은 `0.487179...`이며 목표 `0.95`보다 낮습니다.
-- residual text가 있어 Dense pilot 실행 자격은 있지만, 전체 Dense gain과 latency를 아직 측정하지 않았습니다.
-- 현재 Dense 상태는 `smoke_only`이고 Function Calling runtime에는 `HybridRetriever(sparse, None)`으로 주입됩니다.
-- 따라서 지금 서비스가 전체 corpus 의미 검색 성능을 확보했다고 주장하면 안 됩니다.
+- 기존 독립 free-form 평가의 Sparse Recall@20 `0.487179...`는 과거 기준선이며 이번 Task 1에서 재측정하지 않았습니다.
+- Compose/NCP 관측에는 full-corpus Dense가 연결되어 있지만, 새 identity contract가 포함된 image는 아직 build/deploy되지 않았습니다.
+- Dense 채택 조건인 Sparse 대비 Recall@20 `+5%p`, wrong issuer/version `0`, p95 `2초` 이하는 모두 `UNVERIFIED`입니다. 따라서 전체 corpus 의미 검색 성능을 확보했다고 주장하지 않습니다.
+- missing/invalid/empty Dense 결과와 sidecar 통신 실패는 로컬 회귀에서 Sparse로 fallback합니다. 다만 Compose의 agent cold start는 현재 Dense `service_healthy`에 의존하므로 cold-start fallback은 `UNVERIFIED`입니다.
+- `[agent]` extra와 기본 `Dockerfile`에는 NumPy를 선언하지 않고, `Dockerfile.dense`가 설치하는 `[dense]` extra에만 `numpy==2.5.2`를 고정했습니다. Docker engine을 사용할 수 없어 실제 image package inventory는 `BLOCKED_ENVIRONMENT`입니다.
+- Dense startup은 allowlist된 Python/NumPy/FAISS/model revision/vector count·dimension/index metric을 `/runtime/dense_runtime_manifest.json`과 sidecar `/health`에 동일하게 기록합니다. 기존 health 필드는 유지됩니다.
 - 원본 base DB, overlay, search SQLite는 계속 read-only로 유지합니다.
 - HCX credential, `.env`, SQLite, chunk JSONL, FAISS index와 모델 파일은 Git에 올리지 않습니다.
 
@@ -51,7 +53,7 @@
 
 ```powershell
 git fetch origin
-git switch agent/financial-account-catalog-v1
+git switch agent/judge-stress-v2
 git pull --ff-only
 $env:PYTHONPATH = 'src'
 .\.venv\Scripts\python.exe -m pytest -q
@@ -180,8 +182,9 @@ read-only SafeSearch를 재사용해 5개 Tool Registry를 조립합니다. 기�
 실제 local credential로 5개 Function schema, HCX Tool Call, Registry argument schema 호환 smoke는
 통과했습니다. NCP의 Sparse/Structured 실제 smoke에서도 `answered`, `answer_allowed=true`, 구조화된
 `citations[].rcept_no` 보존을 확인했습니다.
-Dense도 여전히 100개 `smoke_only`이고
-전체 embedding artifact는 준비되지 않았습니다. 상세 계약은
+현재 runtime composition은 환경에 Dense URL이 있으면 remote full-corpus sidecar를 사용하고,
+query-time Dense 실패에는 Sparse 결과를 유지합니다. Task 1의 runtime manifest/health identity는 로컬 계약만
+검증됐고 새 Docker image 및 NCP runtime에서는 아직 확인하지 않았습니다. 상세 계약은
 [Tool Registry v1](docs/tool-registry-v1.md)과
 [HCX Function Calling 설계](docs/superpowers/specs/2026-08-23-hcx-function-calling-design.md)를 따릅니다.
 

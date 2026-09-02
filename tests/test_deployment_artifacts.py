@@ -1,8 +1,21 @@
 import unittest
 from pathlib import Path
+import tomllib
 
 
 class DeploymentArtifactTests(unittest.TestCase):
+    def test_numpy_is_pinned_for_the_dense_image_and_absent_from_the_agent_image(self):
+        project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+        extras = project["project"]["optional-dependencies"]
+        self.assertIn("numpy==2.5.2", extras["dense"])
+        self.assertFalse(any(item.casefold().startswith("numpy") for item in extras["agent"]))
+
+        agent_dockerfile = Path("Dockerfile").read_text(encoding="utf-8").casefold()
+        dense_dockerfile = Path("Dockerfile.dense").read_text(encoding="utf-8").casefold()
+        self.assertIn('".[agent]"', agent_dockerfile)
+        self.assertNotIn("numpy", agent_dockerfile)
+        self.assertIn('".[dense]"', dense_dockerfile)
+
     def test_compose_mounts_databases_read_only_and_has_healthcheck(self):
         text = Path("compose.yaml").read_text(encoding="utf-8")
         self.assertIn("/data/base/disclosure.sqlite:ro", text)
@@ -17,6 +30,7 @@ class DeploymentArtifactTests(unittest.TestCase):
         compose = Path("compose.yaml").read_text(encoding="utf-8")
         example = Path(".env.example").read_text(encoding="utf-8")
         dense_dockerfile = Path("Dockerfile.dense").read_text(encoding="utf-8")
+        self.assertIn("DENSE_RUNTIME_MANIFEST_PATH: /runtime/dense_runtime_manifest.json", compose)
         for name, value in (
             ("DISCLOSURE_DENSE_TIMEOUT_SECONDS", "5"),
             ("DISCLOSURE_DENSE_VECTOR_COUNT", "2571506"),
