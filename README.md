@@ -12,6 +12,8 @@
 
 > **2026-09-03 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, bounded analysis, 주장 단위 검증, HCX Function Calling V1.1, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결이 구현되어 있습니다. Judge Stress V2의 tracked 코드는 개발 480건만 생성하고, 전체 600건 검증에는 별도 git-ignored private holdout 120건을 요구합니다. 로컬 contract harness는 앱·provider를 호출하지 않으므로 해당 480건 통과를 앱 품질로 해석하면 안 됩니다. 통합 release gate는 누락·stale·비유한 지표, 원시 결과 불일치, identity 불일치와 변조된 PASS 보고서를 fail-closed로 거부합니다.
 
+> **2026-09-03 정형 응답 QA 보완:** HCX credential이 없거나 provider가 일시 중단돼도 결정론적으로 라우팅할 수 있는 재무 수치·기업 비교·기간 증감 질문은 read-only SQLite의 검증된 fact와 citation으로 답합니다. HCX는 이 경로의 도구 선택·계산에 관여하지 않으며, 서버가 만든 답변도 주장 단위 숫자·계산·evidence 검증을 모두 통과해야 노출됩니다. 실제 DB 8종 QA에서 삼성전자 최신값, 에스엠 alias, 다중 지표, 다중 기업, 기간 차이/증가율과 세 가지 안전 거절을 확인했습니다. 이는 private holdout/provider/Dense release gate를 대체하지 않으며, 8001은 외부 health timeout 상태라 배포하지 않았습니다.
+
 ### 현재 한눈에 보기
 
 ```text
@@ -35,9 +37,9 @@
 | BGE-M3/FAISS | full-corpus sidecar와 identity 계약 구현; Compose vector count `2,571,506`은 선언값 | 새 image/runtime manifest와 실제 artifact identity 대조 |
 | Hybrid retrieval | remote Dense adapter, RRF, 중복 제거, filter, query-time Sparse fallback 구현 | cold start/restart fallback과 Dense 품질 gate 측정 |
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
-| HCX Function Calling | V1.1 실제 smoke 성공 | 운영 5종 질문 반복 smoke와 장애율 측정 |
+| HCX Function Calling | V1.1 및 providerless 검증 정형 fallback 구현 | 운영 provider 문장화와 fallback을 각각 반복 smoke |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
-| 테스트 | Task 8 focused `181 passed, 94 subtests`; 전체 Python `868 passed, 2 skipped, 240 subtests`; Web JS `12 passed` | private/provider 600건과 실제 staging identity 평가 |
+| 테스트 | 최신 전체 Python `873 passed, 2 skipped, 240 subtests`; Web JS `12 passed` | private/provider 600건과 실제 staging identity 평가 |
 | Release gate | `BLOCKED_HARD_GATE` (34개 사유) | 차단 사유를 해소한 동일 입력으로만 재평가; 임계값 완화 금지 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 

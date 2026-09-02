@@ -979,6 +979,162 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertFalse(result.answer_allowed)
         self.assertEqual(hybrid.calls, [])
 
+    def test_unconfigured_client_serves_grounded_financial_fact_without_network(self) -> None:
+        registry = StaticRegistry(_financial_response([("2025", "333605938")]))
+
+        def forbidden_urlopen(*_args: object, **_kwargs: object) -> object:
+            raise AssertionError("network must not be called for a structured financial fact")
+
+        client = HyperClovaFunctionClient(env={}, urlopen=forbidden_urlopen)
+        service = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자의 최근 사업보고서 기준 매출액을 알려줘")
+
+        self.assertEqual(result.status, "answered")
+        self.assertTrue(result.answer_allowed)
+        self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts"])
+        self.assertEqual(result.citation_ids, ["ev-fin-1"])
+        self.assertIn("333,605,938원", result.answer)
+        self.assertFalse(result.metadata["provider_configured"])
+        self.assertFalse(result.metadata["tool_selection_called"])
+        self.assertFalse(result.metadata["final_generation_called"])
+
+    def test_unconfigured_client_resolves_reviewed_company_alias_before_financial_lookup(self) -> None:
+        response = _financial_response([("2025", "2649870246")])
+        response["data"]["facts"][0]["company_identifiers"] = {"company": "에스엠"}
+        response["evidence_bundle"]["covered_scope"] = {
+            "company": ["에스엠"],
+            "account": ["매출액"],
+        }
+        registry = StaticRegistry(response)
+        client = HyperClovaFunctionClient(env={})
+        service = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["에스엠"]),
+        )
+
+        result = service.answer("SM엔터테인먼트의 최근 사업보고서 기준 매출액을 알려줘")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(registry.calls[0][1]["company"], "에스엠")
+        self.assertIn("alias:sm엔터테인먼트->에스엠", result.metadata["question_corrections"])
+        self.assertIn("2,649,870,246원", result.answer)
+        self.assertFalse(result.metadata["final_generation_called"])
+
+    def test_unconfigured_client_reports_missing_structured_evidence_not_provider_failure(self) -> None:
+        registry = PeriodFinancialRegistry({})
+        client = HyperClovaFunctionClient(env={})
+        service = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자 2025년 매출액을 알려줘")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts"])
+        self.assertIn("answer_generation_blocked_by_sufficiency", result.warnings)
+        self.assertNotIn("hcx_api_key_not_configured", result.warnings)
+
+    def test_unconfigured_client_serves_latest_multi_metric_financial_facts(self) -> None:
+        class LatestMetricRegistry:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, object]]] = []
+
+            def list_tools(self) -> list[dict[str, object]]:
+                return []
+
+            def dispatch(self, name: str, arguments: object) -> dict[str, object]:
+                request = dict(arguments)  # type: ignore[arg-type]
+                self.calls.append((name, request))
+                account = str(request["account"])
+                value = "333605938" if account == "매출액" else "43601051"
+                response = _financial_response([("2025", value)], account)
+                suffix = "revenue" if account == "매출액" else "operating-income"
+                evidence_id = f"ev-{suffix}"
+                receipt = "20250318000001"
+                response["data"]["facts"][0].update({
+                    "financial_fact_id": f"ff-{suffix}",
+                    "evidence_ids": [evidence_id],
+                })
+                response["evidence_bundle"]["items"][0].update({
+                    "evidence_id": evidence_id,
+                    "evidence_ids": [evidence_id],
+                    "filing_id": receipt,
+                    "rcept_no": receipt,
+                })
+                response["evidence_bundle"]["covered_scope"] = {
+                    "company": ["삼성전자"],
+                    "account": [account],
+                }
+                response["evidence_bundle"]["evidence_ids"] = [evidence_id]
+                response["evidence_bundle"]["filing_ids"] = [receipt]
+                return response
+
+        registry = LatestMetricRegistry()
+        client = HyperClovaFunctionClient(env={})
+        service = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer(
+            "삼성전자의 최근 사업보고서 기준 매출액과 영업이익을 근거와 함께 알려줘"
+        )
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(
+            [call[1]["account"] for call in registry.calls],
+            ["매출액", "영업이익"],
+        )
+        self.assertIn("매출액", result.answer)
+        self.assertIn("333,605,938원", result.answer)
+        self.assertIn("영업이익", result.answer)
+        self.assertIn("43,601,051원", result.answer)
+        self.assertEqual(
+            result.citation_ids,
+            ["ev-revenue", "ev-operating-income"],
+        )
+        self.assertEqual(len(result.citations), 1)
+        self.assertEqual(result.citations[0]["rcept_no"], "20250318000001")
+        self.assertEqual(
+            result.metadata["claim_support"][0]["citation_ids"],
+            ["ev-revenue", "ev-operating-income"],
+        )
+        self.assertFalse(result.metadata["final_generation_called"])
+
+    def test_unconfigured_client_serves_verified_financial_difference_and_growth(self) -> None:
+        registry = PeriodFinancialRegistry({
+            ("삼성전자", "2023"): "6566976000000",
+            ("삼성전자", "2025"): "43601051000000",
+        })
+        client = HyperClovaFunctionClient(env={})
+        service = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자 2023년과 2025년 영업이익 차이를 알려줘")
+
+        self.assertEqual(result.status, "answered")
+        self.assertTrue(result.answer_allowed)
+        self.assertIn("37조 340억 7,500만 원", result.answer)
+        self.assertIn("563.94%", result.answer)
+        self.assertEqual(
+            result.metadata["verification_trace"]["checks"][2],
+            {"check": "numeric_values", "status": "passed"},
+        )
+        self.assertFalse(result.metadata["final_generation_called"])
+
     def test_concrete_adapter_uses_documented_openai_compatible_tool_messages(self) -> None:
         opener = FakeUrlOpen([
             {

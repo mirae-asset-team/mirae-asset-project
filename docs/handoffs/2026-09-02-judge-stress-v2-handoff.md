@@ -6,6 +6,10 @@
 
 > 2026-09-03 Task 8 갱신: 원시 결과 재계산, 변조 방지, all-citation 검증, 동시성/보안 카운터, freshness와 외부 trust anchor를 하나의 gate로 통합했다. 배포는 Git archive 기반 pre-stage→8001 실제 평가→최종 gate→별도 8000 승격의 두 단계다. PASS 보고서도 27개 metric을 독립 검증하고, traversal·rollback 부재·image/mount/health identity 불일치를 fail-closed로 거부한다. 반복 독립 재리뷰에서 발견된 상위 집계, raw latency, provider 실행표지와 untracked build-input 우회를 모두 닫았고 focused `181 passed, 94 subtests`, 전체 Python `868 passed, 2 skipped, 240 subtests`를 통과했다.
 
+> 2026-09-03 정형 응답 QA 갱신: provider 미설정 상태의 결정론적 재무 route가 Tool 실행 전에 `provider_unavailable`로 끝나던 결함을 수정했다. 검증된 fact, 다중 지표, 다중 기업, 기간 차이·증가율은 read-only DB에서 계산하고 claim verifier를 통과한 경우에만 답한다. 같은 공시의 여러 evidence ID는 주장 검증에는 모두 보존하되 사용자 citation 카드는 접수번호로 중복 제거한다. 실제 DB 8종 QA는 모두 기대 상태를 확인했고 8001 `/health`는 10초 timeout이므로 배포는 계속 차단했다.
+
+> 위 QA 보완 후 전체 Python 회귀는 `873 passed, 2 skipped, 240 subtests`다. 정확한 인계 커밋은 이 브랜치의 최신 `git log -1 --oneline`을 기준으로 한다.
+
 > 2026-09-03 갱신: Task 5 첫 커밋은 독립 리뷰에서 거절되었고 후속 fixup에서 다섯 blocker와 Docker build-context 결함을 TDD로 수정했다. 현재 tracked 평가 결과가 ADOPTED가 아니므로 Dense는 의도적으로 비활성이고 Sparse가 안전 경로다. Task 6의 claim-level verification은 별도 미추적 작업으로 분리되어 있으며 이 Task 5 fixup에 포함하지 않는다.
 
 ## Task 5 fixup 경계

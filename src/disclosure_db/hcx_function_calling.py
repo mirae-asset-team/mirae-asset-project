@@ -797,10 +797,16 @@ class HcxFunctionCallingService:
 
     @staticmethod
     def _calculation_payload(result: object) -> dict[str, object]:
+        value = str(getattr(result, "value"))
+        unit = getattr(result, "unit")
+        display_value = format_financial_value(value, 1, unit)
+        if display_value is None and unit == "%":
+            display_value = f"{Decimal(value):.2f}%"
         return {
             "operation": str(getattr(result, "operation")),
-            "value": str(getattr(result, "value")),
-            "unit": getattr(result, "unit"),
+            "value": value,
+            "display_value": display_value,
+            "unit": unit,
             "evidence_ids": list(getattr(result, "evidence_ids")),
             "operands": [str(item) for item in getattr(result, "operands")],
         }
@@ -886,7 +892,11 @@ class HcxFunctionCallingService:
             safe_ids = list(available_evidence_ids)
         comparison = data.get("comparison")
         if isinstance(comparison, Mapping) and comparison.get("status") == "complete":
-            return self._deterministic_financial_comparison_answer(safe_response, safe_ids)
+            comparison_answer = self._deterministic_financial_comparison_answer(
+                safe_response, safe_ids,
+            )
+            if comparison_answer is not None:
+                return comparison_answer
         if isinstance(data.get("facts"), list) and data["facts"]:
             return self._deterministic_financial_answer(safe_response, safe_ids)
         if data.get("total_count") is not None or (
@@ -1743,7 +1753,7 @@ class HcxFunctionCallingService:
             )
 
         tool_selection_called = analysis_execution is None and route is None
-        if not self.client.configured:
+        if not self.client.configured and route is None:
             analysis_response = (
                 analysis_execution.to_tool_response()
                 if analysis_execution is not None
@@ -1898,6 +1908,111 @@ class HcxFunctionCallingService:
             return self._result(
                 "abstained", UNANSWERABLE_TEXT,
                 warnings=["answer_generation_blocked_by_incomplete_correction_receipts"], **common,
+            )
+
+        if not self.client.configured:
+            admission = build_claim_admission(tool_response)
+            fallback = self._deterministic_claim_fallback(
+                tool_response,
+                admission,
+                tuple(available_citations),
+                route,
+            )
+            if fallback is None:
+                common["recommended_action"] = "abstain"
+                return self._result(
+                    "abstained",
+                    UNANSWERABLE_TEXT,
+                    warnings=["deterministic_fallback_not_available"],
+                    **common,
+                )
+            citations = self._selected_citations(
+                tool_call.name,
+                fallback.citation_ids,
+                available_citations,
+            )
+            citation_ids = tuple(dict.fromkeys(
+                evidence_id
+                for evidence_id in fallback.citation_ids
+                if evidence_id in available_citations
+            ))
+            selected_facts = {
+                fact_ref: fact
+                for fact_ref, fact in admission.facts.items()
+                if set(fact.evidence_ids).issubset(set(citation_ids))
+            }
+            selected_calculations = {
+                calculation_ref: calculation
+                for calculation_ref, calculation in admission.calculations.items()
+                if set(calculation.evidence_ids).issubset(set(citation_ids))
+            }
+            owned_slots = tuple(dict.fromkeys(
+                slot_id
+                for item in (*selected_facts.values(), *selected_calculations.values())
+                for slot_id in item.evidence_slot_ids
+            ))
+            fallback_claim = HcxAnswerClaim(
+                "deterministic-fallback-1",
+                fallback.answer,
+                citation_ids,
+                tuple(selected_facts),
+                tuple(selected_calculations),
+                owned_slots,
+                tuple(dict.fromkeys(
+                    [
+                        value
+                        for fact in selected_facts.values()
+                        for value in fact.numeric_values
+                    ] + [
+                        value
+                        for calculation in selected_calculations.values()
+                        for value in calculation.numeric_values
+                    ]
+                )),
+            )
+            limitations = (
+                "historical_disclosure_only",
+                "no_transaction_recommendation",
+                "no_forecast",
+                "provider_unavailable_deterministic_fallback",
+            )
+            verification = verify_generated_claims(
+                answer=fallback.answer,
+                citation_ids=citation_ids,
+                raw_claims=(fallback_claim,),
+                raw_limitations=limitations,
+                admission=admission,
+            )
+            if not verification.verified or not citations:
+                common["recommended_action"] = "abstain"
+                common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
+                    (), limitations, verification.trace("abstained"),
+                ))
+                return self._result(
+                    "abstained",
+                    UNANSWERABLE_TEXT,
+                    warnings=[
+                        "deterministic_fallback_verification_failed",
+                        *verification.failure_codes,
+                    ],
+                    **common,
+                )
+            common["metadata"].update({  # type: ignore[union-attr]
+                "execution_mode": "deterministic",
+                **self._claim_metadata(
+                    verification.claims,
+                    verification.limitations,
+                    verification.trace("fallback"),
+                ),
+            })
+            return self._result(
+                "answered",
+                self._render_answer(fallback.answer, citations),
+                answer_allowed=True,
+                citation_ids=list(citation_ids),
+                citations=[item.to_dict() for item in citations],
+                warnings=["provider_unavailable_deterministic_fallback"],
+                **common,
             )
 
         common["metadata"]["final_generation_called"] = True  # type: ignore[index]

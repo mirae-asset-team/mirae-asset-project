@@ -183,6 +183,7 @@ class AdmittedCalculation:
     operands: tuple[str, ...]
     evidence_ids: tuple[str, ...]
     evidence_slot_ids: tuple[str, ...]
+    numeric_values: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +219,7 @@ class ClaimAdmission:
                     "operands": list(calculation.operands),
                     "evidence_ids": list(calculation.evidence_ids),
                     "evidence_slot_ids": list(calculation.evidence_slot_ids),
+                    "numeric_values": list(calculation.numeric_values),
                 }
                 for calculation in self.calculations.values()
             ],
@@ -345,6 +347,7 @@ def build_claim_admission(tool_response: Mapping[str, object]) -> ClaimAdmission
             tuple(str(item) for item in parsed_operands),
             ids,
             owned,
+            _numeric_tokens(value),
         )
     return ClaimAdmission(
         evidence_ids=evidence_ids,
@@ -448,9 +451,11 @@ def verify_generated_claims(
                 ))
                 continue
             support_evidence.update(calculation.evidence_ids)
-            calculated = _decimal(calculation.value)
-            if calculated is not None:
-                grounded_numbers.add(calculated)
+            grounded_numbers.update(
+                number
+                for value in calculation.numeric_values
+                if (number := _decimal(value)) is not None
+            )
         if not support_evidence.issubset(citations) or not support_evidence.issubset(slot_ids):
             reasons.append("evidence_slot_mismatch")
             categories["evidence_slots"].append("evidence_slot_mismatch")
