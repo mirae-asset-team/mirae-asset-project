@@ -195,6 +195,35 @@ class DeterministicQuestionRouter:
                     corrections.append(f"alias:{observed.casefold()}->{canonical}")
         return normalized, tuple(dict.fromkeys(corrections))
 
+    def _collapse_spaced_companies(self, text: str) -> tuple[str, tuple[str, ...]]:
+        """Collapse whitespace inserted inside a registered company surface.
+
+        Token-based typo repair cannot see '삼 성 전 자' because every token
+        shrinks below the minimum match length, so spaced variants must be
+        repaired on the raw text before alias and typo normalization.
+        """
+        normalized = text
+        corrections: list[str] = []
+        surfaces = sorted(
+            {
+                surface
+                for canonical, aliases in self.company_aliases.items()
+                for surface in (canonical, *aliases)
+            } | set(self.company_candidates),
+            key=len,
+            reverse=True,
+        )
+        for company in surfaces:
+            if len(company.replace(" ", "")) < 3 or company in normalized:
+                continue
+            pattern = re.compile(r"[ \t]*".join(re.escape(character) for character in company if character != " "))
+            match = pattern.search(normalized)
+            if match is None or " " not in match.group(0) and "\t" not in match.group(0):
+                continue
+            normalized = normalized[: match.start()] + company + normalized[match.end():]
+            corrections.append(f"spacing:{match.group(0)}->{company}")
+        return normalized, tuple(corrections)
+
     def _companies_in_text(self, text: str) -> tuple[str, ...]:
         matches = [
             (text.find(company), -len(company), company)
@@ -232,7 +261,8 @@ class DeterministicQuestionRouter:
         return text.replace(core, replacement, 1), f"{core}->{replacement}"
 
     def _normalize_typos(self, text: str) -> tuple[str, tuple[str, ...]]:
-        normalized, alias_corrections = self._normalize_company_aliases(text)
+        normalized, spacing_corrections = self._collapse_spaced_companies(text)
+        normalized, alias_corrections = self._normalize_company_aliases(normalized)
         company_surfaces = tuple(
             (normalize_account_text(company), company, company)
             for company in self.company_candidates
@@ -245,6 +275,7 @@ class DeterministicQuestionRouter:
         else:
             account_correction = None
         return normalized, tuple([
+            *spacing_corrections,
             *alias_corrections,
             *(item for item in (company_correction, account_correction) if item),
         ])
