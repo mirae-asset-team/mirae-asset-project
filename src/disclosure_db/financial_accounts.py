@@ -236,6 +236,7 @@ class FinancialAccountCatalog:
         for account in self.accounts:
             surfaces = (
                 ("exact_label", account.label_ko),
+                ("exact_alias", account.label_en),
                 *(("exact_alias", alias) for alias in account.aliases),
                 *(("typo_alias", alias) for alias in account.typo_aliases),
             )
