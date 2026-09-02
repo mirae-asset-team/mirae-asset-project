@@ -110,13 +110,19 @@ def build_bank(companies: list[dict]) -> list[dict]:
     for index, company in enumerate(companies):
         name = company["listed_name"]
         slug = company["stock_code"] or f"i{index}"
+        # Bank holdings and insurers publish net-presentation income statements
+        # without a 매출액/영업수익 top line, so a grounded abstention is a
+        # correct answer for income-statement lookups there.
+        financial_sector = company.get("industry") == "금융"
+        revenue_expected = "answer_or_grounded_abstention" if financial_sector else "answer"
         for account in STRUCTURED_ACCOUNTS:
-            add(f"{slug}-lk-{account}", name, "financial_lookup", "answer",
+            add(f"{slug}-lk-{account}", name, "financial_lookup",
+                revenue_expected if account == "매출액" else "answer",
                 f"{name}의 2025년 연결 {account}은 얼마인가요?", scale_check=True,
                 group=f"{slug}-rev" if account == "매출액" else None)
-        add(f"{slug}-para1", name, "paraphrase", "answer",
+        add(f"{slug}-para1", name, "paraphrase", revenue_expected,
             f"{name} 2025 회계연도 연결 기준 매출액을 알려줘.", group=f"{slug}-rev", scale_check=True)
-        add(f"{slug}-para2", name, "paraphrase", "answer",
+        add(f"{slug}-para2", name, "paraphrase", revenue_expected,
             f"2025년에 {name}이 기록한 연결 매출액이 얼마였는지 알려주세요.", group=f"{slug}-rev", scale_check=True)
         add(f"{slug}-sep", name, "scope_separate", "answer_or_grounded_abstention",
             f"{name}의 2025년 별도 매출액은 얼마인가요?", scale_check=True)
@@ -135,7 +141,7 @@ def build_bank(companies: list[dict]) -> list[dict]:
                 f"{name}의 최근 정정공시에서 무엇이 정정되었나요?")
         spaced = " ".join(name)
         if spaced != name:
-            add(f"{slug}-space", name, "robust_spacing", "answer",
+            add(f"{slug}-space", name, "robust_spacing", revenue_expected,
                 f"{spaced} 의 2025년 연결 매출액은 얼마인가요?", group=f"{slug}-rev", scale_check=True)
         add(f"{slug}-eng", name, "robust_english", "answer_or_abstain",
             f"{name}의 FY2025 연결 revenue는 얼마인가요?")
