@@ -8,9 +8,9 @@
 
 ## 현재 개발 상태와 인수인계
 
-> **Judge Stress V2 인수인계:** Task 1~7의 로컬 구현과 회귀가 완료되었습니다. Task 7 보고서는 실제 앱 정확도가 아닌 `ContractJudgeRuntime` 평가 계약 하네스의 development 480건 검사 결과입니다. private holdout과 staging provider가 없어 `PARTIAL / BLOCKED`이며, Task 8 배포 gate는 시작하지 않았습니다. 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)를 읽고 private/provider 평가부터 진행하세요.
+> **Judge Stress V2 인수인계:** Task 1~8의 로컬 구현과 회귀가 완료되었습니다. Task 8은 원시 case 결과를 재검산하는 통합 release gate와 동일-image 8001→8000 배포/rollback 절차를 구현했지만, 현재 판정은 의도적으로 `BLOCKED_HARD_GATE`입니다. private holdout·실제 staging/provider·신뢰 앵커가 없고 Sparse Recall@20이 `0.487179... < 0.95`이므로 운영 승격은 실행하지 않았습니다. 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)를 읽고 차단 항목을 해소한 뒤 같은 gate를 다시 실행하세요.
 
-> **2026-09-03 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, bounded analysis, 주장 단위 검증, HCX Function Calling V1.1, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결이 구현되어 있습니다. Judge Stress V2의 tracked 코드는 개발 480건만 생성하고, 전체 600건 검증에는 별도 git-ignored private holdout 120건을 요구합니다. 로컬 contract harness는 앱·provider를 호출하지 않으므로 해당 480건 통과를 앱 품질로 해석하면 안 됩니다. 새 image의 Python/NumPy/FAISS/model/vector identity와 Dense Recall@20·issuer/version·p95 채택 gate도 아직 검증되지 않았습니다.
+> **2026-09-03 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, bounded analysis, 주장 단위 검증, HCX Function Calling V1.1, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결이 구현되어 있습니다. Judge Stress V2의 tracked 코드는 개발 480건만 생성하고, 전체 600건 검증에는 별도 git-ignored private holdout 120건을 요구합니다. 로컬 contract harness는 앱·provider를 호출하지 않으므로 해당 480건 통과를 앱 품질로 해석하면 안 됩니다. 통합 release gate는 누락·stale·비유한 지표, 원시 결과 불일치, identity 불일치와 변조된 PASS 보고서를 fail-closed로 거부합니다.
 
 ### 현재 한눈에 보기
 
@@ -28,7 +28,7 @@
 | 영역 | 2026-09-02 상태 | 다음 작업 |
 |---|---|---|
 | 작업 브랜치 | `agent/judge-stress-v2` | Task별 독립 commit 유지 |
-| Task 7 기준 커밋 | `75ae106` | Task 6 최종 재리뷰 승인 후 Task 7 시작점 |
+| Task 8 기준 커밋 | 커밋 전 기준 `0e4e5b3` | 이 README와 같은 브랜치의 최신 커밋이 최종 기준 |
 | 재무계정 카탈로그 | 구현·테스트 완료 | 신규 계정 추가 시 중앙 카탈로그만 확장 |
 | Embedding Chunk v1 | XML/HTML/PDF, streaming, checkpoint/resume 구현 완료 | 전체 corpus 산출물의 manifest와 count 확인 |
 | Sparse 검색 | 운영 안전 경로, query-time fallback 회귀 통과 | Dense 장애·재시작 평가에서 계속 hard gate로 확인 |
@@ -37,7 +37,8 @@
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
 | HCX Function Calling | V1.1 실제 smoke 성공 | 운영 5종 질문 반복 smoke와 장애율 측정 |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
-| 테스트 | Task 7+legacy stress `61 passed`; 전체 Python `706 passed, 2 skipped, 146 subtests`; Web JS `12 passed` | private/provider 평가와 Task 8 release gate |
+| 테스트 | Task 8 focused `136 passed, 177 subtests`; 전체 Python `823 passed, 2 skipped, 323 subtests`; Web JS `12 passed` | private/provider 600건과 실제 staging identity 평가 |
+| Release gate | `BLOCKED_HARD_GATE` (34개 사유) | 차단 사유를 해소한 동일 입력으로만 재평가; 임계값 완화 금지 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
 ### 현재 품질 경계

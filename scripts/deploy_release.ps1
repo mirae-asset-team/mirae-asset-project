@@ -10,16 +10,13 @@ param(
     [string]$ReleaseGatePath = "",
     [string]$KeyPath = "",
     [string]$RemoteDirectory = "/srv/mirae/releases",
-    [string]$ArtifactDirectory = ""
+    [string]$RollbackDirectory = "/srv/mirae/rollback"
 )
 
 $ErrorActionPreference = "Stop"
 $repository = Split-Path -Parent $PSScriptRoot
 if (-not $ReleaseGatePath) {
     $ReleaseGatePath = Join-Path $repository "data/derived/release_gate_summary.json"
-}
-if (-not $ArtifactDirectory) {
-    $ArtifactDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "mirae-release-artifacts"
 }
 
 function Assert-LastExitCode([string]$Step) {
@@ -257,20 +254,54 @@ function Assert-ReleaseGateReport {
 }
 
 function Invoke-RemoteScript {
-    param([string]$Target, [string]$ScriptText, [string]$Arguments, [string]$PrivateKeyPath)
+    param([string]$Target, [string]$ScriptText, [string]$Arguments, [string]$PrivateKeyPath, [string]$Step)
     if ($PrivateKeyPath) {
         $ScriptText | & ssh -i $PrivateKeyPath $Target $Arguments
     }
     else {
         $ScriptText | & ssh $Target $Arguments
     }
-    Assert-LastExitCode "remote staging deployment"
+    Assert-LastExitCode $Step
+}
+
+function Invoke-Rollback {
+    param(
+        [string]$Target,
+        [string]$CandidateDirectory,
+        [string]$RollbackTag,
+        [string]$PrivateKeyPath
+    )
+    $rollbackScript = @'
+set -euo pipefail
+candidate_dir="$1"
+rollback_ref="$2"
+cd "$candidate_dir"
+if ! docker image inspect "$rollback_ref" >/dev/null 2>&1; then
+    printf '%s\n' "rollback image is absent: $rollback_ref" >&2
+    exit 41
+fi
+export DISCLOSURE_RELEASE_IMAGE="$rollback_ref"
+export DISCLOSURE_EXPECTED_COMMIT="rollback"
+docker compose -p mirae-release -f compose.release.yaml up -d --no-build --no-deps disclosure-agent
+container="$(docker compose -p mirae-release -f compose.release.yaml ps -q disclosure-agent)"
+test -n "$container"
+rollback_image_id="$(docker image inspect --format '{{.Id}}' "$rollback_ref")"
+test -n "$rollback_image_id"
+active_image_id="$(docker inspect --format '{{.Image}}' "$container")"
+test -n "$active_image_id"
+test "$active_image_id" = "$rollback_image_id"
+curl --fail --silent --show-error http://127.0.0.1:8000/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"]'
+curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8000/
+'@
+    $rollbackArguments = "bash -s -- '$CandidateDirectory' '$RollbackTag'"
+    Invoke-RemoteScript -Target $Target -ScriptText $rollbackScript -Arguments $rollbackArguments -PrivateKeyPath $PrivateKeyPath -Step "production rollback"
 }
 
 if ($ServerHost -notmatch '^[A-Za-z0-9.-]+$' -or $SshUser -notmatch '^[A-Za-z0-9._-]+$') {
     throw "ServerHost or SshUser contains unsupported characters."
 }
 Assert-SafeAbsoluteUnixPath $RemoteDirectory "RemoteDirectory"
+Assert-SafeAbsoluteUnixPath $RollbackDirectory "RollbackDirectory"
 if ($ExpectedCommit -notmatch '^[0-9a-fA-F]{40}$') {
     throw "ExpectedCommit must be a full 40-character Git commit."
 }
@@ -295,113 +326,43 @@ if (-not [string]::Equals($head, $gate.Commit, [System.StringComparison]::Ordina
     throw "Working tree commit does not match the release gate."
 }
 
-$requiredBuildInputs = @(
-    "Dockerfile",
-    "pyproject.toml",
-    "compose.release.yaml",
-    "src",
-    "config",
-    "eval",
-    "data/derived/freeform_retrieval_summary.json"
-)
-foreach ($relativePath in $requiredBuildInputs) {
-    if (-not (Test-Path -LiteralPath (Join-Path $repository $relativePath))) {
-        throw "Required deployment input is missing: $relativePath"
-    }
-}
-
 $shortCommit = $gate.Commit.Substring(0, 12)
 $shortImage = $gate.ImageId.Substring(7, 12)
 $candidateTag = "mirae-disclosure-agent:candidate-$shortCommit-$shortImage"
 $candidateDirectory = "$RemoteDirectory/candidate-$shortCommit-$shortImage"
-$remoteArchive = "/tmp/mirae-release-$shortCommit-$shortImage.tar.gz"
+$rollbackStamp = [DateTimeOffset]::UtcNow.ToString("yyyyMMddTHHmmssZ")
+$rollbackTag = "mirae-disclosure-agent:rollback-$rollbackStamp-$shortImage"
+$rollbackArchive = "$RollbackDirectory/mirae-disclosure-agent-rollback-$rollbackStamp-$shortImage.tar"
 $target = "$SshUser@$ServerHost"
-$tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("mirae-release-" + [guid]::NewGuid().ToString("N"))
-$packageRoot = Join-Path $tempRoot "package"
-$iidFile = Join-Path $tempRoot "candidate.iid"
-$imageArchive = Join-Path $packageRoot "candidate-image.tar"
-$deploymentArchive = Join-Path $ArtifactDirectory "mirae-release-$shortCommit-$shortImage.tar.gz"
-$archiveHashPath = "$deploymentArchive.sha256"
 
-try {
-    New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
-    New-Item -ItemType Directory -Path $ArtifactDirectory -Force | Out-Null
-
-    & docker build --file (Join-Path $repository "Dockerfile") --tag $candidateTag --iidfile $iidFile $repository
-    Assert-LastExitCode "build candidate image"
-    $builtImageId = ([System.IO.File]::ReadAllText($iidFile)).Trim().ToLowerInvariant()
-    $inspectedImageId = (& docker image inspect --format '{{.Id}}' $candidateTag).Trim().ToLowerInvariant()
-    Assert-LastExitCode "inspect candidate image"
-    if ($builtImageId -ne $gate.ImageId -or $inspectedImageId -ne $gate.ImageId) {
-        throw "Built image identity does not match the release gate; upload is refused."
-    }
-
-    & docker save --output $imageArchive $candidateTag
-    Assert-LastExitCode "save candidate image"
-    $imageArchiveSha256 = (Get-FileHash -LiteralPath $imageArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-
-    Copy-Item -LiteralPath (Join-Path $repository "compose.release.yaml") -Destination $packageRoot
-    Copy-Item -LiteralPath (Join-Path $repository "Dockerfile") -Destination $packageRoot
-    Copy-Item -LiteralPath (Join-Path $repository "pyproject.toml") -Destination $packageRoot
-    Copy-Item -LiteralPath (Join-Path $repository "src") -Destination $packageRoot -Recurse
-    Copy-Item -LiteralPath (Join-Path $repository "config") -Destination $packageRoot -Recurse
-    Copy-Item -LiteralPath (Join-Path $repository "eval") -Destination $packageRoot -Recurse
-    New-Item -ItemType Directory -Path (Join-Path $packageRoot "data/derived") -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $repository "data/derived/freeform_retrieval_summary.json") -Destination (Join-Path $packageRoot "data/derived/freeform_retrieval_summary.json")
-    Copy-Item -LiteralPath $ReleaseGatePath -Destination (Join-Path $packageRoot "release_gate_summary.json")
-
-    $identityLines = @(
-        "schema=release-deployment.v1",
-        "commit=$($gate.Commit)",
-        "image_id=$($gate.ImageId)",
-        "image_ref=$candidateTag",
-        "image_archive_sha256=$imageArchiveSha256",
-        "base_sha256=$($ExpectedBaseDbSha256.ToLowerInvariant())",
-        "overlay_sha256=$($ExpectedOverlayDbSha256.ToLowerInvariant())",
-        "search_index_sha256=$($ExpectedSearchIndexSha256.ToLowerInvariant())"
-    )
-    [System.IO.File]::WriteAllLines((Join-Path $packageRoot "candidate.identity"), $identityLines, [System.Text.UTF8Encoding]::new($false))
-    [System.IO.File]::WriteAllText((Join-Path $packageRoot "candidate-image.tar.sha256"), "$imageArchiveSha256  candidate-image.tar`n", [System.Text.UTF8Encoding]::new($false))
-
-    & tar -czf $deploymentArchive -C $packageRoot .
-    Assert-LastExitCode "package release candidate"
-    $deploymentArchiveSha256 = (Get-FileHash -LiteralPath $deploymentArchive -Algorithm SHA256).Hash.ToLowerInvariant()
-    [System.IO.File]::WriteAllText($archiveHashPath, "$deploymentArchiveSha256  $([System.IO.Path]::GetFileName($deploymentArchive))`n", [System.Text.UTF8Encoding]::new($false))
-
-    if ($KeyPath) {
-        & scp -i $KeyPath $deploymentArchive "${target}:$remoteArchive"
-    }
-    else {
-        & scp $deploymentArchive "${target}:$remoteArchive"
-    }
-    Assert-LastExitCode "upload release candidate"
-
-    $remoteScript = @'
+$promotionScript = @'
 set -euo pipefail
-archive="$1"
-candidate_dir="$2"
-image_ref="$3"
-expected_image="$4"
-expected_image_archive_sha="$5"
-expected_base="$6"
-expected_overlay="$7"
-expected_search="$8"
-expected_commit="$9"
+candidate_dir="$1"
+candidate_ref="$2"
+expected_image="$3"
+expected_commit="$4"
+expected_base="$5"
+expected_overlay="$6"
+expected_search="$7"
+rollback_ref="$8"
+rollback_archive="$9"
+rollback_dir="${10}"
 
-mkdir -p "$candidate_dir"
-tar -xzf "$archive" -C "$candidate_dir"
 cd "$candidate_dir"
-
-actual_archive_sha="$(sha256sum candidate-image.tar | awk '{print $1}')"
-test "$actual_archive_sha" = "$expected_image_archive_sha"
-grep -Fx "schema=release-deployment.v1" candidate.identity >/dev/null
-grep -Fx "commit=$expected_commit" candidate.identity >/dev/null
-grep -Fx "image_id=$expected_image" candidate.identity >/dev/null
-grep -Fx "image_ref=$image_ref" candidate.identity >/dev/null
-grep -Fx "image_archive_sha256=$expected_image_archive_sha" candidate.identity >/dev/null
-grep -Fx "base_sha256=$expected_base" candidate.identity >/dev/null
-grep -Fx "overlay_sha256=$expected_overlay" candidate.identity >/dev/null
-grep -Fx "search_index_sha256=$expected_search" candidate.identity >/dev/null
+test -f candidate.identity
+assert_candidate_line() {
+    grep -Fx "$1=$2" candidate.identity >/dev/null
+}
+assert_candidate_line schema release-deployment.v1
+assert_candidate_line commit "$expected_commit"
+assert_candidate_line image_id "$expected_image"
+assert_candidate_line image_ref "$candidate_ref"
+assert_candidate_line base_sha256 "$expected_base"
+assert_candidate_line overlay_sha256 "$expected_overlay"
+assert_candidate_line search_index_sha256 "$expected_search"
+recorded_image_archive_sha="$(awk -F= '$1 == "image_archive_sha256" {print $2}' candidate.identity)"
+test -n "$recorded_image_archive_sha"
+test "$recorded_image_archive_sha" = "$(sha256sum candidate-image.tar | awk '{print $1}')"
 
 check_hash() {
     actual="$(sha256sum "$1" | awk '{print $1}')"
@@ -411,20 +372,17 @@ check_hash /srv/mirae/data/base/disclosure.sqlite "$expected_base"
 check_hash /srv/mirae/data/agent/agent_overlay.sqlite "$expected_overlay"
 check_hash /srv/mirae/data/agent/agent_search.sqlite "$expected_search"
 
-docker load --input candidate-image.tar >/dev/null
-loaded_image_id="$(docker image inspect --format '{{.Id}}' "$image_ref")"
-test "$loaded_image_id" = "$expected_image"
-
-export DISCLOSURE_RELEASE_IMAGE="$image_ref"
+candidate_image_id="$(docker image inspect --format '{{.Id}}' "$candidate_ref")"
+test "$candidate_image_id" = "$expected_image"
+export DISCLOSURE_RELEASE_IMAGE="$candidate_ref"
 export DISCLOSURE_EXPECTED_COMMIT="$expected_commit"
-docker compose -p mirae-release -f compose.release.yaml up -d --no-build dense-retriever disclosure-agent-staging
 
 staging_container="$(docker compose -p mirae-release -f compose.release.yaml ps -q disclosure-agent-staging)"
 dense_container="$(docker compose -p mirae-release -f compose.release.yaml ps -q dense-retriever)"
 test -n "$staging_container"
 test -n "$dense_container"
-staging_image_id="$(docker inspect --format '{{.Image}}' "$staging_container")"
-test "$staging_image_id" = "$expected_image"
+stagingImageId="$(docker inspect --format '{{.Image}}' "$staging_container")"
+test "$stagingImageId" = "$expected_image"
 
 assert_ro_mounts() {
     container="$1"
@@ -437,30 +395,51 @@ assert_ro_mounts() {
 assert_ro_mounts "$staging_container" /data/base/disclosure.sqlite /data/agent/agent_overlay.sqlite /data/agent/agent_search.sqlite /data/attestation.json
 assert_ro_mounts "$dense_container" /data/dense /model
 
-curl --fail --silent --show-error http://127.0.0.1:8001/health | python3 -c 'import json,sys; value=json.load(sys.stdin); assert value["ready"] and value["eval_enabled"]'
-curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8001/
-rm -f "$archive"
+production_container="$(docker compose -p mirae-release -f compose.release.yaml ps -q disclosure-agent)"
+test -n "$production_container"
+previous_image_id="$(docker inspect --format '{{.Image}}' "$production_container")"
+test -n "$previous_image_id"
+if docker image inspect "$rollback_ref" >/dev/null 2>&1; then
+    exit 1
+fi
+mkdir -p "$rollback_dir"
+test ! -e "$rollback_archive"
+test ! -e "$rollback_archive.sha256"
+docker tag "$previous_image_id" "$rollback_ref"
+docker save --output "$rollback_archive" "$rollback_ref"
+sha256sum "$rollback_archive" > "$rollback_archive.sha256"
+chmod 0444 "$rollback_archive" "$rollback_archive.sha256"
+
+docker compose -p mirae-release -f compose.release.yaml up -d --no-build --no-deps disclosure-agent
+production_container="$(docker compose -p mirae-release -f compose.release.yaml ps -q disclosure-agent)"
+production_image_id="$(docker inspect --format '{{.Image}}' "$production_container")"
+test "$production_image_id" = "$expected_image"
+assert_ro_mounts "$production_container" /data/base/disclosure.sqlite /data/agent/agent_overlay.sqlite /data/agent/agent_search.sqlite /data/attestation.json
+curl --fail --silent --show-error http://127.0.0.1:8000/health | python3 -c 'import json,sys; assert json.load(sys.stdin)["ready"]'
+curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8000/
 '@
-    $remoteArguments = "bash -s -- '$remoteArchive' '$candidateDirectory' '$candidateTag' '$($gate.ImageId)' '$imageArchiveSha256' '$($ExpectedBaseDbSha256.ToLowerInvariant())' '$($ExpectedOverlayDbSha256.ToLowerInvariant())' '$($ExpectedSearchIndexSha256.ToLowerInvariant())' '$($gate.Commit)'"
-    Invoke-RemoteScript -Target $target -ScriptText $remoteScript -Arguments $remoteArguments -PrivateKeyPath $KeyPath
 
-    Write-Output ([PSCustomObject]@{
-        release_state = "STAGING_READY"
-        commit = $gate.Commit
-        image_id = $gate.ImageId
-        image_archive_sha256 = $imageArchiveSha256
-        deployment_archive = $deploymentArchive
-        deployment_archive_sha256 = $deploymentArchiveSha256
-        remote_candidate_directory = $candidateDirectory
-    })
+$promotionArguments = "bash -s -- '$candidateDirectory' '$candidateTag' '$($gate.ImageId)' '$($gate.Commit)' '$($ExpectedBaseDbSha256.ToLowerInvariant())' '$($ExpectedOverlayDbSha256.ToLowerInvariant())' '$($ExpectedSearchIndexSha256.ToLowerInvariant())' '$rollbackTag' '$rollbackArchive' '$RollbackDirectory'"
+try {
+    Invoke-RemoteScript -Target $target -ScriptText $promotionScript -Arguments $promotionArguments -PrivateKeyPath $KeyPath -Step "production promotion or smoke test"
 }
-finally {
-    $tempBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
-    $resolvedTemp = [System.IO.Path]::GetFullPath($tempRoot)
-    if ($resolvedTemp.StartsWith($tempBase, [System.StringComparison]::OrdinalIgnoreCase) -and (Split-Path -Leaf $resolvedTemp) -like "mirae-release-*") {
-        Remove-Item -LiteralPath $resolvedTemp -Recurse -Force -ErrorAction SilentlyContinue
+catch {
+    $promotionError = $_
+    try {
+        Invoke-Rollback -Target $target -CandidateDirectory $candidateDirectory -RollbackTag $rollbackTag -PrivateKeyPath $KeyPath
     }
+    catch {
+        Write-Error "Promotion failed and rollback verification also failed."
+    }
+    throw $promotionError
 }
 
-# Compatibility note: the legacy script executed `docker compose build disclosure-agent-staging`
-# and `docker compose up -d --no-deps disclosure-agent-staging`; both flows are now refused.
+Write-Output ([PSCustomObject]@{
+    release_state = "PROMOTED"
+    commit = $gate.Commit
+    image_id = $gate.ImageId
+    staging_image_id = $gate.ImageId
+    production_image_id = $gate.ImageId
+    rollback_tag = $rollbackTag
+    rollback_archive = $rollbackArchive
+})

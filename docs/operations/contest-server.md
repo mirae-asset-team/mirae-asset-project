@@ -266,6 +266,59 @@ NCP 계정, public IP, ACG, 데이터 볼륨, 외부 네트워크가 확인되�
 provider smoke와 300-case 평가를 통과하기 전까지 최종 제출 상태는 **NO-GO**다. 이 gate를
 낮추거나 deterministic 결과로 대체하지 않는다.
 
+## Fail-closed release deployment
+
+`scripts/deploy_staging.ps1`과 `scripts/deploy_release.ps1`은 일반 배포 명령이 아니라
+`release-gate-summary-v1` 전용 승격 도구다. 기본 보고서
+`data/derived/release_gate_summary.json`이 없거나 JSON/schema가 잘못됐거나,
+`hard_gate_passed=true`와 `release_state=PASS`가 모두 아니면 **BLOCKED** 상태로 즉시
+종료한다. 이 검사는 Docker build, SSH, SCP보다 먼저 실행된다. 현재 추적된 Judge Stress
+보고서는 `release_state=BLOCKED`이므로 release gate 보고서를 대신할 수 없고 배포 입력으로
+사용할 수 없다.
+
+PASS 표시 자체는 신뢰하지 않는다. `hard_gate_reasons`는 JSON `null`이 아닌 실제 빈 배열이어야
+하며, 27개 필수 metric을 각각 숫자 타입인지 확인한 뒤 계약의 exact/minimum/maximum 기준을
+스크립트가 다시 검사한다. `metrics={}`, 필드 누락, 숫자 모양 문자열, `NaN`/무한대 및 임계치
+위반은 모두 외부 명령 전에 거부한다. `evaluated_at_utc`와 네 source timestamp는 UTC offset이
+있는 ISO-8601이어야 하며 24시간 freshness와 5분 future skew를 만족해야 한다. Windows
+PowerShell 5.1의 문자열 역직렬화와 PowerShell 7의 `DateTime` 역직렬화를 모두 허용하되 같은
+시간·freshness 규칙을 적용한다.
+
+승인 보고서의 `identity`에는 full Git commit, Docker `sha256:` image ID와 아래 3개
+SHA-256이 있어야 한다. 명령행의 expected 값과 한 항목이라도 다르면 staging과 production
+모두 변경하지 않는다.
+
+| Identity field | 실제 검증 대상 |
+|---|---|
+| `base_sha256` | `/srv/mirae/data/base/disclosure.sqlite` |
+| `overlay_sha256` | `/srv/mirae/data/agent/agent_overlay.sqlite` |
+| `search_index_sha256` | `/srv/mirae/data/agent/agent_search.sqlite` |
+
+Staging 스크립트는 agent 이미지를 로컬에서 정확히 한 번 build하고 `docker save` 결과와
+SHA-256을 만든다. 배포 묶음에는 image archive, release compose, gate 보고서와 Dockerfile이
+요구하는 `data/derived/freeform_retrieval_summary.json`이 포함된다. 서버에서는 이미지를
+load한 뒤 `docker compose ... up --no-build`만 사용한다. 8001 컨테이너의 `.Image`가 승인된
+image ID와 같은지, DB·overlay·search·attestation 및 Dense data/model mount가 실제
+`RW=false`인지 `docker inspect`로 확인하고 나서만 staging ready를 반환한다.
+
+Production 승격은 8001에서 검사된 것과 **동일한 image ID**가 실행 중일 때만 시작한다.
+기존 8000 image에는 UTC·image ID가 포함된 고유 rollback tag를 붙이고, 전환 전에 rollback
+archive와 SHA-256을 생성해 `0444`로 만든다. 이후에도 `--no-build`로 정확히 같은 후보 image를
+8000에 지정한다. image identity, mount 또는 `/health`·공개 루트 smoke가 실패하면
+`deploy_release.ps1`의 catch 경로가 `Invoke-Rollback`을 호출하여 이전 image를 다시 기동하고
+rollback smoke까지 확인한다.
+
+두 스크립트는 credential, `.env`, PEM 내용을 읽거나 수정하지 않는다. SSH 인증 수단과
+provider secret은 실행 환경이 별도로 제공하며 Git·배포 archive·출력에 포함하지 않는다.
+실제 호출은 PASS 보고서와 세 data identity, full commit, image ID를 확보한 운영자가
+명시적으로 실행할 때만 허용한다.
+
+`RemoteDirectory`와 `RollbackDirectory`는 canonical absolute Unix path만 허용한다. `.`·`..`
+component, 중복 `/`, trailing `/`가 있으면 경로 순회 가능성이 있으므로 배포를 시작하지 않는다.
+rollback tag/image가 없거나 rollback 컨테이너가 없거나 활성 image ID가 rollback image ID와
+다르거나 `/health.ready` 및 공개 루트 smoke 중 하나라도 실패하면 rollback도 실패로 처리한다.
+rollback 검증 실패를 성공으로 바꾸거나 원래 promotion 오류를 숨기지 않는다.
+
 ## Diagnosis and rollback
 
 - `/health.ready=false`: base identity, attestation, overlay match, search-index revision을

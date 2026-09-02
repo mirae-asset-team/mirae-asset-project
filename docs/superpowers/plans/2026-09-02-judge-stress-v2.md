@@ -112,3 +112,17 @@ in the development log.
 - Require exact numeric accuracy 100%, claim citation coverage 100%, zero hallucinated numeric/unknown/cross-filing citations/policy violations/secret leaks, answerability >= 95%, metamorphic consistency >= 98%, free-form Recall@20 >= 95%, structured 20-request p95 <= 2 seconds, provider E2E p95 <= 10 seconds, and zero hidden evaluator errors.
 - Add optional detailed fields: `execution_mode`, `analysis_dimension`, `conclusion`, `evidence_slots`, `limitations`, `claim_support`.
 - Validate 8001 staging, image digest, read-only mounts, Web/API smoke, and rollback assets before promoting the exact tested image to 8000.
+
+Implemented locally on 2026-09-03 from Task 7 documentation HEAD `0e4e5b3`. The versioned
+release contract recomputes financial, Judge, retrieval, concurrency, provider, security, freshness,
+and artifact-identity gates from raw inputs; missing, stale, non-finite, forged aggregate, duplicate,
+or identity-mismatched inputs fail closed. The deployment scripts independently validate the same
+27 metrics before any Git/SSH/Docker command, reject path traversal, require read-only protected
+mounts, build/save/hash the agent image once, use `--no-build` for 8001 and 8000, verify the same
+image identity, and require a validated rollback image and health checks. Independent reviews of the
+evaluation gate and deployment path were APPROVED after adversarial fixes. Focused Task 8 regression
+passed `136` tests and `177` subtests; the full Python suite passed `823` with `2` optional skips and
+`323` subtests. The current tracked result remains `BLOCKED_HARD_GATE` with 34 reasons: it has no
+complete raw 600-case Judge run, Recall@20 is `0.487179...`, provider calls are `0/120`, historical
+financial/retrieval inputs are stale for release purposes, and trusted staging image/data identities
+are absent. Therefore no 8001/8000 or NCP deployment was attempted and no threshold was lowered.

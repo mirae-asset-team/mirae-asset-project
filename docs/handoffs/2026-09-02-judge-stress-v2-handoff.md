@@ -2,7 +2,9 @@
 
 ## 결론
 
-`agent/judge-stress-v2` 브랜치에서 Task 1~5를 로컬 구현·검증했다. Task 2는 독립 600건 suite와 안전한 JSON/HTML report contract까지만 완료했으며 실제 앱 평가는 `NOT_RUN`이다. Task 6~8과 8001/8000 배포는 미완료다. 다음 작업은 Task 6 claim-level verification이다.
+`agent/judge-stress-v2` 브랜치에서 Task 1~8의 로컬 구현·검증을 완료했다. 실제 600건 앱/provider 평가와 운영 승격은 완료된 것으로 주장하지 않는다. 통합 release gate의 현재 결과는 `BLOCKED_HARD_GATE`이며, 34개 차단 사유가 남아 있어 8001/8000 및 NCP 배포를 실행하지 않았다. 다음 작업은 private holdout 120건과 실제 staging provider/identity를 준비해 같은 gate를 재실행하는 것이다.
+
+> 2026-09-03 Task 8 갱신: 원시 결과 재계산, 변조 방지, all-citation 검증, 동시성/보안 카운터, freshness와 외부 trust anchor를 하나의 gate로 통합했다. 배포 스크립트는 PASS 보고서도 27개 metric을 독립 검증하고, traversal·rollback 부재·image/mount 불일치를 fail-closed로 거부한다. 평가/배포 양쪽 독립 재리뷰가 승인됐고 focused `136 passed, 177 subtests`, 전체 Python `823 passed, 2 skipped, 323 subtests`를 통과했다.
 
 > 2026-09-03 갱신: Task 5 첫 커밋은 독립 리뷰에서 거절되었고 후속 fixup에서 다섯 blocker와 Docker build-context 결함을 TDD로 수정했다. 현재 tracked 평가 결과가 ADOPTED가 아니므로 Dense는 의도적으로 비활성이고 Sparse가 안전 경로다. Task 6의 claim-level verification은 별도 미추적 작업으로 분리되어 있으며 이 Task 5 fixup에 포함하지 않는다.
 
@@ -30,6 +32,7 @@
 - Task 4: `d6b3f9d feat: add bounded disclosure analysis executor`
 - Task 5 최초 구현: `3748871 feat: fail closed on dense retrieval adoption`
 - Task 5 review fixup은 이 인수인계와 함께 단일 `fix:` 커밋으로 끝내며 정확한 hash는 `git log -1 --oneline`이 기준이다.
+- Task 6~8의 정확한 최종 hash는 `git log --oneline 39649d3..agent/judge-stress-v2`가 기준이다. Task 8은 `feat: add fail-closed release gate` 커밋으로 끝낸다.
 
 ## Task 1 완료 범위
 
@@ -88,8 +91,8 @@ python -m compileall -q src scripts
 git diff --check
 ```
 
-- Task 7 + legacy stress focused: `61 passed`
-- Python 전체: `706 passed, 2 skipped, 86 warnings, 146 subtests passed`
+- Task 8 focused: `136 passed, 177 subtests passed`
+- Python 전체: `823 passed, 2 skipped, 86 warnings, 323 subtests passed`
 - Web: `12/12 passed`
 - compileall/diff: pass
 - 경고는 기존 FastAPI `on_event` deprecation이다.
@@ -108,7 +111,8 @@ git diff --check
 
 1. evaluator가 관리하는 git-ignored private holdout 120개를 제공한다. tracked code로 대체·재구성하지 않는다.
 2. 실제 staging provider로 hidden semantic root 42개의 versioned observation 120개를 실행하고 sanitized 결과만 집계한다.
-3. **Task 8:** 모든 hard gate 통과 후에만 8001 staging → 동일 image 8000 승격을 수행한다.
+3. `python scripts/evaluate_release_candidate.py`로 실제 trust anchor를 포함한 통합 gate를 재실행한다. 현재 tracked 결과는 `BLOCKED_HARD_GATE`이므로 정상 종료 코드가 `1`이다.
+4. 모든 hard gate가 통과한 경우에만 `scripts/deploy_staging.ps1`로 8001을 검증한 뒤 `scripts/deploy_release.ps1`로 정확히 같은 image를 8000에 승격한다.
 
 각 Task는 `실패 테스트 → 최소 구현 → 관련 테스트 → 전체 회귀 → 보고서 → 독립 커밋`을 지킨다. Plan의 기준이나 read-only 제약을 낮추지 않는다.
 
