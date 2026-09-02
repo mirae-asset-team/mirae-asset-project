@@ -194,6 +194,9 @@ def deterministic_verdict(item: dict, result: dict | None, error: str | None) ->
     if error is not None:
         return "error", error, flags
     status = str(result.get("status", ""))
+    if status == "error":
+        warnings = ", ".join(str(item) for item in result.get("warnings") or [])
+        return "error", f"server_error: {warnings or 'unknown'}", flags
     answered = status == "answered"
     citations = result.get("citations") or []
     answer = str(result.get("answer") or "")
@@ -261,6 +264,8 @@ def main() -> int:
     parser.add_argument("--pace-seconds", type=float, default=0.4, help="minimum spacing between request starts")
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--notes", default="")
+    parser.add_argument("--retry-errors", action="store_true",
+                        help="drop this run's error rows first so they are re-asked")
     args = parser.parse_args()
 
     companies = load_companies()
@@ -268,6 +273,12 @@ def main() -> int:
     if args.limit:
         bank = bank[: args.limit]
     connection = open_ledger()
+    if args.retry_errors:
+        dropped = connection.execute(
+            "DELETE FROM result WHERE run_id=? AND status='error'", (args.run_id,)
+        ).rowcount
+        connection.commit()
+        print(f"retry-errors: dropped {dropped} error rows")
     done = {row[0] for row in connection.execute("SELECT qid FROM result WHERE run_id=?", (args.run_id,))}
     pending = [item for item in bank if item["qid"] not in done]
     commit = subprocess.run(
