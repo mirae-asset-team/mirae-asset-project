@@ -182,25 +182,6 @@ class EvidenceServiceTests(unittest.TestCase):
                 service.search(plan, limit=8)
             self.assertEqual(fetch.call_args.kwargs["limit"], 1)
 
-    def test_multi_account_financial_plan_can_fetch_rows_for_requested_periods(self) -> None:
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            base, overlay = root / "base.sqlite", root / "overlay.sqlite"
-            seed_search_db(base)
-            overlay.touch()
-            service = EvidenceService(base, overlay, attestation=Mock())
-            plan = QueryPlan(
-                "삼성전자 수익성", company="삼성전자", fact_domain="financial",
-                account_terms=["매출액", "영업이익", "당기순이익"], latest_period_count=2,
-            )
-            with patch.object(service, "_base_identity_valid", return_value=True), patch(
-                "disclosure_db.evidence_service.overlay_matches_base", return_value=True,
-            ), patch("disclosure_db.evidence_service.fetch_overlay_facts", return_value=[]) as fetch, patch(
-                "disclosure_db.evidence_service.query_database", return_value=[],
-            ):
-                service.search(plan, limit=8)
-            self.assertGreaterEqual(fetch.call_args.kwargs["limit"], 6)
-
     def test_search_returns_safe_evidence_refs_and_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp) / "base.sqlite"

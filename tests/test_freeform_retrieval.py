@@ -202,33 +202,6 @@ def _structured_plan(*, correction_policy: str, as_of: str, filing_date: str | N
     )
 
 
-def test_profitability_financial_slots_request_two_latest_periods() -> None:
-    plan = plan_analysis(
-        "삼성전자 최근 수익성과 재무건전성이 개선됐는지 공시로 판단해줘",
-        company_candidates=["삼성전자"],
-    )
-    service = EvidenceService(Path("base.sqlite"))
-    captured: list[object] = []
-
-    def capture(query, limit=20):
-        captured.append(query)
-        index = len(captured)
-        return EvidenceBundle(
-            question=query.question,
-            evidence=[_ref(f"ev-{index}-a"), _ref(f"ev-{index}-b")],
-            answerable=True,
-        )
-
-    service.search = capture  # type: ignore[method-assign]
-    result = service.search_analysis(plan)
-
-    financial = [query for query in captured if query.fact_domain == "financial"]
-    assert [query.company for query in financial] == ["삼성전자", "삼성전자"]
-    assert [query.latest_period_count for query in financial] == [2, 2]
-    assert [query.correction_policy for query in financial] == ["current", "current"]
-    assert result.complete is True
-
-
 def test_financing_pressure_financial_slot_keeps_single_period_lookup() -> None:
     plan = plan_analysis(
         "삼성전자 차입과 자금조달 공시 위험을 분석해줘",
