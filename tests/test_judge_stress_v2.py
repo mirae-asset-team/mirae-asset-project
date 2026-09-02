@@ -60,6 +60,16 @@ def _contract() -> dict[str, object]:
         "split_counts": {"development": 480, "holdout": 120},
         "allocation": dict(ALLOCATION),
         "failure_categories": list(FAILURE_CATEGORIES),
+        "provider_probe_contract": {
+            "probe_version": "judge-probes-v1",
+            "eligible_root_count": 42,
+            "observation_count": 120,
+            "source_split": "holdout",
+            "category_root_counts": {
+                "free_form": 24,
+                "multi_evidence_judgment": 18,
+            },
+        },
         "development_issuer_group_ids": [
             _issuer_group_id(f"corp-{index:02d}") for index in range(6)
         ],
@@ -543,6 +553,14 @@ def test_contract_hard_codes_exact_allocation_and_split_counts() -> None:
     with pytest.raises(ValueError, match="480 development / 120 holdout"):
         module.build_development_cases(_sources(), changed_split)
 
+    changed_provider = _contract()
+    changed_provider["provider_probe_contract"] = {
+        **changed_provider["provider_probe_contract"],
+        "observation_count": 119,
+    }
+    with pytest.raises(ValueError, match="42 roots / 120 observations"):
+        module.build_development_cases(_sources(), changed_provider)
+
 
 def test_raw_writer_rejects_paths_outside_git_ignored_evaluator_root(tmp_path: Path) -> None:
     module = _module()
@@ -686,3 +704,141 @@ def test_report_cli_rejects_invalid_manifest_before_writing_outputs(tmp_path: Pa
     assert "suite_sha256 mismatch" in completed.stderr
     assert not json_path.exists()
     assert not html_path.exists()
+
+
+def test_execution_summary_is_partial_blocked_and_never_release_passes() -> None:
+    module = _module()
+    manifest = module.build_manifest(_suite(module), _contract(), _metadata(module))
+    rows = [
+        {
+            "case_id": case["case_id"],
+            "case_sha256": case["case_sha256"],
+            "passed": True,
+            "failure_category": None,
+        }
+        for case in manifest["cases"][:480]
+    ]
+    metadata = {
+        "probe_version": "judge-probes-v1",
+        "provider_eligible_root_count": 42,
+        "provider_probe_observation_count": 120,
+        "provider_call_count": 0,
+        "forbidden_provider_call_count": 0,
+        "deterministic_provider_call_count": 0,
+        "evaluator_error_count": 0,
+        "security_failure_count": 0,
+        "concurrency_error_count": 0,
+        "concurrency_p95_ms": 10.0,
+        "provider_p95_ms": None,
+        "answerability_agreement": 1.0,
+        "numeric_exactness": 1.0,
+        "claim_citation_coverage": 1.0,
+        "metamorphic_consistency": 1.0,
+        "execution_mode": "local_contract_checks",
+        "runtime_release_eligible": False,
+    }
+    summary = module.build_summary(
+        manifest,
+        rows,
+        blockers=("BLOCKED_PRIVATE_HOLDOUT", "BLOCKED_PROVIDER"),
+        run_metadata=metadata,
+    )
+
+    assert summary["status"] == "PARTIAL"
+    assert summary["hard_gate_passed"] is False
+    assert summary["blocked_reasons"] == [
+        "BLOCKED_PRIVATE_HOLDOUT",
+        "BLOCKED_PROVIDER",
+    ]
+    assert "BLOCKED_PRIVATE_HOLDOUT" in summary["hard_gate_reasons"]
+    assert "missing_metric:provider_p95_ms" in summary["hard_gate_reasons"]
+    assert "non_release_runtime" in summary["hard_gate_reasons"]
+    assert summary["provider_eligible_root_count"] == 42
+    assert summary["provider_probe_observation_count"] == 120
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("forbidden_provider_call_count", 1, "forbidden_provider_call_count"),
+        ("deterministic_provider_call_count", 1, "deterministic_provider_call_count"),
+        ("evaluator_error_count", 1, "evaluator_error_count"),
+        ("security_failure_count", 1, "security_failure_count"),
+        ("numeric_exactness", None, "missing_metric:numeric_exactness"),
+    ],
+)
+def test_execution_summary_hard_fails_provider_misuse_errors_and_missing_metrics(
+    field: str, value: object, reason: str
+) -> None:
+    module = _module()
+    manifest = module.build_manifest(_suite(module), _contract(), _metadata(module))
+    rows = [
+        {
+            "case_id": case["case_id"],
+            "case_sha256": case["case_sha256"],
+            "passed": True,
+            "failure_category": None,
+        }
+        for case in manifest["cases"]
+    ]
+    metadata = {
+        "probe_version": "judge-probes-v1",
+        "provider_eligible_root_count": 42,
+        "provider_probe_observation_count": 120,
+        "provider_call_count": 120,
+        "forbidden_provider_call_count": 0,
+        "deterministic_provider_call_count": 0,
+        "evaluator_error_count": 0,
+        "security_failure_count": 0,
+        "concurrency_error_count": 0,
+        "concurrency_p95_ms": 10.0,
+        "provider_p95_ms": 100.0,
+        "answerability_agreement": 1.0,
+        "numeric_exactness": 1.0,
+        "claim_citation_coverage": 1.0,
+        "metamorphic_consistency": 1.0,
+        "execution_mode": "private_provider_evaluation",
+        "runtime_release_eligible": False,
+        field: value,
+    }
+    summary = module.build_summary(manifest, rows, run_metadata=metadata)
+
+    assert summary["hard_gate_passed"] is False
+    assert reason in summary["hard_gate_reasons"]
+
+
+def test_execution_html_distinguishes_blocked_and_does_not_emit_raw_content() -> None:
+    module = _module()
+    manifest = module.build_manifest(_suite(module), _contract(), _metadata(module))
+    summary = module.build_summary(
+        manifest,
+        [],
+        blockers=("BLOCKED_PRIVATE_HOLDOUT",),
+        run_metadata={
+            "probe_version": "judge-probes-v1",
+            "provider_eligible_root_count": 42,
+            "provider_probe_observation_count": 120,
+            "provider_call_count": 0,
+            "forbidden_provider_call_count": 0,
+            "deterministic_provider_call_count": 0,
+            "evaluator_error_count": 0,
+            "security_failure_count": 0,
+            "concurrency_error_count": 0,
+            "concurrency_p95_ms": None,
+            "provider_p95_ms": None,
+            "answerability_agreement": None,
+            "numeric_exactness": None,
+            "claim_citation_coverage": None,
+            "metamorphic_consistency": None,
+            "execution_mode": "local_contract_checks",
+            "runtime_release_eligible": False,
+        },
+    )
+    html = module.render_summary_html(summary)
+
+    assert "BLOCKED" in html
+    assert "BLOCKED_PRIVATE_HOLDOUT" in html
+    assert "Hard gate" in html
+    assert "Contract harness — not app accuracy" in html
+    assert "raw question" not in html.lower()
+    assert "provider body" not in html.lower()

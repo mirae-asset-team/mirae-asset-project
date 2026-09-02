@@ -88,16 +88,16 @@ python -m compileall -q src scripts
 git diff --check
 ```
 
-- Task 5 expanded focused: `237 passed, 1 skipped, 34 warnings, 31 subtests passed`
-- Git 추적 Python 전체: `666 passed, 2 skipped, 86 warnings, 146 subtests passed`
+- Task 7 + legacy stress focused: `61 passed`
+- Python 전체: `706 passed, 2 skipped, 86 warnings, 146 subtests passed`
 - Web: `12/12 passed`
-- compileall/diff/Compose static config: pass
-- 문자 그대로의 `python -m pytest -q`는 별도 작업자의 미완성·미추적 Task 6 테스트 1개에서만 `11 failed`이고 나머지 `666 passed, 2 skipped`다. 위 재현 명령은 Git 추적 suite 전체를 실행해 Task 6 작업물을 명시적으로 제외한다.
+- compileall/diff: pass
 - 경고는 기존 FastAPI `on_event` deprecation이다.
 
 ## 환경상 미검증·차단
 
-- Task 2는 suite 생성만 완료했다. 600-case 앱 실행, failure triage, latency/concurrency/fault 결과는 `NOT_RUN`이다.
+- Task 7의 provider-free `ContractJudgeRuntime` run은 development root `480/480`을 검사했다. 이 runtime은 contract harness일 뿐 실제 앱/provider 정확도 평가 대상이 아니며 `runtime_release_eligible=false`다. private holdout 120개와 provider도 없어 `PARTIAL / BLOCKED_PRIVATE_HOLDOUT / BLOCKED_PROVIDER / non_release_runtime`이다.
+- hidden provider 계약은 holdout free-form 24개와 multi-evidence 18개, 총 root 42개에서 versioned observation 120개를 파생한다. private 원문이 없으면 관측을 합성하거나 실행하지 않는다.
 - Docker Desktop Linux engine이 없어 새 main/Dense image를 build·inspect하지 못했다.
 - NCP/Dense live artifact 및 8001/8000을 변경하지 않았다.
 - Dense 실제 `2,571,506` vector, model mount, 새 health identity, cold-start/restart는 `BLOCKED_ENVIRONMENT`다.
@@ -106,8 +106,8 @@ git diff --check
 
 ## 다음 작업 — 반드시 이 순서
 
-1. **Task 6:** 주장별 citation·Decimal 숫자 검증과 결정론적 fallback을 구현한다. 현재 미추적 두 파일은 Task 5 커밋과 분리한다.
-2. **Task 7:** 공격·metamorphic·장애·20동시 요청 평가를 실행하고 V2 JSON/HTML을 실제 결과로 갱신한다.
+1. evaluator가 관리하는 git-ignored private holdout 120개를 제공한다. tracked code로 대체·재구성하지 않는다.
+2. 실제 staging provider로 hidden semantic root 42개의 versioned observation 120개를 실행하고 sanitized 결과만 집계한다.
 3. **Task 8:** 모든 hard gate 통과 후에만 8001 staging → 동일 image 8000 승격을 수행한다.
 
 각 Task는 `실패 테스트 → 최소 구현 → 관련 테스트 → 전체 회귀 → 보고서 → 독립 커밋`을 지킨다. Plan의 기준이나 read-only 제약을 낮추지 않는다.
@@ -121,6 +121,30 @@ git diff --check
 - 공개 Tool은 5개를 유지하며 내부 executor만 추가한다.
 - 사용자에게는 검증 추적과 한계를 제공하되 hidden chain-of-thought는 노출하지 않는다.
 - promotion은 모든 release verification과 rollback 준비 뒤에만 한다.
+
+## Task 7 실행 계약과 현재 결과
+
+- 실행 lane은 structured/alias/period/correction의 `deterministic_answer`, development 자유형/다중근거의 `retrieval_precheck`, `policy_guard`, hidden semantic의 `provider_answer`, `concurrency`, `fault_injection`으로 고정했다.
+- deterministic/policy/error lane에서는 provider 호출을 허용하지 않는다. 오호출, evaluator error, security failure, metric 누락은 hard failure다.
+- probe identity는 root case ID/hash, `judge-probes-v1`, probe kind에 결속된다. duplicate/stale/hash mismatch는 evaluator error로 거부한다.
+- 메타모픽 비교는 answerability, exact finite Decimal, unit, scope, conclusion, canonical citation set을 모두 비교한다.
+- provider timeout/429/5xx/malformed, Dense unavailable/malformed, restart identity는 외부 연결 없는 bounded fake adapter로 주입한다. 오류 본문은 결과에 남지 않는다.
+- 20개 동시 정형 요청과 restart 전후 runtime identity를 측정한다. 결과/실패/요약/HTML에는 raw question, answer, provider body, prompt, decoded payload, secret을 쓰지 않는다.
+- 2026-09-03 local run: development `480/480`, failures `0`, evaluator/security/concurrency error `0`, provider/forbidden provider call `0`. 하지만 `ContractJudgeRuntime`의 계약 하네스 결과이므로 앱 정확도 PASS가 아니고, provider p95도 미측정이다. tracked summary는 `runtime_release_eligible=false`, release state `BLOCKED`, hard-gate reasons `BLOCKED_PRIVATE_HOLDOUT`, `BLOCKED_PROVIDER`, `missing_metric:provider_p95_ms`, `non_release_runtime`, `incomplete_evaluation`이다.
+- 독립 리뷰에서 typed `JudgeObservation`을 직접 만들 때 비문자 unit/scope/conclusion/citation이 mapping 검증을 우회하는 문제를 재현했다. 공통 runtime validation과 회귀 테스트로 닫았고, 수정 후 focused/전체 검증을 처음부터 다시 통과했다.
+
+재현 명령:
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath 'src').Path
+python scripts/run_judge_stress_v2.py `
+  --repository-root . `
+  --manifest data/derived/judge_stress_v2_manifest.json `
+  --results eval/judge_stress_v2/results.jsonl `
+  --failures eval/judge_stress_v2/failures.jsonl `
+  --json-summary data/derived/judge_stress_v2_summary.json `
+  --html-summary data/derived/judge_stress_v2_summary.html
+```
 
 ## 절대 커밋하지 말 것
 

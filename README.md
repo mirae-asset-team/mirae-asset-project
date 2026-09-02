@@ -8,9 +8,9 @@
 
 ## 현재 개발 상태와 인수인계
 
-> **Judge Stress V2 인수인계:** Task 1(Dense 런타임·의존성·신원 계약), Task 2(개발 480건 생성기·private holdout 120건 검증·안전한 manifest/report), Task 3(입력·routing hardening)의 로컬 구현과 회귀가 완료되었습니다. 600건 실제 앱 평가는 아직 `NOT_RUN`이며 Task 4~8은 완료가 아닙니다. 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)를 읽고 Task 4부터 진행하세요.
+> **Judge Stress V2 인수인계:** Task 1~7의 로컬 구현과 회귀가 완료되었습니다. Task 7 보고서는 실제 앱 정확도가 아닌 `ContractJudgeRuntime` 평가 계약 하네스의 development 480건 검사 결과입니다. private holdout과 staging provider가 없어 `PARTIAL / BLOCKED`이며, Task 8 배포 gate는 시작하지 않았습니다. 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)를 읽고 private/provider 평가부터 진행하세요.
 
-> **2026-09-03 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, HCX Function Calling V1.1, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결이 구현되어 있습니다. Judge Stress V2의 tracked 코드는 개발 480건만 생성하고, 전체 600건 검증에는 별도 git-ignored private holdout 120건을 요구합니다. 앱 실행 결과는 아직 없습니다. Task 1~2에서는 Docker/NCP를 실행하거나 변경하지 않았고, 새 image의 Python/NumPy/FAISS/model/vector identity와 Dense Recall@20·issuer/version·p95 채택 gate는 아직 검증되지 않았습니다.
+> **2026-09-03 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, bounded analysis, 주장 단위 검증, HCX Function Calling V1.1, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결이 구현되어 있습니다. Judge Stress V2의 tracked 코드는 개발 480건만 생성하고, 전체 600건 검증에는 별도 git-ignored private holdout 120건을 요구합니다. 로컬 contract harness는 앱·provider를 호출하지 않으므로 해당 480건 통과를 앱 품질로 해석하면 안 됩니다. 새 image의 Python/NumPy/FAISS/model/vector identity와 Dense Recall@20·issuer/version·p95 채택 gate도 아직 검증되지 않았습니다.
 
 ### 현재 한눈에 보기
 
@@ -28,7 +28,7 @@
 | 영역 | 2026-09-02 상태 | 다음 작업 |
 |---|---|---|
 | 작업 브랜치 | `agent/judge-stress-v2` | Task별 독립 commit 유지 |
-| 기준 커밋 | `99893d4` | Judge Stress V2 Task 1 기준점 |
+| Task 7 기준 커밋 | `75ae106` | Task 6 최종 재리뷰 승인 후 Task 7 시작점 |
 | 재무계정 카탈로그 | 구현·테스트 완료 | 신규 계정 추가 시 중앙 카탈로그만 확장 |
 | Embedding Chunk v1 | XML/HTML/PDF, streaming, checkpoint/resume 구현 완료 | 전체 corpus 산출물의 manifest와 count 확인 |
 | Sparse 검색 | 운영 안전 경로, query-time fallback 회귀 통과 | Dense 장애·재시작 평가에서 계속 hard gate로 확인 |
@@ -37,7 +37,7 @@
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
 | HCX Function Calling | V1.1 실제 smoke 성공 | 운영 5종 질문 반복 smoke와 장애율 측정 |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
-| 테스트 | Task 3 최종 Python `591 passed, 2 skipped, 84 subtests`; Web JS `12 passed` | Task 4 bounded analysis executor |
+| 테스트 | Task 7+legacy stress `61 passed`; 전체 Python `706 passed, 2 skipped, 146 subtests`; Web JS `12 passed` | private/provider 평가와 Task 8 release gate |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
 ### 현재 품질 경계
@@ -57,7 +57,9 @@
 
 Task 2는 기존 300건 stress와 856건 financial release regression을 수정하지 않고 별도 600건 계약을 만들었습니다. 구성은 structured 120, alias/period/correction 90, free-form 120, multi-evidence judgment 90, policy/adversarial 90, API/concurrency 60, fault 30이며 development 480과 hidden holdout 120으로 나뉩니다. tracked 생성기는 audited source에서 development 480만 재현합니다. 실제 holdout 질문·oracle·선정값·paraphrase/template family는 git-ignored private evaluator 입력으로만 존재하며, 입력이 없으면 builder는 개발 파일을 만든 뒤 `BLOCKED_PRIVATE_HOLDOUT`으로 종료합니다.
 
-tracked [manifest](data/derived/judge_stress_v2_manifest.json), [JSON summary](data/derived/judge_stress_v2_summary.json), [standalone HTML summary](data/derived/judge_stress_v2_summary.html)에는 case/group ID, SHA-256, 분류별 수량과 재현 메타데이터만 있습니다. underlying audited source facts는 추적되지만 exact hidden 질문·oracle·private selection은 추적되지 않습니다. raw development도 plan상 tracked 산출물이 아니며 holdout과 함께 `eval/judge_stress_v2/` 아래에서만 다룹니다. 실제 split은 issuer, 독립 document group, 독립 question-template family, source group, exact question hash가 모두 겹치지 않아야 합니다. 애플리케이션 runtime은 evaluator module이나 raw artifact를 import하지 않습니다. 현재 summary의 `status=NOT_RUN`은 suite 구축만 끝났고 실제 Task 3~7 평가를 아직 실행하지 않았다는 뜻입니다.
+tracked [manifest](data/derived/judge_stress_v2_manifest.json), [JSON summary](data/derived/judge_stress_v2_summary.json), [standalone HTML summary](data/derived/judge_stress_v2_summary.html)에는 case/group ID, SHA-256, 분류별 수량과 재현 메타데이터만 있습니다. underlying audited source facts는 추적되지만 exact hidden 질문·oracle·private selection은 추적되지 않습니다. raw development도 plan상 tracked 산출물이 아니며 holdout과 함께 `eval/judge_stress_v2/` 아래에서만 다룹니다. 실제 split은 issuer, 독립 document group, 독립 question-template family, source group, exact question hash가 모두 겹치지 않아야 합니다. 애플리케이션 runtime은 evaluator module이나 raw artifact를 import하지 않습니다. Task 7의 provider-free 실행은 `ContractJudgeRuntime`이라는 contract harness로 development root `480/480`을 검사했을 뿐 실제 앱/provider 정확도 평가는 아닙니다. summary는 `runtime_release_eligible=false`, `status=PARTIAL`, `release_state=BLOCKED`이고 `non_release_runtime`, `BLOCKED_PRIVATE_HOLDOUT`, `BLOCKED_PROVIDER`를 hard-gate 사유로 보존합니다.
+
+Task 7 probe 계약은 한국어/영어 재표현, 유일 오타, JSON/순서 변경, 직접·간접·Base64·URL·zero-width 주입, prompt/key 추출, SQL/XSS, 존재하지 않는 사실과 issuer/version/unit/scope 오염, provider/Dense 장애와 restart identity를 다룹니다. hidden provider 대상은 새 root 120개가 아니라 기존 holdout의 free-form `24`개와 multi-evidence `18`개, 총 root `42`개에서 파생되는 versioned probe observation `120`개입니다. private 원문이 없으면 이 120개를 합성하거나 실행하지 않습니다. 결과와 HTML에는 질문·답변·provider body·prompt·credential을 저장하지 않습니다.
 
 Reporter는 manifest 선언을 신뢰하지 않고 매번 600개 unique row, development/holdout `480/120`, 전체 및 split별 exact category allocation, row split/category, unique case ID와 canonical `suite_sha256`을 다시 검증합니다. Privacy 범위는 exact authored private 질문과 private rubric ID가 개발 코드/추적 산출물에서 조회·재구성되지 않는다는 뜻입니다. 공개 issuer/fact provenance나 공개 DB 사실 답변까지 암호학적으로 숨긴다는 주장은 하지 않으며, 유한한 공개 corpus의 hashed group ID는 대조 가능할 수 있습니다. pre-paraphrase 질문이나 공개 fact를 재구성하는 것은 evaluator가 보관하는 exact private holdout 원문과 동일하지 않습니다.
 
@@ -80,6 +82,16 @@ python scripts/build_judge_stress_v2.py `
 python scripts/evaluate_judge_stress_v2.py `
   --manifest data/derived/judge_stress_v2_manifest.json `
   --results eval/judge_stress_v2/results.jsonl `
+  --json-summary data/derived/judge_stress_v2_summary.json `
+  --html-summary data/derived/judge_stress_v2_summary.html
+
+# 로컬에서 가능한 development 480개 계약·공격·장애·동시성 검사
+# 실제 provider 품질 PASS가 아니며 private/provider 부재를 BLOCKED로 남깁니다.
+python scripts/run_judge_stress_v2.py `
+  --repository-root . `
+  --manifest data/derived/judge_stress_v2_manifest.json `
+  --results eval/judge_stress_v2/results.jsonl `
+  --failures eval/judge_stress_v2/failures.jsonl `
   --json-summary data/derived/judge_stress_v2_summary.json `
   --html-summary data/derived/judge_stress_v2_summary.html
 ```

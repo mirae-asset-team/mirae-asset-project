@@ -80,8 +80,22 @@ Web passed `12/12`; compile and diff checks passed. No external/provider/live ev
 
 ## Task 7 — Automated judge and security evaluation
 
-- Cover Korean/English paraphrases, typos, JSON demands, prompt extraction, direct/indirect/encoded injection, SQL/XSS strings, nonexistent facts, corrections, wrong issuer/version/unit/scope, provider faults, Dense faults, and restart/concurrency behavior.
-- Run deterministic/policy/error cases without HCX and only the hidden free-form/judgment holdout through the provider.
+- [x] Cover Korean/English paraphrases, typos, JSON demands, prompt extraction, direct/indirect/encoded injection, SQL/XSS strings, nonexistent facts, corrections, wrong issuer/version/unit/scope, provider faults, Dense faults, and restart/concurrency behavior.
+- [x] Run deterministic/policy/error cases without HCX and reserve provider eligibility for the hidden free-form/judgment holdout.
+
+Completed locally on 2026-09-03 from Task 6 final review-approved HEAD `75ae106`. The harness keeps
+the original 600 roots and defines 120 versioned provider observations from the 42 eligible hidden
+roots (24 free-form and 18 multi-evidence); it does not invent private roots. Raw questions,
+answers, provider bodies, prompts, decoded attack payloads, and credentials are absent from result,
+failure, JSON, HTML, and checkpoint artifacts. The provider-free local run evaluated all 480
+development roots with zero case/evaluator/security/concurrency/provider-call failures, but this is
+only a `ContractJudgeRuntime` contract-harness result, explicitly marked
+`runtime_release_eligible=false`, and not an application-accuracy result. Because the private holdout and staging provider were unavailable,
+the tracked report is honestly `PARTIAL`, `BLOCKED_PRIVATE_HOLDOUT`, `BLOCKED_PROVIDER`, and
+`hard_gate_passed=false`; it is not an application-quality or release PASS. Focused Task 7 tests
+passed `42`; Task 7 plus legacy stress passed `61`; the full Python suite passed `706` with `2` existing optional skips
+and `146` subtests, Web passed `12/12`, and compileall/diff passed. Final commit verification is recorded
+in the development log.
 
 ## Task 8 — Release gate and deployment
 

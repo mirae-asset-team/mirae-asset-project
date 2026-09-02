@@ -27,6 +27,16 @@
     "security",
     "runtime"
   ],
+  "provider_probe_contract": {
+    "probe_version": "judge-probes-v1",
+    "eligible_root_count": 42,
+    "observation_count": 120,
+    "source_split": "holdout",
+    "category_root_counts": {
+      "free_form": 24,
+      "multi_evidence_judgment": 18
+    }
+  },
   "development_issuer_group_ids": [
     "issuer-0423338934cd55a48b6861fb",
     "issuer-0a76ef0e1362e07a40308305",

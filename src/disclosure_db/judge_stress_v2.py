@@ -13,6 +13,7 @@ from copy import deepcopy
 import hashlib
 from html import escape
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -57,6 +58,16 @@ REQUIRED_SPLIT_COUNTS = {"development": 480, "holdout": 120}
 REQUIRED_SPLIT_ALLOCATION = {
     "development": {name: count * 4 // 5 for name, count in REQUIRED_ALLOCATION.items()},
     "holdout": {name: count // 5 for name, count in REQUIRED_ALLOCATION.items()},
+}
+REQUIRED_PROVIDER_PROBE_CONTRACT = {
+    "probe_version": "judge-probes-v1",
+    "eligible_root_count": 42,
+    "observation_count": 120,
+    "source_split": "holdout",
+    "category_root_counts": {
+        "free_form": 24,
+        "multi_evidence_judgment": 18,
+    },
 }
 
 _ACCOUNT_LABELS = {
@@ -132,6 +143,8 @@ def _validate_contract(contract: Mapping[str, object]) -> None:
         raise ValueError("Judge Stress V2 exact required allocation changed")
     if tuple(contract.get("failure_categories", ())) != FAILURE_CATEGORIES:
         raise ValueError("Judge Stress V2 failure categories changed")
+    if contract.get("provider_probe_contract") != REQUIRED_PROVIDER_PROBE_CONTRACT:
+        raise ValueError("provider probe contract must remain 42 roots / 120 observations")
     development_groups = contract.get("development_issuer_group_ids")
     if (
         not isinstance(development_groups, list)
@@ -771,7 +784,11 @@ def validate_judge_manifest(
 
 
 def build_summary(
-    manifest: Mapping[str, object], results: Iterable[Mapping[str, object]]
+    manifest: Mapping[str, object],
+    results: Iterable[Mapping[str, object]],
+    *,
+    blockers: Sequence[str] = (),
+    run_metadata: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     cases = validate_judge_manifest(manifest)
     result_rows = list(results)
@@ -802,10 +819,118 @@ def build_summary(
     evaluated = len(result_rows)
     expected = 600
     status = "NOT_RUN" if evaluated == 0 else ("COMPLETE" if evaluated == expected else "PARTIAL")
-    return {
+    allowed_blockers = {
+        "BLOCKED_PRIVATE_HOLDOUT",
+        "BLOCKED_PROVIDER",
+        "NOT_RUN_EXTERNAL",
+    }
+    blocker_rows = list(dict.fromkeys(str(value) for value in blockers))
+    if any(value not in allowed_blockers for value in blocker_rows):
+        raise ValueError("unknown Judge Stress V2 blocker")
+
+    allowed_metadata = {
+        "execution_mode",
+        "probe_version",
+        "runtime_release_eligible",
+        "provider_eligible_root_count",
+        "provider_probe_observation_count",
+        "provider_call_count",
+        "forbidden_provider_call_count",
+        "deterministic_provider_call_count",
+        "evaluator_error_count",
+        "security_failure_count",
+        "concurrency_error_count",
+        "concurrency_p95_ms",
+        "provider_p95_ms",
+        "answerability_agreement",
+        "numeric_exactness",
+        "claim_citation_coverage",
+        "metamorphic_consistency",
+    }
+    metadata = dict(run_metadata or {})
+    unexpected_metadata = set(metadata) - allowed_metadata
+    if unexpected_metadata:
+        raise ValueError("unsafe Judge Stress V2 run metadata")
+
+    runtime_release_eligible = metadata.get("runtime_release_eligible", False)
+    if type(runtime_release_eligible) is not bool:
+        raise ValueError("runtime_release_eligible must be bool")
+    metadata["runtime_release_eligible"] = runtime_release_eligible
+
+    count_fields = (
+        "provider_eligible_root_count",
+        "provider_probe_observation_count",
+        "provider_call_count",
+        "forbidden_provider_call_count",
+        "deterministic_provider_call_count",
+        "evaluator_error_count",
+        "security_failure_count",
+        "concurrency_error_count",
+    )
+    for field in count_fields:
+        value = metadata.get(field, 0)
+        if type(value) is not int or value < 0:
+            raise ValueError(f"{field} must be a non-negative integer")
+        metadata[field] = value
+    if run_metadata is not None and (
+        metadata["provider_eligible_root_count"] != 42
+        or metadata["provider_probe_observation_count"] != 120
+    ):
+        raise ValueError("provider probe contract must remain 42 roots / 120 observations")
+
+    metric_fields = (
+        "answerability_agreement",
+        "numeric_exactness",
+        "claim_citation_coverage",
+        "metamorphic_consistency",
+    )
+    latency_fields = ("concurrency_p95_ms", "provider_p95_ms")
+    hard_reasons = list(blocker_rows)
+    for field in (*metric_fields, *latency_fields):
+        value = metadata.get(field)
+        if value is None:
+            if run_metadata is not None:
+                hard_reasons.append(f"missing_metric:{field}")
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{field} must be numeric or null")
+        number = float(value)
+        if not math.isfinite(number) or number < 0:
+            raise ValueError(f"{field} must be finite and non-negative")
+        if field in metric_fields and number > 1:
+            raise ValueError(f"{field} must be between zero and one")
+        metadata[field] = number
+
+    for field in (
+        "forbidden_provider_call_count",
+        "deterministic_provider_call_count",
+        "evaluator_error_count",
+        "security_failure_count",
+        "concurrency_error_count",
+    ):
+        if metadata[field]:
+            hard_reasons.append(field)
+    if not runtime_release_eligible:
+        hard_reasons.append("non_release_runtime")
+    if evaluated != expected:
+        hard_reasons.append("incomplete_evaluation")
+    if evaluated - passed:
+        hard_reasons.append("case_failures")
+    hard_reasons = list(dict.fromkeys(hard_reasons))
+    hard_gate_passed = run_metadata is not None and not hard_reasons
+    release_state = (
+        "BLOCKED"
+        if blocker_rows
+        else ("NOT_RUN" if status == "NOT_RUN" else ("PASS" if hard_gate_passed else "FAIL"))
+    )
+    summary = {
         "schema_version": "judge-stress-v2-summary-v1",
         "suite_sha256": manifest.get("suite_sha256"),
         "status": status,
+        "release_state": release_state,
+        "hard_gate_passed": hard_gate_passed,
+        "hard_gate_reasons": hard_reasons,
+        "blocked_reasons": blocker_rows,
         "case_count": expected,
         "evaluated_count": evaluated,
         "pass_count": passed,
@@ -815,6 +940,8 @@ def build_summary(
         "failure_category_counts": failure_counts,
         "reproducibility": deepcopy(manifest.get("reproducibility", {})),
     }
+    summary.update({field: metadata.get(field) for field in sorted(allowed_metadata)})
+    return summary
 
 
 def render_summary_html(summary: Mapping[str, object]) -> str:
@@ -832,13 +959,32 @@ def render_summary_html(summary: Mapping[str, object]) -> str:
         f"<tr><td>{escape(name)}</td><td>{int(failure_counts[name])}</td></tr>"
         for name in FAILURE_CATEGORIES
     )
+    blocked = summary.get("blocked_reasons")
+    blocked = blocked if isinstance(blocked, list) else []
+    hard_reasons = summary.get("hard_gate_reasons")
+    hard_reasons = hard_reasons if isinstance(hard_reasons, list) else []
+    blocker_rows = "".join(f"<li><code>{escape(str(value))}</code></li>" for value in blocked)
+    reason_rows = "".join(f"<li><code>{escape(str(value))}</code></li>" for value in hard_reasons)
+    blockers_section = (
+        f"<h2>Blocked reasons</h2><ul>{blocker_rows}</ul>" if blocker_rows else ""
+    )
+    reasons_section = (
+        f"<h2>Hard gate reasons</h2><ul>{reason_rows}</ul>" if reason_rows else ""
+    )
+    runtime_label = (
+        "Contract harness — not app accuracy"
+        if summary.get("runtime_release_eligible") is not True
+        else "Release-eligible application runtime"
+    )
     return f"""<!doctype html>
 <html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">
 <title>Judge Stress V2 Summary</title><style>
 body{{font:15px system-ui,sans-serif;max-width:920px;margin:40px auto;padding:0 20px;color:#17202a}}h1{{margin-bottom:4px}}.meta{{color:#59636e}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:24px 0}}.card{{border:1px solid #d9dee3;border-radius:8px;padding:14px}}table{{border-collapse:collapse;width:100%;margin:12px 0 28px}}th,td{{border-bottom:1px solid #e6e9ec;padding:8px;text-align:left}}th{{background:#f5f7f8}}
 </style></head><body><main><h1>Judge Stress V2</h1>
 <p class=\"meta\">Suite <code>{escape(str(summary.get('suite_sha256')))}</code></p>
-<div class=\"grid\"><div class=\"card\"><strong>Status</strong><br>{escape(str(summary.get('status')))}</div><div class=\"card\"><strong>Cases</strong><br>{int(summary.get('case_count', 0))}</div><div class=\"card\"><strong>Evaluated</strong><br>{int(summary.get('evaluated_count', 0))}</div><div class=\"card\"><strong>Failures</strong><br>{int(summary.get('failure_count', 0))}</div></div>
+<p class=\"meta\"><strong>Runtime:</strong> {escape(runtime_label)}</p>
+<div class=\"grid\"><div class=\"card\"><strong>Status</strong><br>{escape(str(summary.get('status')))}</div><div class=\"card\"><strong>Release state</strong><br>{escape(str(summary.get('release_state', 'NOT_RUN')))}</div><div class=\"card\"><strong>Hard gate</strong><br>{'PASS' if summary.get('hard_gate_passed') is True else 'FAIL'}</div><div class=\"card\"><strong>Cases</strong><br>{int(summary.get('case_count', 0))}</div><div class=\"card\"><strong>Evaluated</strong><br>{int(summary.get('evaluated_count', 0))}</div><div class=\"card\"><strong>Failures</strong><br>{int(summary.get('failure_count', 0))}</div></div>
+{blockers_section}{reasons_section}
 <h2>Suite categories</h2><table><thead><tr><th>Category</th><th>Cases</th></tr></thead><tbody>{category_rows}</tbody></table>
 <h2>Failure categories</h2><table><thead><tr><th>Failure category</th><th>Count</th></tr></thead><tbody>{failure_rows}</tbody></table>
 <p class=\"meta\">This standalone report intentionally contains no raw evaluator questions or expected answers.</p>
