@@ -81,6 +81,17 @@ class FinancialAccountResolutionTests(unittest.TestCase):
         resolution = resolve_financial_account("영 업-이 익")
         self.assertEqual(resolution.canonical_id, "operating_income")
 
+    def test_colloquial_tails_do_not_hide_the_account(self) -> None:
+        self.assertEqual(resolve_financial_account("매출액 좀 알려줄래").canonical_id, "revenue")
+        self.assertEqual(resolve_financial_account("영업이익 궁금해").canonical_id, "operating_income")
+        self.assertEqual(resolve_financial_account("당기순이익 어때?").canonical_id, "net_income")
+        self.assertEqual(
+            resolve_financial_account("삼성전자 2025년 연결 매출액 좀 알려줄래?").canonical_id,
+            "revenue",
+        )
+        # Boundary guard must keep shadowing longer account words.
+        self.assertEqual(resolve_financial_account("매출총이익 좀 알려줘").canonical_id, "gross_profit")
+
     def test_fuzzy_typo_is_never_inferred(self) -> None:
         self.assertEqual(resolve_financial_account("매출총익").status, "unknown")
         self.assertIsNone(canonical_account_id("매출총이익"))
