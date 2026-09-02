@@ -790,3 +790,10 @@
 - 최소 GREEN: vector manifest가 `IndexFlatIP`, `inner_product`, `normalized_embeddings=true`를 선언해야 하고, loaded FAISS index의 type/metric이 이를 확인해야 startup이 진행된다. `/model/model_identity.json`의 schema/model/revision도 pinned `BAAI/bge-m3` revision과 일치해야 한다. Runtime manifest와 `/health`는 이 검증된 값만 공개하며 기존 health 필드는 유지한다.
 - 검증: focused Dense runtime `12 passed, 6 warnings`; 전체 Python `548 passed, 2 skipped, 58 warnings, 74 subtests passed`; Web `12 passed`; `python -m compileall -q src scripts` 통과. 전체 Python/Web/compile 결과는 fix 구현 직후 실행한 완료 evidence이고, 사용자 지시에 따라 최종 단계에서는 focused suite만 재실행했다.
 - 문서/환경 경계: 2026-08-20 `dcf44b8` local Docker/compose evidence와 2026-08-21 `d3e909a` NCP image evidence를 `PASS_HISTORICAL`로 범위 지정했다. 현재 Task 1 compose/image/container 및 Dense image/health 측정은 Docker engine unavailable로 `BLOCKED_ENVIRONMENT`이며 Docker를 재시도하거나 image validation을 주장하지 않았다.
+
+### 2026-09-02 — Task 1 fix round 2: immutable Dense files and vector norms
+
+- 재리뷰 원인: `normalized_embeddings=true`와 model identity JSON 자체가 여전히 self-asserted 선언이었다. Vector/build manifest에는 이미 artifact SHA-256이 있으므로 runtime이 이를 직접 검증하고, mounted model identity도 실제 전체 파일 hash에 묶어야 했다.
+- TDD RED: 잘못된 FAISS SHA-256, 실제 non-unit vector, 변경된 mounted model file의 세 회귀를 먼저 추가해 기존 코드에서 `3 failed, 12 passed`를 확인했다. 모델 identity builder 부재도 별도 artifact test에서 `1 failed`로 확인했다.
+- 최소 GREEN: FAISS/metadata SHA-256을 build manifest와 비교하고, `IndexFlatIP`의 모든 vector를 bounded batch로 reconstruct하여 L2 norm `1±1e-4`를 검증한다. Staging 전용 builder가 model directory 전체 regular file의 size/SHA-256 identity를 원자적으로 만들며 runtime은 파일 집합·크기·hash를 모두 확인한다. Live/read-only mount를 쓰지 않으며 main agent에는 NumPy를 추가하지 않았다.
+- 검증: Dense runtime 및 deployment artifact `28 passed`; 전체 Python `552 passed, 2 skipped, 58 warnings, 74 subtests`; Web `12/12`; `compileall src scripts`와 `git diff --check` 통과. Docker/NCP/live artifact 측정은 계속 `BLOCKED_ENVIRONMENT`이다.

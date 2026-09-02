@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from array import array
 from contextlib import closing
+import hashlib
 import json
 import mmap
 import os
@@ -50,6 +51,90 @@ def _write_runtime_manifest(path: Path, identity: dict[str, object]) -> None:
         newline="\n",
     )
     os.replace(temporary, path)
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _model_file_paths(model_path: Path) -> dict[str, Path]:
+    root = model_path.resolve()
+    files: dict[str, Path] = {}
+    for path in sorted(model_path.rglob("*")):
+        if not path.is_file() or path.name == MODEL_IDENTITY_FILENAME:
+            continue
+        resolved = path.resolve()
+        try:
+            relative = resolved.relative_to(root).as_posix()
+        except ValueError as exc:
+            raise ValueError("dense_mounted_model_path_invalid") from exc
+        files[relative] = path
+    return files
+
+
+def build_model_identity(model_path: Path) -> dict[str, object]:
+    """Return a non-secret identity manifest bound to every mounted model file."""
+    files = _model_file_paths(Path(model_path))
+    if not files:
+        raise ValueError("dense_mounted_model_files_missing")
+    return {
+        "schema_version": MODEL_IDENTITY_SCHEMA_VERSION,
+        "model": EXPECTED_MODEL,
+        "model_revision": EXPECTED_MODEL_REVISION,
+        "files": {
+            relative: {
+                "size_bytes": path.stat().st_size,
+                "sha256": _sha256_file(path),
+            }
+            for relative, path in files.items()
+        },
+    }
+
+
+def _validate_model_identity(model_path: Path, identity: dict[str, object]) -> None:
+    declared = identity.get("files")
+    if not isinstance(declared, dict) or not declared:
+        raise ValueError("dense_mounted_model_identity_mismatch")
+    actual = _model_file_paths(model_path)
+    if set(declared) != set(actual):
+        raise ValueError("dense_mounted_model_file_set_mismatch")
+    for relative, path in actual.items():
+        contract = declared.get(relative)
+        if not isinstance(contract, dict):
+            raise ValueError(f"dense_mounted_model_file_mismatch:{relative}")
+        sha256 = contract.get("sha256")
+        size_bytes = contract.get("size_bytes")
+        if (
+            not isinstance(sha256, str)
+            or len(sha256) != 64
+            or int(size_bytes or -1) != path.stat().st_size
+            or _sha256_file(path) != sha256.casefold()
+        ):
+            raise ValueError(f"dense_mounted_model_file_mismatch:{relative}")
+
+
+def _validate_normalized_index(index: object, numpy: object, *, batch_size: int = 4096) -> None:
+    vector_count = int(getattr(index, "ntotal"))
+    dimension = int(getattr(index, "d"))
+    for start in range(0, vector_count, batch_size):
+        count = min(batch_size, vector_count - start)
+        try:
+            vectors = index.reconstruct_n(start, count)  # type: ignore[attr-defined]
+        except TypeError:
+            vectors = numpy.empty((count, dimension), dtype="float32")  # type: ignore[attr-defined]
+            index.reconstruct_n(start, count, vectors)  # type: ignore[attr-defined]
+        array_value = numpy.asarray(vectors, dtype="float32")  # type: ignore[attr-defined]
+        if tuple(array_value.shape) != (count, dimension):
+            raise ValueError("dense_vector_normalization_mismatch")
+        norms = numpy.linalg.norm(array_value, axis=1)  # type: ignore[attr-defined]
+        if not bool(numpy.all(numpy.isfinite(norms))) or not bool(  # type: ignore[attr-defined]
+            numpy.allclose(norms, 1.0, rtol=0.0, atol=1e-4)  # type: ignore[attr-defined]
+        ):
+            raise ValueError("dense_vector_normalization_mismatch")
 
 
 class JsonlOffsetIndex:
@@ -261,9 +346,17 @@ class DenseRuntime:
         if dimension != 1024 or vector_count <= 0:
             raise ValueError("dense_manifest_invalid")
         for path, key in ((Path(index_path), "faiss_index"), (Path(metadata_path), "chunk_metadata")):
-            expected = int(manifest.get("outputs", {}).get(key, {}).get("size_bytes") or -1)
+            contract = manifest.get("outputs", {}).get(key, {})
+            expected = int(contract.get("size_bytes") or -1)
+            expected_sha256 = contract.get("sha256")
             if not path.is_file() or path.stat().st_size != expected:
                 raise ValueError(f"dense_artifact_size_mismatch:{key}")
+            if (
+                not isinstance(expected_sha256, str)
+                or len(expected_sha256) != 64
+                or _sha256_file(path) != expected_sha256.casefold()
+            ):
+                raise ValueError(f"dense_artifact_hash_mismatch:{key}")
 
         model_identity_path = Path(model_path) / MODEL_IDENTITY_FILENAME
         if not model_identity_path.is_file():
@@ -279,6 +372,7 @@ class DenseRuntime:
             or model_identity.get("model_revision") != EXPECTED_MODEL_REVISION
         ):
             raise ValueError("dense_mounted_model_identity_mismatch")
+        _validate_model_identity(Path(model_path), model_identity)
 
         import faiss  # type: ignore[import-not-found]
         import numpy as np  # type: ignore[import-not-found]
@@ -293,6 +387,7 @@ class DenseRuntime:
             raise ValueError("dense_faiss_identity_mismatch")
         if int(getattr(self.index, "metric_type", -1)) != int(faiss.METRIC_INNER_PRODUCT):
             raise ValueError("dense_faiss_metric_mismatch")
+        _validate_normalized_index(self.index, np)
         self.metadata = JsonlOffsetIndex(metadata_path, offsets_path, expected_count=vector_count)
         self.filing_vectors = FilingVectorIndex(
             metadata_path,

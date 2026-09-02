@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import numpy as real_numpy
 
 from fastapi.testclient import TestClient
 
@@ -98,15 +101,29 @@ def _write_dense_runtime_fixture(root: Path) -> dict[str, Path]:
             "vector_count": 1,
         },
         "outputs": {
-            "faiss_index": {"size_bytes": index_path.stat().st_size},
-            "chunk_metadata": {"size_bytes": metadata_path.stat().st_size},
+            "faiss_index": {
+                "size_bytes": index_path.stat().st_size,
+                "sha256": hashlib.sha256(index_path.read_bytes()).hexdigest(),
+            },
+            "chunk_metadata": {
+                "size_bytes": metadata_path.stat().st_size,
+                "sha256": hashlib.sha256(metadata_path.read_bytes()).hexdigest(),
+            },
         },
     }), encoding="utf-8")
     model_path.mkdir()
+    model_config = model_path / "config.json"
+    model_config.write_text('{"model_type":"bge-m3"}\n', encoding="utf-8")
     (model_path / "model_identity.json").write_text(json.dumps({
         "schema_version": "1.0.0",
         "model": _DENSE_MODEL,
         "model_revision": _DENSE_MODEL_REVISION,
+        "files": {
+            "config.json": {
+                "size_bytes": model_config.stat().st_size,
+                "sha256": hashlib.sha256(model_config.read_bytes()).hexdigest(),
+            }
+        },
     }), encoding="utf-8")
     return {
         "index_path": index_path,
@@ -116,11 +133,16 @@ def _write_dense_runtime_fixture(root: Path) -> dict[str, Path]:
     }
 
 
-def _fake_dense_modules(*, metric_type: int = 0) -> dict[str, object]:
+def _fake_dense_modules(*, metric_type: int = 0, normalized: bool = True) -> dict[str, object]:
+    def reconstruct_n(_start: int, count: int):
+        vectors = real_numpy.zeros((count, 1024), dtype="float32")
+        vectors[:, 0] = 1.0 if normalized else 2.0
+        return vectors
+
     fake_index = type(
         "IndexFlatIP",
         (),
-        {"d": 1024, "ntotal": 1, "metric_type": metric_type},
+        {"d": 1024, "ntotal": 1, "metric_type": metric_type, "reconstruct_n": staticmethod(reconstruct_n)},
     )()
     return {
         "faiss": SimpleNamespace(
@@ -129,13 +151,19 @@ def _fake_dense_modules(*, metric_type: int = 0) -> dict[str, object]:
             __version__="1.15.0",
             read_index=lambda _: fake_index,
         ),
-        "numpy": SimpleNamespace(__version__="2.5.2"),
+        "numpy": real_numpy,
         "FlagEmbedding": SimpleNamespace(BGEM3FlagModel=lambda *_args, **_kwargs: object()),
     }
 
 
-def _load_dense_runtime(root: Path, paths: dict[str, Path], *, metric_type: int = 0) -> DenseRuntime:
-    with patch.dict(sys.modules, _fake_dense_modules(metric_type=metric_type)):
+def _load_dense_runtime(
+    root: Path,
+    paths: dict[str, Path],
+    *,
+    metric_type: int = 0,
+    normalized: bool = True,
+) -> DenseRuntime:
+    with patch.dict(sys.modules, _fake_dense_modules(metric_type=metric_type, normalized=normalized)):
         return DenseRuntime(
             index_path=paths["index_path"],
             metadata_path=paths["metadata_path"],
@@ -153,10 +181,11 @@ def _assert_dense_runtime_rejected(
     expected_error: str,
     *,
     metric_type: int = 0,
+    normalized: bool = True,
 ) -> None:
     runtime = None
     try:
-        runtime = _load_dense_runtime(root, paths, metric_type=metric_type)
+        runtime = _load_dense_runtime(root, paths, metric_type=metric_type, normalized=normalized)
     except ValueError as exc:
         test.assertRegex(str(exc), expected_error)
     else:
@@ -282,6 +311,29 @@ class DenseRuntimeIdentityTests(unittest.TestCase):
                 metric_type=1,
             )
 
+    def test_runtime_rejects_faiss_artifact_hash_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = _write_dense_runtime_fixture(root)
+            manifest = json.loads(paths["manifest_path"].read_text(encoding="utf-8"))
+            manifest["outputs"]["faiss_index"]["sha256"] = "0" * 64
+            paths["manifest_path"].write_text(json.dumps(manifest), encoding="utf-8")
+
+            _assert_dense_runtime_rejected(self, root, paths, "dense_artifact_hash_mismatch:faiss_index")
+
+    def test_runtime_rejects_non_normalized_loaded_vectors(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = _write_dense_runtime_fixture(root)
+
+            _assert_dense_runtime_rejected(
+                self,
+                root,
+                paths,
+                "dense_vector_normalization_mismatch",
+                normalized=False,
+            )
+
     def test_runtime_rejects_missing_mounted_model_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -309,6 +361,19 @@ class DenseRuntimeIdentityTests(unittest.TestCase):
                 root,
                 paths,
                 "dense_mounted_model_identity_mismatch",
+            )
+
+    def test_runtime_rejects_mounted_model_file_hash_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            paths = _write_dense_runtime_fixture(root)
+            (paths["model_path"] / "config.json").write_text("changed\n", encoding="utf-8")
+
+            _assert_dense_runtime_rejected(
+                self,
+                root,
+                paths,
+                "dense_mounted_model_file_mismatch:config.json",
             )
 
 

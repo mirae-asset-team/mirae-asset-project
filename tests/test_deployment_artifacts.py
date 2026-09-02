@@ -40,6 +40,14 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn('CMD ["disclosure-dense"]', dense_dockerfile)
         self.assertIn('HF_HUB_OFFLINE=1', dense_dockerfile)
 
+    def test_dense_model_identity_has_a_reproducible_staging_builder(self):
+        script = Path("scripts/build_dense_model_identity.py")
+        self.assertTrue(script.is_file())
+        text = script.read_text(encoding="utf-8")
+        self.assertIn("build_model_identity", text)
+        self.assertIn("--model-path", text)
+        self.assertIn("--output", text)
+
     def test_public_limit_defaults_are_explicit_in_compose_and_example_env(self):
         compose = Path("compose.yaml").read_text(encoding="utf-8")
         example = Path(".env.example").read_text(encoding="utf-8")
