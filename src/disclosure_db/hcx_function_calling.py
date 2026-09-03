@@ -929,6 +929,126 @@ class HcxFunctionCallingService:
             "verification_trace": dict(trace),
         }
 
+    def _verified_deterministic_fallback_result(
+        self,
+        *,
+        tool_call: HcxToolCall,
+        tool_response: Mapping[str, object],
+        route: QuestionRoute | None,
+        available_citations: Mapping[str, HcxEvidenceCitation],
+        common: Mapping[str, object],
+        warning_codes: Sequence[str],
+        limitation_code: str,
+    ) -> FunctionCallingResult:
+        result_common = dict(common)
+        result_common["metadata"] = dict(
+            common.get("metadata") if isinstance(common.get("metadata"), Mapping) else {}
+        )
+        admission = build_claim_admission(tool_response)
+        fallback = self._deterministic_claim_fallback(
+            tool_response,
+            admission,
+            tuple(available_citations),
+            route,
+        )
+        if fallback is None:
+            result_common["recommended_action"] = "abstain"
+            return self._result(
+                "abstained",
+                UNANSWERABLE_TEXT,
+                warnings=[*warning_codes, "deterministic_fallback_not_available"],
+                **result_common,
+            )
+        citations = self._selected_citations(
+            tool_call.name,
+            fallback.citation_ids,
+            available_citations,
+        )
+        citation_ids = tuple(dict.fromkeys(
+            evidence_id
+            for evidence_id in fallback.citation_ids
+            if evidence_id in available_citations
+        ))
+        selected_facts = {
+            fact_ref: fact
+            for fact_ref, fact in admission.facts.items()
+            if set(fact.evidence_ids).issubset(set(citation_ids))
+        }
+        selected_calculations = {
+            calculation_ref: calculation
+            for calculation_ref, calculation in admission.calculations.items()
+            if set(calculation.evidence_ids).issubset(set(citation_ids))
+        }
+        owned_slots = tuple(dict.fromkeys(
+            slot_id
+            for item in (*selected_facts.values(), *selected_calculations.values())
+            for slot_id in item.evidence_slot_ids
+        ))
+        fallback_claim = HcxAnswerClaim(
+            "deterministic-fallback-1",
+            fallback.answer,
+            citation_ids,
+            tuple(selected_facts),
+            tuple(selected_calculations),
+            owned_slots,
+            tuple(dict.fromkeys(
+                [
+                    value
+                    for fact in selected_facts.values()
+                    for value in fact.numeric_values
+                ] + [
+                    value
+                    for calculation in selected_calculations.values()
+                    for value in calculation.numeric_values
+                ]
+            )),
+        )
+        limitations = (
+            "historical_disclosure_only",
+            "no_transaction_recommendation",
+            "no_forecast",
+            limitation_code,
+        )
+        verification = verify_generated_claims(
+            answer=fallback.answer,
+            citation_ids=citation_ids,
+            raw_claims=(fallback_claim,),
+            raw_limitations=limitations,
+            admission=admission,
+        )
+        if not verification.verified or not citations:
+            result_common["recommended_action"] = "abstain"
+            result_common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
+                (), limitations, verification.trace("abstained"),
+            ))
+            return self._result(
+                "abstained",
+                UNANSWERABLE_TEXT,
+                warnings=[
+                    *warning_codes,
+                    "deterministic_fallback_verification_failed",
+                    *verification.failure_codes,
+                ],
+                **result_common,
+            )
+        result_common["metadata"].update({  # type: ignore[union-attr]
+            "execution_mode": "deterministic",
+            **self._claim_metadata(
+                verification.claims,
+                verification.limitations,
+                verification.trace("fallback"),
+            ),
+        })
+        return self._result(
+            "answered",
+            self._render_answer(fallback.answer, citations),
+            answer_allowed=True,
+            citation_ids=list(citation_ids),
+            citations=[item.to_dict() for item in citations],
+            warnings=list(warning_codes),
+            **result_common,
+        )
+
     def _merged_response(
         self,
         *,
@@ -1911,108 +2031,14 @@ class HcxFunctionCallingService:
             )
 
         if not self.client.configured:
-            admission = build_claim_admission(tool_response)
-            fallback = self._deterministic_claim_fallback(
-                tool_response,
-                admission,
-                tuple(available_citations),
-                route,
-            )
-            if fallback is None:
-                common["recommended_action"] = "abstain"
-                return self._result(
-                    "abstained",
-                    UNANSWERABLE_TEXT,
-                    warnings=["deterministic_fallback_not_available"],
-                    **common,
-                )
-            citations = self._selected_citations(
-                tool_call.name,
-                fallback.citation_ids,
-                available_citations,
-            )
-            citation_ids = tuple(dict.fromkeys(
-                evidence_id
-                for evidence_id in fallback.citation_ids
-                if evidence_id in available_citations
-            ))
-            selected_facts = {
-                fact_ref: fact
-                for fact_ref, fact in admission.facts.items()
-                if set(fact.evidence_ids).issubset(set(citation_ids))
-            }
-            selected_calculations = {
-                calculation_ref: calculation
-                for calculation_ref, calculation in admission.calculations.items()
-                if set(calculation.evidence_ids).issubset(set(citation_ids))
-            }
-            owned_slots = tuple(dict.fromkeys(
-                slot_id
-                for item in (*selected_facts.values(), *selected_calculations.values())
-                for slot_id in item.evidence_slot_ids
-            ))
-            fallback_claim = HcxAnswerClaim(
-                "deterministic-fallback-1",
-                fallback.answer,
-                citation_ids,
-                tuple(selected_facts),
-                tuple(selected_calculations),
-                owned_slots,
-                tuple(dict.fromkeys(
-                    [
-                        value
-                        for fact in selected_facts.values()
-                        for value in fact.numeric_values
-                    ] + [
-                        value
-                        for calculation in selected_calculations.values()
-                        for value in calculation.numeric_values
-                    ]
-                )),
-            )
-            limitations = (
-                "historical_disclosure_only",
-                "no_transaction_recommendation",
-                "no_forecast",
-                "provider_unavailable_deterministic_fallback",
-            )
-            verification = verify_generated_claims(
-                answer=fallback.answer,
-                citation_ids=citation_ids,
-                raw_claims=(fallback_claim,),
-                raw_limitations=limitations,
-                admission=admission,
-            )
-            if not verification.verified or not citations:
-                common["recommended_action"] = "abstain"
-                common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
-                    (), limitations, verification.trace("abstained"),
-                ))
-                return self._result(
-                    "abstained",
-                    UNANSWERABLE_TEXT,
-                    warnings=[
-                        "deterministic_fallback_verification_failed",
-                        *verification.failure_codes,
-                    ],
-                    **common,
-                )
-            common["metadata"].update({  # type: ignore[union-attr]
-                "execution_mode": "deterministic",
-                **self._claim_metadata(
-                    verification.claims,
-                    verification.limitations,
-                    verification.trace("fallback"),
-                ),
-            })
-            return self._result(
-                "answered",
-                self._render_answer(fallback.answer, citations),
-                answer_allowed=True,
-                citation_ids=list(citation_ids),
-                citations=[item.to_dict() for item in citations],
-                warnings=["provider_unavailable_deterministic_fallback"],
-                **common,
+            return self._verified_deterministic_fallback_result(
+                tool_call=tool_call,
+                tool_response=tool_response,
+                route=route,
+                available_citations=available_citations,
+                common=common,
+                warning_codes=("provider_unavailable_deterministic_fallback",),
+                limitation_code="provider_unavailable_deterministic_fallback",
             )
 
         common["metadata"]["final_generation_called"] = True  # type: ignore[index]
@@ -2027,6 +2053,27 @@ class HcxFunctionCallingService:
             common["metadata"].update(  # type: ignore[union-attr]
                 self._record_failure(failure_stage, exc, tool_name=tool_call.name)
             )
+            if (
+                isinstance(exc, HcxFunctionCallingError)
+                and analysis_execution is None
+                and route is not None
+                and (
+                    tool_call.name == "get_financial_facts"
+                    or route.workflow == "financial_statement_metric"
+                )
+            ):
+                return self._verified_deterministic_fallback_result(
+                    tool_call=tool_call,
+                    tool_response=tool_response,
+                    route=route,
+                    available_citations=available_citations,
+                    common=common,
+                    warning_codes=(
+                        "hcx_final_generation_failed",
+                        "provider_failure_deterministic_fallback",
+                    ),
+                    limitation_code="provider_failure_deterministic_fallback",
+                )
             common["recommended_action"] = "abstain"
             return self._result(
                 "error", UNANSWERABLE_TEXT, warnings=["hcx_final_generation_failed"], **common,
@@ -2384,24 +2431,29 @@ class HcxFunctionCallingService:
     ) -> list[HcxEvidenceCitation]:
         identifiers = list(available) if tool_name == "get_correction_lineage" else list(generated_ids)
         selected: list[HcxEvidenceCitation] = []
-        seen_receipts: set[str] = set()
         for evidence_id in identifiers:
             citation = available.get(evidence_id)
-            if citation is None or citation.rcept_no in seen_receipts:
+            if citation is None:
                 continue
-            seen_receipts.add(citation.rcept_no)
             selected.append(citation)
         return selected
 
     @staticmethod
     def _render_answer(answer: str, citations: Sequence[HcxEvidenceCitation]) -> str:
+        displayed: list[HcxEvidenceCitation] = []
+        seen_receipts: set[str] = set()
+        for citation in citations:
+            if citation.rcept_no in seen_receipts:
+                continue
+            seen_receipts.add(citation.rcept_no)
+            displayed.append(citation)
         lines = [answer.strip(), "", "근거 공시"]
-        if len(citations) == 1:
-            citation = citations[0]
+        if len(displayed) == 1:
+            citation = displayed[0]
             label = " ".join(item for item in (citation.correction_role, citation.report_name) if item)
             lines.extend([f"- {label or 'DART 공시'}", f"- 접수번호: {citation.rcept_no}"])
         else:
-            for index, citation in enumerate(citations, start=1):
+            for index, citation in enumerate(displayed, start=1):
                 label = " ".join(item for item in (citation.correction_role, citation.report_name) if item)
                 lines.append(f"{index}. {label or 'DART 공시'} — 접수번호: {citation.rcept_no}")
         return "\n".join(lines)

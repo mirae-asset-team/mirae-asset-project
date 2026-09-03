@@ -341,6 +341,46 @@ def test_calculation_requires_all_operand_evidence_and_exact_decimal_result() ->
     assert "calculation_operand_evidence_missing" in result.metadata["verification_trace"]["failure_codes"]
 
 
+def test_korean_won_display_component_cannot_ground_a_wrong_calculation_claim() -> None:
+    facts = [
+        _fact("fact-2023", "6566976000000", "ev-1", year="2023"),
+        _fact("fact-2025", "43601051000000", "ev-2", year="2025"),
+    ]
+    calculations = [{
+        "calculation_id": "calc-difference",
+        "operation": "difference",
+        "value": "37034075000000",
+        "display_value": "37조 340억 7,500만 원",
+        "unit": "KRW",
+        "operands": ["6566976000000", "43601051000000"],
+        "evidence_ids": ["ev-1", "ev-2"],
+    }]
+    malicious_text = "두 기간 영업이익의 차이는 340원입니다."
+
+    result = _service(
+        _response(
+            facts=facts,
+            calculations=calculations,
+            evidence_ids=("ev-1", "ev-2"),
+        ),
+        _generated(
+            malicious_text,
+            citations=("ev-1", "ev-2"),
+            claims=(_claim(
+                malicious_text,
+                citations=("ev-1", "ev-2"),
+                fact_refs=("fact-2023", "fact-2025"),
+                calculation_refs=("calc-difference",),
+                numeric_values=("340",),
+            ),),
+        ),
+    ).answer("삼성전자 2023년과 2025년 영업이익 차이는?")
+
+    assert malicious_text not in result.answer
+    assert result.metadata["verification_trace"]["status"] == "fallback"
+    assert "numeric_value_not_grounded" in result.metadata["verification_trace"]["failure_codes"]
+
+
 def test_wrong_evidence_slot_and_mixed_unadmitted_fact_support_fail_closed() -> None:
     mixed = _fact("fact-mixed", "200", "ev-1", year="2025")
     mixed["evidence_ids"] = ["ev-1", "not-admitted"]

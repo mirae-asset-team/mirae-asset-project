@@ -1103,8 +1103,16 @@ class HcxFunctionCallingTests(unittest.TestCase):
             result.citation_ids,
             ["ev-revenue", "ev-operating-income"],
         )
-        self.assertEqual(len(result.citations), 1)
-        self.assertEqual(result.citations[0]["rcept_no"], "20250318000001")
+        self.assertEqual(len(result.citations), 2)
+        self.assertEqual(
+            {item["evidence_id"] for item in result.citations},
+            {"ev-revenue", "ev-operating-income"},
+        )
+        self.assertEqual(
+            {item["rcept_no"] for item in result.citations},
+            {"20250318000001"},
+        )
+        self.assertEqual(result.answer.count("접수번호: 20250318000001"), 1)
         self.assertEqual(
             result.metadata["claim_support"][0]["citation_ids"],
             ["ev-revenue", "ev-operating-income"],
@@ -1134,6 +1142,33 @@ class HcxFunctionCallingTests(unittest.TestCase):
             {"check": "numeric_values", "status": "passed"},
         )
         self.assertFalse(result.metadata["final_generation_called"])
+
+    def test_configured_provider_failure_falls_back_for_deterministic_financial_route(self) -> None:
+        registry = StaticRegistry(_financial_response([("2025", "333605938")]))
+        client = FakeHcxClient(
+            HcxToolCall(
+                "unused-by-router",
+                "get_financial_facts",
+                {"company": "삼성전자", "account": "매출액"},
+            ),
+            generation_error=HcxFunctionCallingError(
+                "hcx_request_failed", stage="routed_final_generation_request",
+            ),
+        )
+        service = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자의 최근 사업보고서 기준 매출액을 알려줘")
+
+        self.assertEqual(result.status, "answered")
+        self.assertTrue(result.answer_allowed)
+        self.assertIn("333,605,938원", result.answer)
+        self.assertIn("provider_failure_deterministic_fallback", result.warnings)
+        self.assertTrue(result.metadata["final_generation_called"])
+        self.assertEqual(result.metadata["execution_mode"], "deterministic")
 
     def test_concrete_adapter_uses_documented_openai_compatible_tool_messages(self) -> None:
         opener = FakeUrlOpen([

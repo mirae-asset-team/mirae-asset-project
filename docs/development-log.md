@@ -913,8 +913,17 @@
 
 - 시각: `2026-09-03T08:50:15+09:00` / `2026-09-02T23:50:15Z`. 기준 커밋은 `fbe5305`다. D 드라이브 base DB, live overlay와 search index는 read-only 조회로만 사용했고 credential, `.env`, PEM, NCP 보안 설정은 변경하지 않았다.
 - 원인: `HcxFunctionCallingService.answer()`가 결정론적 structured route를 이미 확정한 뒤에도 provider 설정 여부를 Tool 실행보다 먼저 검사했다. 따라서 DB에 검증된 삼성전자 수치가 있어도 HCX key가 없으면 `provider_unavailable`로 종료됐다. provider는 설명 문장화에만 필요하고 정형 조회·Decimal 계산에는 필요하지 않다는 기존 설계와 어긋났다.
-- TDD: provider 미설정 단일 fact, `SM엔터테인먼트 → 에스엠`, 근거 부족, 최신 다중 지표, 기간 차이·증가율을 실패 테스트로 먼저 고정했다. 다중 지표는 같은 사업보고서의 citation 카드가 접수번호 기준으로 하나가 되더라도 서로 다른 evidence ID를 claim verifier에 모두 보존하도록 수정했다. 계산 답변은 원시 Decimal뿐 아니라 서버가 만든 원화 단위·백분율 표시값도 admission에 등록한 뒤 재계산과 숫자 일치를 검증한다.
+- TDD: provider 미설정 단일 fact, `SM엔터테인먼트 → 에스엠`, 근거 부족, 최신 다중 지표, 기간 차이·증가율을 실패 테스트로 먼저 고정했다. 다중 지표는 같은 사업보고서에 속해도 서로 다른 evidence ID를 claim verifier와 구조화 citation에 모두 보존하고, 렌더링된 접수번호 목록만 중복 제거한다. 계산 답변은 원시 Decimal뿐 아니라 서버가 만든 원화 단위·백분율 표시값도 admission에 등록한 뒤 재계산과 숫자 일치를 검증한다.
 - 안전 경계: provider 미설정 fallback은 deterministic route에서만 동작한다. 근거가 부족하거나 claim/citation/calculation 검증이 실패하면 답하지 않으며, 자유형 질문은 기존처럼 provider 없이 생성하지 않는다. 매수 추천, prompt injection, 연결/별도 모순은 Tool/provider 호출 전에 각각 정책 거절·공격 거절·명확화로 끝난다.
 - 실제 DB QA: 삼성전자 최신 연결 매출액, 에스엠 alias 최신 연결 매출액, 삼성전자 매출액+영업이익, 삼성전자/SK하이닉스 2024 매출 비교, 삼성전자 2023/2025 영업이익 차이·증가율은 모두 `answered`, deterministic execution, claim verification failure `0`이었다. 정책·prompt injection·모순 scope 3건은 모두 `abstained`였다. focused 회귀는 `75 passed, 56 subtests`다.
 - 외부 상태: `http://101.79.31.221:8001/health`는 10초 안에 응답하지 않아 `TaskCanceledException`으로 관측됐다. release gate는 기존 `BLOCKED_HARD_GATE` 34개 사유와 임계값을 그대로 유지했으며 staging/production 배포를 실행하지 않았다.
-- 최종 전체 회귀: Python `873 passed, 2 skipped, 86 warnings, 240 subtests` (`69.80s`). skip 2건과 FastAPI `on_event` deprecation warning은 기존 환경 항목이다.
+- 최초 리뷰 전 전체 회귀: Python `873 passed, 2 skipped, 86 warnings, 240 subtests` (`69.80s`). skip 2건과 FastAPI `on_event` deprecation warning은 기존 환경 항목이다.
+
+### 푸시 전 독립 리뷰 수정
+
+- 시각: `2026-09-03T09:10:32+09:00` / `2026-09-03T00:10:32Z`. 독립 리뷰가 Critical 1건과 Important 2건을 발견해 최초 커밋 `ebc2530`의 즉시 푸시를 중단했다.
+- 숫자 검증 RED: 계산 표시 `37조 340억 7,500만 원`의 구성요소 `340`을 독립적으로 claim하면 잘못된 `340원`도 승인됐다. 원화 표기 전체를 단일 Decimal `37034075000000`으로 복원하고 해당 span의 구성 숫자를 별도 token으로 등록하지 않도록 수정했다. 조작 claim은 `numeric_value_not_grounded`로 폐기되고 안전 fallback만 남는다.
+- 장애 fallback RED: key는 설정됐지만 provider가 timeout/5xx 계열 `HcxFunctionCallingError`를 내면 DB 근거가 있어도 `error`였다. `get_financial_facts`와 재무제표 structured workflow에만 검증된 deterministic fallback을 재사용한다. provider 오류 진단과 `final_generation_called=true`는 보존하며 자유형/다중근거 판단은 fallback 범위에 넣지 않았다.
+- citation RED: 같은 접수번호의 두 evidence ID를 하나의 응답 card로 합치면 staging gate가 두 번째 ID의 filing을 확인할 수 없어 cross-filing으로 차단했다. API `citations`는 evidence ID마다 1:1 card를 제공하고 화면 답변의 접수번호 목록만 중복 제거한다.
+- 검증: 세 반례 최초 `3 failed`; 수정 후 `3 passed`; claim/HCX/staging/runtime 확대 회귀 `117 passed, 56 subtests`. 실제 read-only DB 8종 재실행도 structured 5건 `answered`, 안전 거절 3건 `abstained`, claim verification failure `0`, 모든 `citation_ids`의 card 매핑 일치를 확인했다.
+- 독립 리뷰 수정 후 전체 회귀: Python `875 passed, 2 skipped, 86 warnings, 240 subtests` (`68.76s`).

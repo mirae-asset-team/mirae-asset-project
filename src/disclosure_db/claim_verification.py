@@ -19,6 +19,14 @@ CLAIM_CONTRACT_VERSION = "claim-verification-v1"
 _NUMBER = re.compile(
     r"(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:[eE][-+]?\d+)?"
 )
+_DECIMAL_ATOM = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
+_KOREAN_WON_AMOUNT = re.compile(
+    rf"(?<![\d,])(?P<sign>[-+]?)"
+    rf"(?:(?P<jo>{_DECIMAL_ATOM})\s*조\s*)?"
+    rf"(?:(?P<eok>{_DECIMAL_ATOM})\s*억\s*)?"
+    rf"(?:(?P<man>{_DECIMAL_ATOM})\s*만\s*)?"
+    rf"(?:(?P<won>{_DECIMAL_ATOM})\s*)?원"
+)
 _NONFINITE = re.compile(r"(?<![A-Za-z0-9_])[+-]?(?:nan|inf(?:inity)?)(?![A-Za-z0-9_])", re.I)
 _FACT_ID_FIELDS = ("financial_fact_id", "event_fact_id", "fact_id")
 _CALCULATION_ID_FIELDS = ("calculation_id", "calculation_ref")
@@ -51,6 +59,39 @@ def _decimal(value: object) -> Decimal | None:
     return result if result.is_finite() else None
 
 
+def _scalar_numeric_tokens(value: object) -> tuple[str, ...]:
+    text = str(value)
+    result: list[str] = []
+    cursor = 0
+    for match in _KOREAN_WON_AMOUNT.finditer(text):
+        components = {
+            "jo": Decimal(1_000_000_000_000),
+            "eok": Decimal(100_000_000),
+            "man": Decimal(10_000),
+            "won": Decimal(1),
+        }
+        if not any(match.group(name) is not None for name in components):
+            continue
+        result.extend(
+            item.group(0).replace(",", "")
+            for item in _NUMBER.finditer(text[cursor:match.start()])
+        )
+        amount = sum(
+            Decimal(match.group(name).replace(",", "")) * multiplier
+            for name, multiplier in components.items()
+            if match.group(name) is not None
+        )
+        if match.group("sign") == "-":
+            amount = -amount
+        result.append(str(amount))
+        cursor = match.end()
+    result.extend(
+        item.group(0).replace(",", "")
+        for item in _NUMBER.finditer(text[cursor:])
+    )
+    return _ordered(tuple(result))
+
+
 def _numeric_tokens(value: object) -> tuple[str, ...]:
     if isinstance(value, Mapping):
         result: list[str] = []
@@ -65,7 +106,7 @@ def _numeric_tokens(value: object) -> tuple[str, ...]:
         return _ordered(result)
     if value is None or isinstance(value, bool):
         return ()
-    return _ordered(tuple(match.group(0).replace(",", "") for match in _NUMBER.finditer(str(value))))
+    return _scalar_numeric_tokens(value)
 
 
 def extract_prose_numeric_values(text: str) -> tuple[str, ...]:
