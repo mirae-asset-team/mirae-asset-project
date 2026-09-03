@@ -929,6 +929,19 @@ class HcxFunctionCallingService:
             "verification_trace": dict(trace),
         }
 
+    @staticmethod
+    def _allows_deterministic_fallback(
+        tool_call: HcxToolCall, route: QuestionRoute | None,
+    ) -> bool:
+        if route is None:
+            return False
+        if route.workflow == "financial_statement_metric":
+            return True
+        return bool(
+            tool_call.name == "get_financial_facts"
+            and route.workflow in {"single", "financial_derived", "financial_comparison"}
+        )
+
     def _verified_deterministic_fallback_result(
         self,
         *,
@@ -2031,6 +2044,14 @@ class HcxFunctionCallingService:
             )
 
         if not self.client.configured:
+            if not self._allows_deterministic_fallback(tool_call, route):
+                common["recommended_action"] = "abstain"
+                return self._result(
+                    "provider_unavailable",
+                    UNANSWERABLE_TEXT,
+                    warnings=["hcx_api_key_not_configured"],
+                    **common,
+                )
             return self._verified_deterministic_fallback_result(
                 tool_call=tool_call,
                 tool_response=tool_response,
@@ -2056,17 +2077,7 @@ class HcxFunctionCallingService:
             if (
                 isinstance(exc, HcxFunctionCallingError)
                 and analysis_execution is None
-                and route is not None
-                and route.workflow in {
-                    "single",
-                    "financial_derived",
-                    "financial_comparison",
-                    "financial_statement_metric",
-                }
-                and (
-                    tool_call.name == "get_financial_facts"
-                    or route.workflow == "financial_statement_metric"
-                )
+                and self._allows_deterministic_fallback(tool_call, route)
             ):
                 return self._verified_deterministic_fallback_result(
                     tool_call=tool_call,

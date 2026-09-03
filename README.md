@@ -39,7 +39,7 @@
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
 | HCX Function Calling | V1.1 및 providerless 검증 정형 fallback 구현 | 운영 provider 문장화와 fallback을 각각 반복 smoke |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
-| 테스트 | 최신 전체 Python `876 passed, 2 skipped, 240 subtests`; Web JS `13 passed` | private/provider 600건과 실제 staging identity 평가 |
+| 테스트 | 최신 전체 Python `877 passed, 2 skipped, 240 subtests`; Web JS `13 passed` | private/provider 600건과 실제 staging identity 평가 |
 | Release gate | `BLOCKED_HARD_GATE` (34개 사유) | 차단 사유를 해소한 동일 입력으로만 재평가; 임계값 완화 금지 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 

@@ -934,3 +934,9 @@
 - fallback 범위 RED: `financial_change_reason`도 내부적으로 `get_financial_facts`를 사용해 provider 장애 때 증가 원인 대신 단순 숫자를 `answered`로 반환할 수 있었다. fallback 허용 workflow를 `single`, `financial_derived`, `financial_comparison`, `financial_statement_metric`으로 명시하고, 앞의 세 workflow는 실제 Tool이 `get_financial_facts`인 경우로 제한했다. 증가 이유·자유형·다중근거 판단은 provider 실패 시 계속 fail-closed다.
 - 웹 중복 RED: release gate가 evidence별 filing을 검증할 수 있도록 API `citations`를 1:1로 보존한 결과 같은 접수번호 카드가 웹에서 반복됐다. 순수 함수 `uniqueCitationCards`가 화면에 표시할 카드만 접수번호 기준으로 합치며, 원 API 배열과 저장된 evidence ID는 변경하지 않는다.
 - 검증: 두 신규 RED는 Python `1 failed`, Web module export failure `1`로 확인했고 수정 후 Python `1 passed`, Web `8 passed`; 확대 회귀 Python `118 passed, 56 subtests`, Web 전체 `13 passed`; 최종 Python 전체 `876 passed, 2 skipped, 86 warnings, 240 subtests` (`68.68s`)다.
+
+### 푸시 전 독립 재리뷰 수정 2
+
+- 마지막 정적 재리뷰에서 provider 장애 분기에는 workflow allowlist가 적용됐지만 provider 미설정 분기는 여전히 모든 routed 질문에 deterministic fallback을 시도하는 대칭 결함을 찾았다. `financial_change_reason` 무설정 회귀는 구현 전에 `1 failed`였다.
+- `_allows_deterministic_fallback` 단일 함수가 provider 미설정과 provider 장애 경로를 함께 통제한다. 허용되지 않은 route는 key가 없으면 `provider_unavailable`, provider 호출이 실패하면 `error`로 끝나며 숫자 답변을 만들지 않는다.
+- 핵심 대칭 회귀 `4 passed`; 최종 Python 전체 `877 passed, 2 skipped, 86 warnings, 240 subtests` (`74.35s`)다. Web 전체는 `13 passed`로 유지된다.
