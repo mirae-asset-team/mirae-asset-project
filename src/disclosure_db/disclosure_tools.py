@@ -113,14 +113,18 @@ def format_financial_value(
         if selected is None:
             return None
         divisor, suffix = selected
-        converted = normalized / divisor
-        sign = "-" if converted < 0 else ""
-        raw = format(abs(converted), "f")
-        whole, dot, fraction = raw.partition(".")
-        rendered = sign + f"{int(whole):,}"
-        if dot and fraction.rstrip("0"):
-            rendered += "." + fraction.rstrip("0")
-        return f"{rendered}{suffix}"
+        # A large unit the value cannot fill (e.g. 561억 asked "in 조") would
+        # render as an unreadable "0.0561363조"; fall through to the natural
+        # mixed-unit form below, which stays both precise and legible.
+        if not (output_unit in {"jo", "eok"} and abs(normalized) < divisor):
+            converted = normalized / divisor
+            sign = "-" if converted < 0 else ""
+            raw = format(abs(converted), "f")
+            whole, dot, fraction = raw.partition(".")
+            rendered = sign + f"{int(whole):,}"
+            if dot and fraction.rstrip("0"):
+                rendered += "." + fraction.rstrip("0")
+            return f"{rendered}{suffix}"
     if normalized != normalized.to_integral_value():
         return f"{normalized:,.2f} 원"
     integer = int(normalized)

@@ -1587,7 +1587,7 @@ class HcxFunctionCallingTests(unittest.TestCase):
         result = service.answer("삼성전자 2025년 연결 영업이익을 조 단위로 알려주세요.")
 
         self.assertEqual(result.status, "answered")
-        self.assertIn("0.665007조 원", result.answer)
+        self.assertIn("6,650억 700만 원", result.answer)
         self.assertEqual(
             result.tool_response["data"]["facts"][0]["requested_output_unit"],
             "jo",
