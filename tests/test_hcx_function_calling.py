@@ -669,10 +669,11 @@ class HcxFunctionCallingTests(unittest.TestCase):
         result = service.answer("삼성전자 2025년 연결 영업이익을 조 단위로 알려주세요.")
 
         self.assertEqual(result.status, "answered")
-        self.assertIn("0.665007조 원", result.answer)
+        # 0.665조 is below one 조, so it renders in natural units, still exact.
+        self.assertIn("6,650억 700만 원", result.answer)
         self.assertTrue(result.metadata["deterministic_amount_guard_used"])
         routed_fact = client.generation_calls[0][2]["data"]["facts"][0]
-        self.assertEqual(routed_fact["display_value"], "0.665007조 원")
+        self.assertEqual(routed_fact["display_value"], "6,650억 700만 원")
         self.assertEqual(routed_fact["requested_output_unit"], "jo")
 
     def test_false_amount_confirmation_is_corrected_without_hcx_generation(self) -> None:
