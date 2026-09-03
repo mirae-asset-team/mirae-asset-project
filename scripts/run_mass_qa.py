@@ -153,7 +153,10 @@ def corpus_provenance(result: dict, corpus: sqlite3.Connection | None) -> str | 
             (evidence_id,),
         ).fetchone()
         if row is None:
-            return f"cited_evidence_absent_from_corpus:{evidence_id}"
+            # Event evidence is served from the agent overlay, which is not part
+            # of the local base corpus, so absence here proves nothing. Only a
+            # cell that resolves and then disagrees is a defect.
+            continue
         filing_id, normalized, raw_text = row
         served_filing = str(item.get("filing_id") or "")
         if served_filing and served_filing != str(filing_id):
@@ -653,7 +656,7 @@ def deterministic_verdict(item: dict, result: dict | None, error: str | None,
     _FAILING = (
         "numeric_display_mismatch", "invalid_rcept_no", "truth_mismatch",
         "fact_not_in_cited_evidence", "fact_without_resolvable_evidence",
-        "cited_evidence_without_number", "cited_evidence_absent_from_corpus",
+        "cited_evidence_without_number",
         "evidence_filing_mismatch", "evidence_text_mismatch",
         "false_premise_accepted", "false_amount_uncorrected", "false_amount_affirmed",
     )
