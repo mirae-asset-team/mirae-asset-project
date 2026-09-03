@@ -8,9 +8,11 @@
 
 > 2026-09-03 정형 응답 QA 갱신: provider 미설정 상태의 결정론적 재무 route가 Tool 실행 전에 `provider_unavailable`로 끝나던 결함을 수정했다. 검증된 fact, 다중 지표, 다중 기업, 기간 차이·증가율은 read-only DB에서 계산하고 claim verifier를 통과한 경우에만 답한다. 같은 공시의 여러 evidence ID는 구조화 citation에 모두 보존하고, 사용자에게 렌더링하는 접수번호 목록만 중복 제거한다. 실제 DB 8종 QA는 모두 기대 상태를 확인했고 8001 `/health`는 10초 timeout이므로 배포는 계속 차단했다.
 
-> 위 QA와 독립 리뷰 수정을 반영한 전체 Python 회귀는 `875 passed, 2 skipped, 240 subtests`다. 정확한 인계 커밋은 이 브랜치의 최신 `git log -1 --oneline`을 기준으로 한다.
+> 위 QA와 독립 리뷰 수정을 반영한 전체 Python 회귀는 `876 passed, 2 skipped, 240 subtests`, Web은 `13 passed`다. 정확한 인계 커밋은 이 브랜치의 최신 `git log -1 --oneline`을 기준으로 한다.
 
 > 푸시 전 독립 리뷰에서 원화 단위 표시의 부분 숫자 승인, provider timeout fallback 누락, evidence ID와 citation card 매핑 불일치 3건을 발견했다. 모두 RED 테스트로 재현한 뒤 수정했다. 원화 표시는 `조/억/만/원` 전체를 하나의 Decimal로 복원해 검증하고, 구성요소 숫자는 독립 근거로 쓰지 않는다. 설정된 provider가 실패해도 구조화 재무 route만 동일한 검증 fallback을 사용하며, 자유형/판단 route는 기존처럼 fail-closed다.
+
+> 후속 재리뷰에서 `financial_change_reason`까지 숫자 fallback에 포함되는 범위 오류와 웹의 동일 접수번호 카드 중복을 추가로 발견했다. fallback workflow를 단일 수치·파생 계산·재무 비교·검증된 재무제표 지표로 제한했고, API evidence card는 보존하면서 웹 표시만 접수번호로 합쳤다.
 
 > 2026-09-03 갱신: Task 5 첫 커밋은 독립 리뷰에서 거절되었고 후속 fixup에서 다섯 blocker와 Docker build-context 결함을 TDD로 수정했다. 현재 tracked 평가 결과가 ADOPTED가 아니므로 Dense는 의도적으로 비활성이고 Sparse가 안전 경로다. Task 6의 claim-level verification은 별도 미추적 작업으로 분리되어 있으며 이 Task 5 fixup에 포함하지 않는다.
 

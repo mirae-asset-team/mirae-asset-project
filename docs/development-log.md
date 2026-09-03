@@ -927,3 +927,10 @@
 - citation RED: 같은 접수번호의 두 evidence ID를 하나의 응답 card로 합치면 staging gate가 두 번째 ID의 filing을 확인할 수 없어 cross-filing으로 차단했다. API `citations`는 evidence ID마다 1:1 card를 제공하고 화면 답변의 접수번호 목록만 중복 제거한다.
 - 검증: 세 반례 최초 `3 failed`; 수정 후 `3 passed`; claim/HCX/staging/runtime 확대 회귀 `117 passed, 56 subtests`. 실제 read-only DB 8종 재실행도 structured 5건 `answered`, 안전 거절 3건 `abstained`, claim verification failure `0`, 모든 `citation_ids`의 card 매핑 일치를 확인했다.
 - 독립 리뷰 수정 후 전체 회귀: Python `875 passed, 2 skipped, 86 warnings, 240 subtests` (`68.76s`).
+
+### 푸시 전 독립 재리뷰 수정
+
+- 시각: `2026-09-03T09:19:37+09:00` / `2026-09-03T00:19:37Z`. 첫 후속 커밋 `5dc846f` 재리뷰에서 Important 2건을 추가로 확인했다.
+- fallback 범위 RED: `financial_change_reason`도 내부적으로 `get_financial_facts`를 사용해 provider 장애 때 증가 원인 대신 단순 숫자를 `answered`로 반환할 수 있었다. fallback 허용 workflow를 `single`, `financial_derived`, `financial_comparison`, `financial_statement_metric`으로 명시하고, 앞의 세 workflow는 실제 Tool이 `get_financial_facts`인 경우로 제한했다. 증가 이유·자유형·다중근거 판단은 provider 실패 시 계속 fail-closed다.
+- 웹 중복 RED: release gate가 evidence별 filing을 검증할 수 있도록 API `citations`를 1:1로 보존한 결과 같은 접수번호 카드가 웹에서 반복됐다. 순수 함수 `uniqueCitationCards`가 화면에 표시할 카드만 접수번호 기준으로 합치며, 원 API 배열과 저장된 evidence ID는 변경하지 않는다.
+- 검증: 두 신규 RED는 Python `1 failed`, Web module export failure `1`로 확인했고 수정 후 Python `1 passed`, Web `8 passed`; 확대 회귀 Python `118 passed, 56 subtests`, Web 전체 `13 passed`; 최종 Python 전체 `876 passed, 2 skipped, 86 warnings, 240 subtests` (`68.68s`)다.

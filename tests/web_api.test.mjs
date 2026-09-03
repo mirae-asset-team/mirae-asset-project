@@ -14,6 +14,7 @@ import {
   evidenceStatus,
   evidenceStatusLabel,
   loadingLabel,
+  uniqueCitationCards,
   validateFunctionAnswer,
 } from "../src/disclosure_db/web/api.js";
 
@@ -65,6 +66,21 @@ test("renders only structured citation fields supplied by the backend", () => {
   );
   assert.equal(dartUrl("ev-1"), null);
   assert.equal(dartUrl("20250318000001&x=1"), null);
+});
+
+test("deduplicates displayed citation cards by receipt without losing API evidence", () => {
+  const citations = [
+    {...answeredFixture.citations[0], evidence_id: "ev-revenue"},
+    {...answeredFixture.citations[0], evidence_id: "ev-operating-income"},
+    {...answeredFixture.citations[0], evidence_id: "ev-other", rcept_no: "20250318000002"},
+  ];
+
+  const displayed = uniqueCitationCards(citations);
+
+  assert.deepEqual(displayed.map(({evidence_id}) => evidence_id), ["ev-revenue", "ev-other"]);
+  assert.deepEqual(citations.map(({evidence_id}) => evidence_id), [
+    "ev-revenue", "ev-operating-income", "ev-other",
+  ]);
 });
 
 test("validates the answer gate and receipt-number invariant", () => {

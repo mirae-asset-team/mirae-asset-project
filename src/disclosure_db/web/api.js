@@ -48,6 +48,21 @@ export function citationTitle(citation) {
   return [citation?.correction_role, citation?.report_name].filter(Boolean).join(" · ");
 }
 
+export function uniqueCitationCards(citations) {
+  if (!Array.isArray(citations)) {
+    return [];
+  }
+  const seenReceipts = new Set();
+  return citations.filter((citation) => {
+    const receipt = typeof citation?.rcept_no === "string" ? citation.rcept_no : "";
+    if (!receipt || seenReceipts.has(receipt)) {
+      return false;
+    }
+    seenReceipts.add(receipt);
+    return true;
+  });
+}
+
 export function dartUrl(rceptNo) {
   if (typeof rceptNo !== "string" || !/^\d{14}$/.test(rceptNo)) {
     return null;

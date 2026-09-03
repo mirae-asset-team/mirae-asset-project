@@ -832,6 +832,30 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertFalse(result.metadata["tool_selection_called"])
         self.assertEqual(len(client.generation_calls), 1)
 
+    def test_change_reason_does_not_degrade_to_numeric_answer_on_provider_failure(self) -> None:
+        financial = _financial_response([("2025", "100"), ("2026", "150")])
+        search = _sufficient_response(
+            "search_disclosures", {"results": [], "retrieval_mode": "hybrid"},
+            evidence_id="ev-reason", receipt="20260401000001",
+        )
+        registry = NamedRegistry({"get_financial_facts": financial, "search_disclosures": search})
+        client = FakeHcxClient(
+            self._search_call(),
+            generation_error=HcxFunctionCallingError(
+                "hcx_request_failed", stage="routed_final_generation_request",
+            ),
+        )
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자 2026년 매출액이 증가한 이유는?")
+
+        self.assertEqual(result.status, "error")
+        self.assertFalse(result.answer_allowed)
+        self.assertNotIn("provider_failure_deterministic_fallback", result.warnings)
+        self.assertEqual(result.metadata["workflow"], "financial_change_reason")
+
     def test_document_summary_without_requested_report_is_unavailable(self) -> None:
         summary = _sufficient_response(
             "build_summary_context", {"context": "다른 공시", "result_count": 1},

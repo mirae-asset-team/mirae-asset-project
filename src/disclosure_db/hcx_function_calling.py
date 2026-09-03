@@ -2057,6 +2057,12 @@ class HcxFunctionCallingService:
                 isinstance(exc, HcxFunctionCallingError)
                 and analysis_execution is None
                 and route is not None
+                and route.workflow in {
+                    "single",
+                    "financial_derived",
+                    "financial_comparison",
+                    "financial_statement_metric",
+                }
                 and (
                     tool_call.name == "get_financial_facts"
                     or route.workflow == "financial_statement_metric"
