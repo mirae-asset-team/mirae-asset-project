@@ -26,7 +26,13 @@ _TREND_MARKERS = ("트렌드", "트랜드", "추이", "동향", "빈도", "건�
 _SUMMARY_MARKERS = ("요약", "요악", "요약해", "정리해", "핵심 내용")
 _SEARCH_MARKERS = ("찾아", "검색", "언급", "관련 공시", "공시 내용", "어떤 공시")
 _CORRECTION_MARKERS = ("정정", "최초공시", "원공시", "변경 전", "변경 후")
-_CHANGE_REASON_MARKERS = ("증가한 이유", "감소한 이유", "증가 이유", "감소 이유", "변동 이유", "왜 증가", "왜 감소")
+_INCREASE_REASON_MARKERS = (
+    "증가한 이유", "증가 이유", "왜 증가", "증가했는데", "증가한 배경", "증가 배경",
+)
+_DECREASE_REASON_MARKERS = (
+    "감소한 이유", "감소 이유", "왜 감소", "감소했는데", "감소한 배경", "감소 배경",
+)
+_CHANGE_REASON_MARKERS = (*_INCREASE_REASON_MARKERS, *_DECREASE_REASON_MARKERS, "변동 이유")
 _EVENT_DISCLOSURE_MARKERS = (
     "대량보유", "자기주식", "유상증자", "무상증자", "전환사채", "조건부자본증권",
     "시설투자", "공급계약", "회사합병", "합병 결정", "회사분할", "분할 결정",
@@ -59,6 +65,26 @@ _CALENDAR_DATE = re.compile(
 )
 _FISCAL_YEAR_MENTION = re.compile(r"(?<!\d)(20\d{2}|\d{2})\s*년")
 _KOREAN_SUFFIXES = ("으로", "에서", "에게", "까지", "부터", "처럼", "보다", "의", "은", "는", "이", "가", "을", "를", "로")
+
+
+def _claimed_change_direction(text: str) -> str | None:
+    if any(marker in text for marker in _INCREASE_REASON_MARKERS):
+        return "increase"
+    if any(marker in text for marker in _DECREASE_REASON_MARKERS):
+        return "decrease"
+    return None
+
+
+def _requested_output_unit(text: str) -> str | None:
+    """Return only explicit KRW display-unit requests, most specific first."""
+
+    if re.search(r"조(?:원)?\s*단위", text):
+        return "jo"
+    if re.search(r"억(?:원)?\s*단위", text):
+        return "eok"
+    if re.search(r"(?<![가-힣A-Za-z0-9])원\s*단위", text):
+        return "won"
+    return None
 
 
 def _distance_at_most_one(left: str, right: str) -> bool:
@@ -488,11 +514,17 @@ class DeterministicQuestionRouter:
                     "company": company,
                     **period,
                     "account": metric,
+                    "account_id": account_id,
                 }
                 for company in required_companies
                 for period in required_periods
-                for _, metric in metrics
+                for account_id, metric in metrics
             ]
+            metric_ids = {account_id for account_id, _ in metrics}
+            accounting_identity = (
+                metric_ids == {"total_assets", "total_liabilities", "total_equity"}
+                and any(marker in text for marker in ("합", "일치", "회계등식"))
+            )
             first_requirement = requirements[0]
             arguments: dict[str, object] = {
                 "company": first_requirement["company"],
@@ -531,6 +563,9 @@ class DeterministicQuestionRouter:
                     "metric_ids": [account_id for account_id, _ in metrics],
                     "intent": "financial_comparison",
                     "requirements": requirements,
+                    "derived_operation": (
+                        "accounting_identity" if accounting_identity else None
+                    ),
                     "required_evidence": "validated_structured_fact_per_company_and_period",
                 },
                 **route_context,
@@ -626,6 +661,7 @@ class DeterministicQuestionRouter:
                     "company": plan.company,
                     "target_start_date": plan.period_start,
                     "target_end_date": plan.period_end,
+                    "claimed_direction": _claimed_change_direction(text),
                 },
                 **route_context,
             )
@@ -750,6 +786,7 @@ class DeterministicQuestionRouter:
                 "get_financial_facts",
                 arguments,
                 metric_kind="DIRECT",
+                context={"requested_output_unit": _requested_output_unit(text)},
                 **route_context,
             )
 

@@ -924,7 +924,10 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(result.status, "answered")
         self.assertEqual(result.tool_response["data"]["premise"], "increase_not_confirmed")
         self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts"])
-        self.assertEqual(len(client.generation_calls), 1)
+        self.assertEqual(client.generation_calls, [])
+        self.assertIn("증가 전제는 공시 수치와 일치하지 않습니다", result.answer)
+        self.assertIn("감소했습니다", result.answer)
+        self.assertTrue(result.metadata["deterministic_premise_correction_used"])
 
     def test_change_reason_searches_once_only_after_increase_is_verified(self) -> None:
         financial = _financial_response([("2025", "100"), ("2026", "150")])
@@ -1483,6 +1486,55 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(raised.exception.http_status, 400)
         self.assertEqual(raised.exception.provider_error_code, "40001")
         self.assertNotIn("raw provider detail", str(raised.exception))
+
+    def test_accounting_identity_is_calculated_from_three_validated_facts(self) -> None:
+        registry = AccountFinancialRegistry({
+            ("삼성전자", "자산총계"): "1000",
+            ("삼성전자", "부채총계"): "400",
+            ("삼성전자", "자본총계"): "600",
+        })
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer(
+            "삼성전자의 2025년 연결 부채총계와 자본총계를 각각 알려주고 "
+            "그 합을 자산총계와 비교해 주세요."
+        )
+
+        self.assertEqual(result.status, "answered")
+        identity = result.tool_response["data"]["comparison"]["accounting_identity"]
+        self.assertEqual(identity["status"], "matches")
+        self.assertEqual(identity["liabilities_plus_equity"], "1000")
+        self.assertEqual(identity["difference"], "0")
+        self.assertEqual(
+            [item["operation"] for item in result.tool_response["data"]["calculations"]],
+            ["sum", "difference"],
+        )
+
+    def test_requested_unit_is_rendered_by_backend_before_generation(self) -> None:
+        response = _financial_response([("2025", "665007")], account="영업이익")
+        response["data"]["facts"][0].update({
+            "scale": 1_000_000,
+            "display_value": "6,650억 700만 원",
+        })
+        service = HcxFunctionCallingService(
+            StaticRegistry(response),
+            HyperClovaFunctionClient(env={}),
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자 2025년 연결 영업이익을 조 단위로 알려주세요.")
+
+        self.assertEqual(result.status, "answered")
+        self.assertIn("0.665007조 원", result.answer)
+        self.assertEqual(
+            result.tool_response["data"]["facts"][0]["requested_output_unit"],
+            "jo",
+        )
 
 
 if __name__ == "__main__":

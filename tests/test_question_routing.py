@@ -364,6 +364,49 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
                 self.assertEqual(route.kind, "unavailable")
                 self.assertEqual(route.metric_kind, "UNAVAILABLE")
 
+    def test_accounting_identity_request_preserves_all_three_operands(self) -> None:
+        route = self.router.route(
+            "삼성전자의 2025년 연결 부채총계와 자본총계를 각각 알려주고 "
+            "그 합을 자산총계와 비교해 주세요."
+        )
+
+        self.assertIsNotNone(route)
+        self.assertEqual(route.workflow, "financial_comparison")
+        self.assertEqual(route.context["derived_operation"], "accounting_identity")
+        self.assertEqual(
+            {item["account_id"] for item in route.context["requirements"]},
+            {"total_assets", "total_liabilities", "total_equity"},
+        )
+
+    def test_financial_reason_route_preserves_claimed_direction(self) -> None:
+        increase = self.router.route("삼성전자 2026년 매출액이 증가한 이유는?")
+        decrease = self.router.route("삼성전자 2026년 매출액이 감소한 이유는?")
+        planted = self.router.route(
+            "삼성전자의 2025년 연결 매출액이 전년 대비 감소했는데 그 배경이 무엇인가요?"
+        )
+        neutral = self.router.route("삼성전자 2026년 매출액 변동 이유는?")
+
+        self.assertEqual(increase.context["claimed_direction"], "increase")
+        self.assertEqual(decrease.context["claimed_direction"], "decrease")
+        self.assertEqual(planted.context["claimed_direction"], "decrease")
+        self.assertEqual(planted.workflow, "financial_change_reason")
+        self.assertIsNone(neutral.context["claimed_direction"])
+
+    def test_financial_lookup_preserves_explicit_output_unit(self) -> None:
+        cases = {
+            "삼성전자 2025년 매출액을 조 단위로 알려줘": "jo",
+            "삼성전자 2025년 매출액을 억원 단위로 알려줘": "eok",
+            "삼성전자 2025년 매출액을 원 단위 숫자 그대로 알려줘": "won",
+        }
+        for question, output_unit in cases.items():
+            with self.subTest(question=question):
+                route = self.router.route(question)
+                self.assertIsNotNone(route)
+                self.assertEqual(route.context["requested_output_unit"], output_unit)
+        unsupported = self.router.route("삼성전자 2025년 매출액을 천원 단위로 알려줘")
+        self.assertIsNotNone(unsupported)
+        self.assertIsNone(unsupported.context["requested_output_unit"])
+
 
 if __name__ == "__main__":
     unittest.main()
