@@ -977,3 +977,11 @@
 - 빈 당기순이익 합계행 복구(5af7a2e): DART 연결 손익계산서에서 합계행이 비고 '지배기업 소유주지분'+'비지배지분' 두 행에 값이 있는 표준 패턴을 결정론 합산(회계 항등식)으로 복구한다. `extraction_method=annual_statement_attribution_sum_v1`, evidence는 두 원천 셀 모두 보존, 값이 있는 행은 절대 대체하지 않는다. 실물 검증: 레인보우로보틱스 3개년 정확 복구(2025 1,421,503,230 / 2023 -842,680,471), 전수 스캔에서 삼성중공업 포함 2개사 각 3개년 해당. TDD 3건 + 전체 회귀 `581 passed, 2 skipped`.
 - 배선 주의: 복구된 fact가 서빙에 반영되려면 financial candidates→overlay 재빌드가 필요하다(이번 작업은 추출 코드까지). HCX 폴백·라우팅 수정의 효과 실현은 NCP 재배포 후다.
 - 하나금융지주 재무제표 결손 심층 판정: main dart_xml은 parse success인데 연결재무상태표 table_record가 제목 블록(5셀)+본문 첫 2행(14셀)에서 잘려 있고, '자산총계' 셀이 재무제표 섹션·감사보고서 첨부(src_ea4e…, src_fc2e…) 어디에도 없다. 단위 상속으로 해결 불가한 파서 레벨 인제스트 결손으로, 코퍼스 재수집·재빌드가 필요한 백로그다(KB금융 PDF 정정본 fallback 정책과 함께 팀 결정 대기).
+
+## 2026-09-03T11:45+09:00 — QA 개선 사이클 3: 전제·단위·공시유형 근거 게이트
+
+- 실행 경계: `agent/qa-growth-v4`에서만 수정했다. NCP `:8001`은 `hcx-function-v1.1`, 로컬 브랜치는 `v1.2`이므로 기존 `v4-staging-20260903` 런은 배포 전 실패 발굴용이며 성능·정확도 최종 근거가 아니다. `:8000`, `:8001` 컨테이너와 원격 파일은 변경하지 않았다.
+- 1차 근본원인 수정(`f6df102`): 명시 요청 단위를 backend에서 무반올림 렌더링하고, 증가·감소 원인은 `value_numeric*scale`로 전제를 먼저 검증한다. 거짓 전제는 검색·HCX 호출 없이 정확한 두 기간 수치로 정정한다. 자산=부채+자본은 세 구조화 계정과 정확한 피연산자 evidence로 계산한다. 대량 QA `--retry-errors`는 HTTP/연결 실패(`status IS NULL`)만 제거해 재시도하고 실제 HCX provider 실패는 보존한다.
+- 2차 실패 주도 수정(`62410e8`): 금액 확인 질문은 질문의 표시 정밀도와 검증된 실제값을 비교해 `네/아니요`를 결정론적으로 답한다. 외화 환산은 환율 시점·출처 부재로, 미공개 정보·긴급 매매 지시는 안전 경계에서 즉시 보류한다. 액면/주식분할 질문은 요청 연도와 실제 `report_name`이 모두 맞는 evidence만 남기며, 해당 결정 공시가 없으면 답변 생성을 차단한다.
+- 대량 런 안정화: 과속 프로세스(`pace=1.0`)를 정확한 PID 확인 후 종료하고 같은 탐색 run을 concurrency 1, `pace=2.1`, transient-only retry로 재개했다. 시작 시 일시 오류 272행만 제거했다. 재시작 후 517건 실측에서 transport error/HTTP 429는 0건, 평균 2.699초, p95 6.57초였고 원장 `PRAGMA integrity_check=ok`이다. 백그라운드 PID `51664`가 남은 12,811문항을 계속 처리한다.
+- 검증: 집중 회귀 `85 passed, 47 subtests`, 전체 Python `618 passed, 2 skipped, 71 warnings, 95 subtests`, Web `12/12`, `compileall`, `git diff --check`, staged secret scan을 통과했다. 경고는 기존 FastAPI/Starlette deprecation이다. 로컬 수정의 NCP 실효 검증과 `:8000` 승격은 아직 실행하지 않았다.
