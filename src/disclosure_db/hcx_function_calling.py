@@ -593,6 +593,35 @@ class HcxFunctionCallingService:
         bundle = response.get("evidence_bundle")
         return bundle if isinstance(bundle, Mapping) else {}
 
+    @staticmethod
+    def _requested_unit_response(
+        route: QuestionRoute, response: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Replace fact display strings with exact backend-rendered requested units."""
+
+        output_unit = str(route.context.get("requested_output_unit") or "")
+        if output_unit not in {"jo", "eok", "won"}:
+            return dict(response)
+        data = response.get("data")
+        facts = data.get("facts") if isinstance(data, Mapping) else None
+        if not isinstance(facts, list):
+            return dict(response)
+        rendered_facts: list[object] = []
+        for raw_fact in facts:
+            if not isinstance(raw_fact, Mapping):
+                rendered_facts.append(raw_fact)
+                continue
+            fact = dict(raw_fact)
+            rendered = format_financial_value(
+                fact.get("value_numeric"), fact.get("scale") or 1,
+                fact.get("unit") or "KRW", output_unit=output_unit,
+            )
+            if rendered:
+                fact["display_value"] = rendered
+                fact["requested_output_unit"] = output_unit
+            rendered_facts.append(fact)
+        return {**dict(response), "data": {**dict(data), "facts": rendered_facts}}
+
     def _merged_response(
         self,
         *,
@@ -851,6 +880,8 @@ class HcxFunctionCallingService:
             all_facts.append(fact)
         calculations: list[dict[str, object]] = []
         calculation_failed = False
+        derived_operation = str(route.context.get("derived_operation") or "")
+        accounting_identity: dict[str, object] | None = None
         # "A와 B를 각각" requests mix accounts; ranking or differencing across
         # different accounts is meaningless, so those steps require one metric.
         single_metric = len({
@@ -897,7 +928,6 @@ class HcxFunctionCallingService:
         # two source accounts already fetched, in (denominator, numerator)
         # order. Computing it from validated facts keeps the answer grounded in
         # the same evidence as the operands.
-        derived_operation = str(route.context.get("derived_operation") or "")
         if derived_operation == "percentage_ratio" and len(selected) == 2:
             (_, denominator_fact, denominator_value), (_, numerator_fact, numerator_value) = selected
             evidence_ids = [
@@ -922,18 +952,67 @@ class HcxFunctionCallingService:
                     "metric_id": route.context.get("metric_id"),
                     "period": route.context.get("period"),
                 })
+        if derived_operation == "accounting_identity" and len(selected) == 3:
+            by_account = {
+                str(requirement.get("account_id") or ""): (fact, value)
+                for requirement, fact, value in selected
+            }
+            if set(by_account) == {"total_assets", "total_liabilities", "total_equity"}:
+                assets_fact, assets = by_account["total_assets"]
+                liabilities_fact, liabilities = by_account["total_liabilities"]
+                equity_fact, equity = by_account["total_equity"]
+                right_side_evidence_ids = [
+                    str(item)
+                    for fact in (liabilities_fact, equity_fact)
+                    for item in fact.get("evidence_ids", [])
+                    if item
+                ]
+                residual_evidence_ids = [
+                    str(item)
+                    for fact in (assets_fact, liabilities_fact, equity_fact)
+                    for item in fact.get("evidence_ids", [])
+                    if item
+                ]
+                try:
+                    right_side = calculate(
+                        "sum", [liabilities, equity], unit="KRW",
+                        evidence_ids=right_side_evidence_ids,
+                    )
+                    residual = calculate(
+                        "difference", [right_side.value, assets],
+                        unit="KRW", evidence_ids=residual_evidence_ids,
+                    )
+                except (TypeError, ValueError):
+                    calculation_failed = True
+                else:
+                    calculations.extend((
+                        {**self._calculation_payload(right_side), "role": "liabilities_plus_equity"},
+                        {**self._calculation_payload(residual), "role": "assets_minus_liabilities_and_equity"},
+                    ))
+                    accounting_identity = {
+                        "status": "matches" if residual.value == 0 else "does_not_match",
+                        "assets": format(assets, "f"),
+                        "liabilities_plus_equity": format(right_side.value, "f"),
+                        "difference": format(residual.value, "f"),
+                        "unit": "KRW",
+                    }
 
-        complete = (
-            len(requirements) >= 2
-            and len(selected) == len(requirements)
-            and not calculation_failed
-            and (
-                derived_operation == "percentage_ratio"
-                or not single_metric
+        if derived_operation == "percentage_ratio":
+            operation_complete = len(calculations) == 1
+        elif derived_operation == "accounting_identity":
+            operation_complete = accounting_identity is not None
+        else:
+            operation_complete = (
+                not single_metric
                 or len(companies) != 1
                 or len(periods) < 2
                 or len(calculations) == 2 * (len(periods) - 1)
             )
+        complete = (
+            len(requirements) >= 2
+            and len(selected) == len(requirements)
+            and not calculation_failed
+            and operation_complete
         )
         comparison: dict[str, object] = {
             "status": "complete" if complete else "incomplete",
@@ -951,6 +1030,7 @@ class HcxFunctionCallingService:
                 for requirement, fact, _ in selected
             ],
             "calculations": calculations,
+            "accounting_identity": accounting_identity,
             "winner": None,
         }
         if complete and single_metric and len(companies) >= 2 and len(periods) <= 1:
@@ -1037,6 +1117,16 @@ class HcxFunctionCallingService:
                 force_answer_allowed=False,
             )
         previous, current = ordered[current_index - 1], ordered[current_index]
+        previous_value = self._fact_comparable_value(previous)
+        current_value = self._fact_comparable_value(current)
+        if previous_value is None or current_value is None:
+            return self._merged_response(
+                tool_name="get_financial_facts", request=route.arguments,
+                data={**dict(primary_data), "calculations": [], "premise": "unverified"},
+                responses=[primary], checker_tool="get_financial_facts", checker_data=dict(primary_data),
+                required_response_indexes=(0,), extra_reasons=("backend_normalized_value_unavailable",),
+                force_answer_allowed=False,
+            )
         evidence_ids = [
             str(item)
             for fact in (previous, current)
@@ -1045,11 +1135,11 @@ class HcxFunctionCallingService:
         ]
         try:
             difference = calculate(
-                "difference", [previous.get("value_numeric"), current.get("value_numeric")],
-                unit=current.get("unit"), evidence_ids=evidence_ids,
+                "difference", [previous_value, current_value],
+                unit="KRW", evidence_ids=evidence_ids,
             )
             growth = calculate(
-                "growth_rate", [previous.get("value_numeric"), current.get("value_numeric")],
+                "growth_rate", [previous_value, current_value],
                 unit="%", evidence_ids=evidence_ids,
             )
         except (TypeError, ValueError):
@@ -1061,13 +1151,35 @@ class HcxFunctionCallingService:
                 force_answer_allowed=False,
             )
         calculations.extend((self._calculation_payload(difference), self._calculation_payload(growth)))
-        increased = getattr(difference, "value") > 0
+        if difference.value > 0:
+            actual_direction = "increase"
+        elif difference.value < 0:
+            actual_direction = "decrease"
+        else:
+            actual_direction = "unchanged"
+        claimed_direction = str(route.context.get("claimed_direction") or "") or None
+        premise_confirmed = (
+            actual_direction != "unchanged"
+            if claimed_direction is None
+            else claimed_direction == actual_direction
+        )
+        premise = (
+            f"confirmed_{actual_direction}"
+            if premise_confirmed and claimed_direction is not None
+            else "change_confirmed"
+            if premise_confirmed
+            else f"{claimed_direction}_not_confirmed"
+            if claimed_direction is not None
+            else "change_not_confirmed"
+        )
         base_data = {
             **dict(primary_data),
             "calculations": calculations,
-            "premise": "confirmed_increase" if increased else "increase_not_confirmed",
+            "premise": premise,
+            "claimed_direction": claimed_direction,
+            "actual_direction": actual_direction,
         }
-        if not increased:
+        if not premise_confirmed:
             return self._merged_response(
                 tool_name="get_financial_facts", request=route.arguments, data=base_data,
                 responses=[primary], checker_tool="get_financial_facts", checker_data=dict(primary_data),
@@ -1087,7 +1199,7 @@ class HcxFunctionCallingService:
             tool_name="get_financial_facts", request=route.arguments,
             data={**base_data, "reason_evidence": dict(search.get("data") or {})},
             responses=[primary, search], checker_tool="get_financial_facts", checker_data=dict(primary_data),
-            required_response_indexes=(0, 1), extra_reasons=("increase_verified_before_reason_search",),
+            required_response_indexes=(0, 1), extra_reasons=("change_verified_before_reason_search",),
             force_answer_allowed=True,
         )
 
@@ -1266,6 +1378,8 @@ class HcxFunctionCallingService:
         primary = self.registry.dispatch(tool_call.name, tool_call.arguments)
         if str(primary.get("status") or "error") in {"invalid_request", "error"}:
             return tool_call, primary
+        if route.context.get("requested_output_unit"):
+            primary = self._requested_unit_response(route, primary)
         if route.workflow == "financial_derived":
             return tool_call, self._financial_derived_response(route, primary)
         if route.workflow == "financial_comparison":
@@ -1448,6 +1562,30 @@ class HcxFunctionCallingService:
                 "abstained", UNANSWERABLE_TEXT,
                 warnings=["answer_generation_blocked_by_incomplete_correction_receipts"], **common,
             )
+
+        if route is not None and route.workflow == "financial_change_reason":
+            data = tool_response.get("data")
+            premise = str(data.get("premise") or "") if isinstance(data, Mapping) else ""
+            if premise.endswith("_not_confirmed"):
+                available_ids = list(
+                    tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
+                )
+                generated = self._deterministic_change_reason_answer(
+                    route, tool_response, available_ids,
+                )
+                if generated is not None:
+                    citations = self._selected_citations(
+                        tool_call.name, generated.citation_ids, available_citations,
+                    )
+                    if citations:
+                        common["metadata"]["deterministic_premise_correction_used"] = True  # type: ignore[index]
+                        return self._result(
+                            "answered", self._render_answer(generated.answer, citations),
+                            answer_allowed=True,
+                            citation_ids=[item.evidence_id for item in citations],
+                            citations=[item.to_dict() for item in citations],
+                            **common,
+                        )
 
         common["metadata"]["final_generation_called"] = True  # type: ignore[index]
         failure_stage = "final_generation"
@@ -1683,7 +1821,87 @@ class HcxFunctionCallingService:
                 pass
             else:
                 lines.append(f"증가율은 약 {growth_value:.2f}%입니다.")
+        ratio = next((item for item in calculation_rows if item.get("operation") == "percentage_ratio"), None)
+        if ratio is not None and ratio.get("value") is not None:
+            try:
+                ratio_value = Decimal(str(ratio["value"]))
+            except (InvalidOperation, ValueError):
+                pass
+            else:
+                lines.append(f"{metric}은 약 {ratio_value:.2f}%입니다.")
+        identity = comparison.get("accounting_identity")
+        if isinstance(identity, Mapping):
+            right_side = format_financial_value(
+                identity.get("liabilities_plus_equity"), 1, identity.get("unit") or "KRW",
+            )
+            difference_value = format_financial_value(
+                identity.get("difference"), 1, identity.get("unit") or "KRW",
+            )
+            if right_side and identity.get("status") == "matches":
+                lines.append(f"부채총계와 자본총계의 합은 {right_side}으로 자산총계와 일치합니다.")
+            elif right_side and difference_value:
+                lines.append(
+                    f"부채총계와 자본총계의 합은 {right_side}이며, "
+                    f"자산총계와의 차이는 {difference_value}입니다."
+                )
         return HcxGeneratedAnswer("\n".join(lines), tuple(available_evidence_ids[:5]))
+
+    @classmethod
+    def _deterministic_change_reason_answer(
+        cls,
+        route: QuestionRoute,
+        tool_response: Mapping[str, object],
+        available_evidence_ids: Sequence[str],
+    ) -> HcxGeneratedAnswer | None:
+        data = tool_response.get("data")
+        facts = data.get("facts") if isinstance(data, Mapping) else None
+        if not isinstance(facts, list) or len(facts) < 2 or not available_evidence_ids:
+            return None
+        ordered = sorted(
+            (dict(item) for item in facts if isinstance(item, Mapping)),
+            key=cls._fact_period_key,
+        )
+        target_end = str(route.context.get("target_end_date") or "")
+        if target_end:
+            target_year = target_end[:4]
+            indexes = [
+                index for index, fact in enumerate(ordered)
+                if cls._fact_period_key(fact).startswith(target_year)
+            ]
+            current_index = indexes[-1] if indexes else -1
+        else:
+            current_index = len(ordered) - 1
+        if current_index <= 0:
+            return None
+        previous, current = ordered[current_index - 1], ordered[current_index]
+        previous_display = str(previous.get("display_value") or "") or format_financial_value(
+            previous.get("value_numeric"), previous.get("scale") or 1,
+            previous.get("unit") or "KRW",
+        )
+        current_display = str(current.get("display_value") or "") or format_financial_value(
+            current.get("value_numeric"), current.get("scale") or 1,
+            current.get("unit") or "KRW",
+        )
+        if not previous_display or not current_display:
+            return None
+        claimed = str(route.context.get("claimed_direction") or "change")
+        actual = str(data.get("actual_direction") or "unchanged") if isinstance(data, Mapping) else "unchanged"
+        direction_ko = {"increase": "증가", "decrease": "감소", "unchanged": "변동 없음"}
+        claimed_ko = direction_ko.get(claimed, "변동")
+        actual_ko = direction_ko.get(actual, "변동 없음")
+        previous_period = cls._fact_period_key(previous)[:4]
+        current_period = cls._fact_period_key(current)[:4]
+        identifiers = current.get("company_identifiers")
+        company = str(identifiers.get("company") or "") if isinstance(identifiers, Mapping) else ""
+        account = str(current.get("account_name") or current.get("account_id") or "재무 수치")
+        subject = " ".join(item for item in (company, account) if item)
+        answer = (
+            f"질문의 {claimed_ko} 전제는 공시 수치와 일치하지 않습니다. "
+            f"{subject}은 {previous_period}년 {previous_display}에서 "
+            f"{current_period}년 {current_display}로 {actual_ko}했습니다. "
+            f"따라서 {claimed_ko} 원인은 검색하지 않았습니다."
+        )
+        return HcxGeneratedAnswer(answer, tuple(available_evidence_ids[:5]))
 
     @staticmethod
     def _deterministic_trend_answer(

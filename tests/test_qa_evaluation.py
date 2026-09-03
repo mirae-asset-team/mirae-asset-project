@@ -81,6 +81,27 @@ class QaEvaluationTests(unittest.TestCase):
         )
         self.assertIsNone(format_financial_value("7332", 1, None))
 
+    def test_backend_formats_explicit_requested_krw_unit_without_rounding(self) -> None:
+        self.assertEqual(
+            format_financial_value("665007", 1_000_000, "KRW", output_unit="jo"),
+            "0.665007조 원",
+        )
+        self.assertEqual(
+            format_financial_value("665007", 1_000_000, "KRW", output_unit="eok"),
+            "6,650.07억 원",
+        )
+        self.assertEqual(
+            format_financial_value("3380060390", 1_000, "KRW", output_unit="won"),
+            "3,380,060,390,000원",
+        )
+        self.assertEqual(
+            format_financial_value("-5", 100_000_000, "KRW", output_unit="jo"),
+            "-0.0005조 원",
+        )
+        self.assertIsNone(
+            format_financial_value("1", 1, "KRW", output_unit="unsupported")
+        )
+
     def test_korean_krw_amounts_are_parsed_from_answer_prose(self) -> None:
         from decimal import Decimal
 

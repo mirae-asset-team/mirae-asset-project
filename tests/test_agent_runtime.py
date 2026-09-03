@@ -578,7 +578,9 @@ class AgentRuntimeTests(unittest.TestCase):
                     answerable=True,
                 )
 
-        agent = DisclosureAgent(evidence_service=FakeService())
+        agent = DisclosureAgent(
+            evidence_service=FakeService(), generator=DeterministicGenerator()
+        )
         answer = agent.answer("테스트회사 매출액 관련 설명은?")
         self.assertTrue(answer.verified)
         self.assertIn("매출액", answer.answer)
@@ -603,7 +605,9 @@ class AgentRuntimeTests(unittest.TestCase):
                     }],
                 )
 
-        answer = DisclosureAgent(evidence_service=Service()).answer("테스트회사 계약금액은 얼마인가?")
+        answer = DisclosureAgent(
+            evidence_service=Service(), generator=DeterministicGenerator()
+        ).answer("테스트회사 계약금액은 얼마인가?")
         self.assertTrue(answer.answerable)
         self.assertEqual(answer.numeric_values, ["2000"])
         self.assertEqual(answer.citation_ids, ["ev1"])

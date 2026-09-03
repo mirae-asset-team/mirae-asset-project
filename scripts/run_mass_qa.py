@@ -600,6 +600,17 @@ def open_ledger() -> sqlite3.Connection:
     return connection
 
 
+def drop_transient_error_rows(connection: sqlite3.Connection, run_id: str) -> int:
+    """Remove transport failures for retry without replaying genuine HCX failures."""
+
+    dropped = connection.execute(
+        "DELETE FROM result WHERE run_id=? AND verdict='error' AND status IS NULL",
+        (run_id,),
+    ).rowcount
+    connection.commit()
+    return dropped
+
+
 def ask(base_url: str, question: str, timeout: float) -> tuple[dict | None, float, str | None]:
     payload = json.dumps({"question": question}).encode("utf-8")
     request = urllib.request.Request(
@@ -706,7 +717,8 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=120.0)
     parser.add_argument("--notes", default="")
     parser.add_argument("--retry-errors", action="store_true",
-                        help="drop this run's error rows first so they are re-asked")
+                        help="retry transport errors (HTTP/connection failures) without "
+                             "replaying genuine provider failures")
     parser.add_argument("--events", action="store_true",
                         help="append the event-disclosure question layer (bank v3)")
     parser.add_argument("--growth-order", action="store_true",
@@ -736,11 +748,8 @@ def main() -> int:
         bank = bank[: args.limit]
     connection = open_ledger()
     if args.retry_errors:
-        dropped = connection.execute(
-            "DELETE FROM result WHERE run_id=? AND status='error'", (args.run_id,)
-        ).rowcount
-        connection.commit()
-        print(f"retry-errors: dropped {dropped} error rows")
+        dropped = drop_transient_error_rows(connection, args.run_id)
+        print(f"retry-errors: dropped {dropped} transient error rows")
     done = {row[0] for row in connection.execute("SELECT qid FROM result WHERE run_id=?", (args.run_id,))}
     pending = [item for item in bank if item["qid"] not in done]
     # Growth ordering: a question is only worth a credit when its outcome can

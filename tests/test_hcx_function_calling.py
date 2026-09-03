@@ -332,6 +332,44 @@ class HcxFunctionCallingTests(unittest.TestCase):
             sorted(calculations[0]["evidence_ids"]), ["ev-부채총계", "ev-자본총계"],
         )
 
+    def test_accounting_identity_is_calculated_from_three_validated_facts(self) -> None:
+        registry = AccountFinancialRegistry({
+            ("삼성전자", "자산총계"): "1000",
+            ("삼성전자", "부채총계"): "400",
+            ("삼성전자", "자본총계"): "600",
+        })
+        client = FakeHcxClient(
+            self._search_call(),
+            generated=HcxGeneratedAnswer(
+                "부채총계 400원과 자본총계 600원의 합은 자산총계 1,000원과 일치합니다.",
+                ("ev-자산총계", "ev-부채총계", "ev-자본총계"),
+            ),
+        )
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer(
+            "삼성전자의 2025년 연결 부채총계와 자본총계를 각각 알려주고 "
+            "그 합을 자산총계와 비교해 주세요."
+        )
+
+        self.assertEqual(result.status, "answered")
+        identity = result.tool_response["data"]["comparison"]["accounting_identity"]
+        self.assertEqual(identity["status"], "matches")
+        self.assertEqual(identity["liabilities_plus_equity"], "1000")
+        self.assertEqual(identity["difference"], "0")
+        calculations = result.tool_response["data"]["calculations"]
+        self.assertEqual([item["operation"] for item in calculations], ["sum", "difference"])
+        self.assertEqual(
+            sorted(calculations[0]["evidence_ids"]),
+            ["ev-부채총계", "ev-자본총계"],
+        )
+        self.assertEqual(
+            sorted(calculations[1]["evidence_ids"]),
+            ["ev-부채총계", "ev-자본총계", "ev-자산총계"],
+        )
+
     def test_ratio_blocks_when_one_operand_is_missing(self) -> None:
         registry = AccountFinancialRegistry({("삼성전자", "자본총계"): "160"})
         client = FakeHcxClient(self._search_call())
@@ -610,6 +648,31 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertNotIn("16,587조", result.answer)
         self.assertIn("16조 5,878억 5,077만 9,912원", result.answer)
         self.assertTrue(result.metadata["deterministic_amount_guard_used"])
+
+    def test_requested_unit_is_rendered_by_backend_before_final_generation(self) -> None:
+        response = _financial_response([("2025", "665007")], account="영업이익")
+        fact = response["data"]["facts"][0]
+        fact.update({
+            "scale": 1_000_000,
+            "display_value": "6,650억 700만 원",
+        })
+        registry = StaticRegistry(response)
+        client = FakeHcxClient(
+            self._search_call(),
+            generated=HcxGeneratedAnswer("영업이익은 6조 6,507억 원입니다.", ("ev-fin-1",)),
+        )
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자 2025년 연결 영업이익을 조 단위로 알려주세요.")
+
+        self.assertEqual(result.status, "answered")
+        self.assertIn("0.665007조 원", result.answer)
+        self.assertTrue(result.metadata["deterministic_amount_guard_used"])
+        routed_fact = client.generation_calls[0][2]["data"]["facts"][0]
+        self.assertEqual(routed_fact["display_value"], "0.665007조 원")
+        self.assertEqual(routed_fact["requested_output_unit"], "jo")
 
     def test_correctly_scaled_final_amount_is_kept_verbatim(self) -> None:
         receipt = "20250318000001"
@@ -999,6 +1062,90 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(result.status, "answered")
         self.assertEqual(result.tool_response["data"]["premise"], "increase_not_confirmed")
         self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts"])
+        self.assertEqual(len(client.generation_calls), 0)
+        self.assertIn("증가 전제는 공시 수치와 일치하지 않습니다", result.answer)
+        self.assertIn("감소했습니다", result.answer)
+        self.assertTrue(result.metadata["deterministic_premise_correction_used"])
+
+    def test_change_reason_compares_normalized_values_across_scales(self) -> None:
+        financial = _financial_response([("2025", "2"), ("2026", "15")])
+        financial["data"]["facts"][0]["scale"] = 100
+        financial["data"]["facts"][1]["scale"] = 10
+        registry = NamedRegistry({"get_financial_facts": financial})
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자 2026년 매출액이 증가한 이유는?")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(result.tool_response["data"]["premise"], "increase_not_confirmed")
+        self.assertEqual(result.tool_response["data"]["actual_direction"], "decrease")
+        self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts"])
+        self.assertEqual(client.generation_calls, [])
+
+    def test_change_reason_correction_uses_the_targeted_period_pair(self) -> None:
+        financial = _financial_response([
+            ("2024", "100"), ("2025", "80"), ("2026", "120"),
+        ])
+        registry = NamedRegistry({"get_financial_facts": financial})
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자 2025년 매출액이 증가한 이유는?")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(result.tool_response["data"]["premise"], "increase_not_confirmed")
+        self.assertIn("2024년", result.answer)
+        self.assertIn("2025년", result.answer)
+        self.assertNotIn("2026년", result.answer)
+
+    def test_decrease_reason_rejects_false_premise_without_search_or_hcx(self) -> None:
+        financial = _financial_response([("2025", "100"), ("2026", "150")])
+        registry = NamedRegistry({"get_financial_facts": financial})
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer(
+            "삼성전자의 2026년 연결 매출액이 전년 대비 감소했는데 그 배경이 무엇인가요?"
+        )
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(result.tool_response["data"]["premise"], "decrease_not_confirmed")
+        self.assertEqual(result.tool_response["data"]["actual_direction"], "increase")
+        self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts"])
+        self.assertEqual(client.generation_calls, [])
+        self.assertIn("감소 전제는 공시 수치와 일치하지 않습니다", result.answer)
+        self.assertIn("증가했습니다", result.answer)
+
+    def test_decrease_reason_searches_only_after_decrease_is_verified(self) -> None:
+        financial = _financial_response([("2025", "200"), ("2026", "150")])
+        search = _sufficient_response(
+            "search_disclosures", {"results": [], "retrieval_mode": "hybrid"},
+            evidence_id="ev-reason", receipt="20260401000001",
+        )
+        registry = NamedRegistry({"get_financial_facts": financial, "search_disclosures": search})
+        client = FakeHcxClient(
+            self._search_call(),
+            generated=HcxGeneratedAnswer("감소 사실과 관련 공시 근거를 확인했습니다.", ("ev-fin-1", "ev-reason")),
+        )
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자 2026년 매출액이 감소한 이유는?")
+
+        self.assertEqual(result.status, "answered")
+        self.assertEqual(result.tool_response["data"]["premise"], "confirmed_decrease")
+        self.assertEqual(
+            [name for name, _ in registry.calls],
+            ["get_financial_facts", "search_disclosures"],
+        )
         self.assertEqual(len(client.generation_calls), 1)
 
     def test_change_reason_searches_once_only_after_increase_is_verified(self) -> None:

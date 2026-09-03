@@ -95,13 +95,32 @@ def parse_korean_krw_amounts(text: str) -> list[Decimal]:
 
 
 def format_financial_value(
-    value: object, scale: object = 1, unit: object = "KRW",
+    value: object, scale: object = 1, unit: object = "KRW", *,
+    output_unit: str | None = None,
 ) -> str | None:
-    """Format validated KRW using deterministic 조/억/만/원 groups."""
+    """Format validated KRW using deterministic requested or mixed units."""
 
     normalized = normalized_financial_value(value, scale, unit)
     if normalized is None:
         return None
+    if output_unit is not None:
+        divisors = {
+            "jo": (Decimal(10) ** 12, "조 원"),
+            "eok": (Decimal(10) ** 8, "억 원"),
+            "won": (Decimal(1), "원"),
+        }
+        selected = divisors.get(output_unit)
+        if selected is None:
+            return None
+        divisor, suffix = selected
+        converted = normalized / divisor
+        sign = "-" if converted < 0 else ""
+        raw = format(abs(converted), "f")
+        whole, dot, fraction = raw.partition(".")
+        rendered = sign + f"{int(whole):,}"
+        if dot and fraction.rstrip("0"):
+            rendered += "." + fraction.rstrip("0")
+        return f"{rendered}{suffix}"
     if normalized != normalized.to_integral_value():
         return f"{normalized:,.2f} 원"
     integer = int(normalized)
