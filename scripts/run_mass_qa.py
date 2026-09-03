@@ -24,6 +24,8 @@ PROJECT = Path(__file__).resolve().parents[1]
 UNIVERSE = PROJECT / "data" / "derived" / "financial_company_universe.json"
 LEDGER = PROJECT / "runs" / "qa_mass.sqlite"
 CORPUS = PROJECT / "data" / "derived" / "disclosure_corpus_semantic_v1.sqlite"
+# Provider quota rejections return in 0.1-0.3s; anything slower did real work.
+_QUOTA_REJECTION_SECONDS = 2.0
 
 STRUCTURED_ACCOUNTS = ("매출액", "영업이익", "당기순이익", "자산총계", "부채총계", "자본총계")
 
@@ -839,10 +841,15 @@ def main() -> int:
             last_start[0] = time.time()
         result, elapsed, error = ask(args.base_url, item["question"], args.timeout)
         for backoff in (8.0, 15.0):
+            # A quota rejection comes back almost immediately and is worth
+            # waiting out. A provider failure that took seconds of real work is
+            # a genuine failure on that question: retrying it burns three HCX
+            # calls and half a minute to record the same verdict.
             rate_limited = (
                 error is None
                 and isinstance(result, dict)
                 and result.get("status") == "error"
+                and elapsed < _QUOTA_REJECTION_SECONDS
                 and any(str(warning).startswith("hcx_") for warning in result.get("warnings") or [])
             )
             if not rate_limited:
