@@ -177,6 +177,7 @@ class NamedRegistry:
 def _sufficient_response(
     tool_name: str, data: dict[str, object], *, evidence_id: str, receipt: str,
     company: str = "삼성전자", account: str | None = None, report_name: str = "사업보고서",
+    filed_at: str = "2026-03-18",
 ) -> dict[str, object]:
     covered_scope: dict[str, object] = {"company": [company]}
     if account:
@@ -195,7 +196,7 @@ def _sufficient_response(
                 "filing_id": receipt,
                 "rcept_no": receipt,
                 "report_name": report_name,
-                "filed_at": "2026-03-18",
+                "filed_at": filed_at,
                 "quality_status": "validated_structured_evidence",
             }],
             "evidence_ids": [evidence_id],
@@ -1486,6 +1487,62 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(raised.exception.http_status, 400)
         self.assertEqual(raised.exception.provider_error_code, "40001")
         self.assertNotIn("raw provider detail", str(raised.exception))
+
+    def test_false_amount_confirmation_is_corrected_without_hcx_generation(self) -> None:
+        registry = AccountFinancialRegistry({
+            ("삼성전자", "매출액"): "97146675000000",
+        })
+        client = FakeHcxClient(self._search_call())
+        result = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        ).answer("삼성전자의 2025년 연결 매출액이 971.5조 맞죠?")
+
+        self.assertEqual(result.status, "answered")
+        self.assertTrue(result.answer.startswith("아니요."))
+        self.assertIn("97,146,675,000,000원", result.answer)
+        self.assertEqual(client.generation_calls, [])
+        self.assertFalse(result.metadata["claimed_amount_matches"])
+
+    def test_foreign_currency_conversion_abstains_without_external_rate(self) -> None:
+        registry = NamedRegistry({})
+        client = FakeHcxClient(self._search_call())
+        result = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        ).answer("삼성전자의 2025년 연결 매출액을 미국 달러로 환산하면 얼마인가요?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual(registry.calls, [])
+        self.assertEqual(client.generation_calls, [])
+        self.assertIn("환율의 기준 시점과 출처", result.answer)
+
+    def test_stock_split_question_abstains_without_matching_report_type(self) -> None:
+        unrelated = _sufficient_response(
+            "search_disclosures",
+            {"results": [], "retrieval_mode": "hybrid"},
+            evidence_id="ev-other",
+            receipt="20260318000001",
+            report_name="사업보고서",
+        )
+        registry = NamedRegistry({"search_disclosures": unrelated})
+        client = FakeHcxClient(self._search_call())
+        result = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        ).answer("삼성전자의 2025년 액면분할 결정 공시에서 분할 비율이 어떻게 되나요?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual(
+            result.tool_response["data"]["document_existence"],
+            "not_found",
+        )
+        self.assertEqual(client.generation_calls, [])
 
     def test_accounting_identity_is_calculated_from_three_validated_facts(self) -> None:
         registry = AccountFinancialRegistry({

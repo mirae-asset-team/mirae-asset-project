@@ -38,14 +38,23 @@ _EVENT_DISCLOSURE_MARKERS = (
     "시설투자", "공급계약", "회사합병", "합병 결정", "회사분할", "분할 결정",
     "감자 결정", "주식교환", "투자판단", "소송",
 )
+_STOCK_SPLIT_MARKERS = ("액면분할", "주식분할")
+_STOCK_SPLIT_REPORT_PATTERNS = ("주식분할결정", "액면분할결정")
 _UNAVAILABLE_MARKERS = ("시가총액", "목표주가", "미래 주가", "주가 예측", "예상 주가")
+_FOREIGN_CURRENCY_MARKERS = (
+    "미국 달러", "달러", "usd", "유로", "eur", "엔화", "일본 엔", "jpy", "위안", "cny",
+)
 # Solicitation phrasings ask for a trading decision rather than a disclosure
 # fact. Routing them through the provider cost ~9s and still ended in a
 # refusal, so the refusal is made deterministic and immediate.
 _ADVICE_MARKERS = (
     "사도 될까", "사도 되나", "사도 돼", "매수해도", "매도해도", "팔아도 될까",
-    "投資", "투자해도", "사는 게 좋을", "사는게 좋을", "살까요", "팔까요",
+    "投資", "투자해도", "사는 게 좋을", "사는게 좋을", "사는 게 맞", "사는게 맞",
+    "살까요", "팔까요",
     "말려야", "추천해", "추천할", "유망한가", "괜찮은 종목", "들어가도",
+)
+_NONPUBLIC_INFORMATION_MARKERS = (
+    "공시 전인", "공시되지 않은", "아직 공시되지", "아직 공개되지", "미공개", "내부정보",
 )
 # Document-shaped questions that name no financial account. These carry a
 # company and a disclosure topic, so the search tool is the grounded route.
@@ -85,6 +94,17 @@ def _requested_output_unit(text: str) -> str | None:
     if re.search(r"(?<![가-힣A-Za-z0-9])원\s*단위", text):
         return "won"
     return None
+
+
+def _required_event_report_patterns(text: str) -> tuple[str, ...]:
+    if any(marker in text for marker in _STOCK_SPLIT_MARKERS):
+        return _STOCK_SPLIT_REPORT_PATTERNS
+    return ()
+
+
+def _requests_foreign_currency_conversion(text: str) -> bool:
+    lowered = text.casefold()
+    return "환산" in text and any(marker in lowered for marker in _FOREIGN_CURRENCY_MARKERS)
 
 
 def _distance_at_most_one(left: str, right: str) -> bool:
@@ -487,6 +507,34 @@ class DeterministicQuestionRouter:
                 **route_context,
             )
 
+        if _requests_foreign_currency_conversion(text):
+            return QuestionRoute(
+                "unavailable",
+                "foreign_currency_conversion_requires_external_rate",
+                response_mode="deterministic",
+                message=(
+                    "DART 공시 근거에는 환율의 기준 시점과 출처가 없어 외화 환산값을 "
+                    "검증할 수 없습니다. 공시에 기재된 원화 수치는 확인할 수 있습니다."
+                ),
+                metric_kind="UNAVAILABLE",
+                context={"available_range": "DART 공시에 기재된 원화 재무수치"},
+                **route_context,
+            )
+
+        if any(marker in text for marker in _NONPUBLIC_INFORMATION_MARKERS):
+            return QuestionRoute(
+                "unavailable",
+                "nonpublic_information_unavailable",
+                response_mode="deterministic",
+                message=(
+                    "아직 공시되지 않은 정보나 내부정보는 확인하거나 제공할 수 없습니다. "
+                    "공개된 DART 공시만 근거로 답변할 수 있습니다."
+                ),
+                metric_kind="UNAVAILABLE",
+                context={"available_range": "공개된 DART 공시"},
+                **route_context,
+            )
+
         if plan.question_type == "out_of_scope" or any(marker in text for marker in _UNAVAILABLE_MARKERS):
             return QuestionRoute(
                 "unavailable",
@@ -621,16 +669,33 @@ class DeterministicQuestionRouter:
             # Event-report questions (holding reports, treasury stock, capital
             # actions...) must not depend on provider tool selection, which has
             # been observed picking get_correction_lineage for them.
+            required_report_patterns = _required_event_report_patterns(text)
+            arguments: dict[str, object] = {
+                "question": text,
+                "company": plan.company,
+                "top_k": 10,
+            }
+            if required_report_patterns and plan.period_start and plan.period_end:
+                arguments.update({
+                    "start_date": plan.period_start,
+                    "end_date": plan.period_end,
+                })
             return QuestionRoute(
                 "tool",
                 "event_disclosure_type_question",
                 "search_disclosures",
-                {
-                    "question": text,
-                    "company": plan.company,
-                    "top_k": 10,
-                },
+                arguments,
+                workflow=(
+                    "event_disclosure_check"
+                    if required_report_patterns
+                    else "single"
+                ),
                 metric_kind="SEARCH",
+                context={
+                    "required_report_patterns": required_report_patterns,
+                    "required_start_date": plan.period_start if required_report_patterns else None,
+                    "required_end_date": plan.period_end if required_report_patterns else None,
+                },
                 **route_context,
             )
 
