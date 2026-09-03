@@ -115,8 +115,10 @@ def build_bank_v4(companies: list[dict]) -> list[dict]:
             if older is None or newer is None:
                 continue
             label = ACCOUNT_KO[account_id]
+            # The headline amount here is a computed difference, so it will not
+            # equal any single backend fact; display consistency does not apply.
             add(f"{slug}-delta-{account_id}", name, "cross_year_delta", "answer",
-                f"{name}의 2024년 대비 2025년 연결 {label} 증감액은 얼마인가요?", scale_check=True)
+                f"{name}의 2024년 대비 2025년 연결 {label} 증감액은 얼마인가요?")
             # False premise: assert the direction opposite to the measured one.
             rose = Decimal(newer["value"]) > Decimal(older["value"])
             claim = "감소" if rose else "증가"
