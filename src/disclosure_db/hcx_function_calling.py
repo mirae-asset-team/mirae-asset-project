@@ -46,6 +46,17 @@ _FORECAST_CLAIM = re.compile(
     r"전망(?:됩니다|입니다|된다|될|치)|추정(?:됩니다|입니다|된다|될|치)|forecast|estimated?)",
     re.IGNORECASE,
 )
+_AMOUNT_VERIFICATION_MARKERS = ("맞죠", "맞나요", "맞습니까", "맞아요", "맞는지", "맞는가")
+_AMOUNT_UNIT_TOKEN = re.compile(r"([0-9][0-9,.]*)\s*(조|십억|억|천만|백만|만|원)")
+_AMOUNT_UNIT_FACTOR = {
+    "조": Decimal(10) ** 12,
+    "십억": Decimal(10) ** 9,
+    "억": Decimal(10) ** 8,
+    "천만": Decimal(10) ** 7,
+    "백만": Decimal(10) ** 6,
+    "만": Decimal(10) ** 4,
+    "원": Decimal(1),
+}
 _SAFE_DIAGNOSTIC_TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
 _LOGGER = logging.getLogger(__name__)
 
@@ -1258,6 +1269,83 @@ class HcxFunctionCallingService:
             force_answer_allowed=bool(matched),
         )
 
+    def _event_disclosure_response(
+        self, route: QuestionRoute, primary: Mapping[str, object],
+    ) -> dict[str, object]:
+        patterns = [
+            re.sub(r"[^가-힣A-Za-z0-9]", "", str(item))
+            for item in route.context.get("required_report_patterns", [])
+            if item
+        ]
+        if not patterns:
+            return dict(primary)
+        bundle = self._bundle_from_response(primary)
+        items = bundle.get("items")
+        required_start = str(route.context.get("required_start_date") or "")
+        required_end = str(route.context.get("required_end_date") or "")
+        matched = [
+            item for item in items
+            if isinstance(item, Mapping)
+            and any(
+                pattern in re.sub(
+                    r"[^가-힣A-Za-z0-9]", "", str(item.get("report_name") or "")
+                )
+                for pattern in patterns
+            )
+            and (
+                not required_start
+                or required_start <= str(item.get("filed_at") or "") <= required_end
+            )
+        ] if isinstance(items, list) else []
+        if matched:
+            evidence_ids = list(dict.fromkeys(
+                str(evidence_id)
+                for item in matched
+                for evidence_id in (
+                    item.get("evidence_ids")
+                    if isinstance(item.get("evidence_ids"), (list, tuple))
+                    else [item.get("evidence_id")]
+                )
+                if evidence_id
+            ))
+            filing_ids = list(dict.fromkeys(
+                str(item.get("filing_id") or item.get("rcept_no"))
+                for item in matched
+                if item.get("filing_id") or item.get("rcept_no")
+            ))
+            primary_data = primary.get("data") if isinstance(primary.get("data"), Mapping) else {}
+            return {
+                **dict(primary),
+                "data": {
+                    **dict(primary_data),
+                    "results": matched,
+                    "document_existence": "confirmed",
+                    "required_report_patterns": patterns,
+                },
+                "evidence_bundle": {
+                    **dict(bundle),
+                    "items": matched,
+                    "evidence_ids": evidence_ids,
+                    "filing_ids": filing_ids,
+                },
+            }
+        primary_data = primary.get("data") if isinstance(primary.get("data"), Mapping) else {}
+        return self._merged_response(
+            tool_name="search_disclosures",
+            request=route.arguments,
+            data={
+                **dict(primary_data),
+                "document_existence": "not_found",
+                "required_report_patterns": patterns,
+            },
+            responses=[primary],
+            checker_tool="search_disclosures",
+            checker_data=dict(primary_data),
+            required_response_indexes=(0,),
+            extra_reasons=("requested_event_report_not_found",),
+            force_answer_allowed=False,
+        )
+
     @staticmethod
     def _statement_item_matches(item: Mapping[str, object], route: QuestionRoute) -> bool:
         year = str(route.context.get("fiscal_year") or "")
@@ -1388,6 +1476,8 @@ class HcxFunctionCallingService:
             return tool_call, self._trend_response(question, route, primary)
         if route.workflow == "financial_change_reason":
             return tool_call, self._change_reason_response(question, route, primary)
+        if route.workflow == "event_disclosure_check":
+            return tool_call, self._event_disclosure_response(route, primary)
         if route.workflow == "correction_search_then_lineage":
             return self._correction_response(route, primary)
         if route.workflow == "document_summary_check":
@@ -1562,6 +1652,33 @@ class HcxFunctionCallingService:
                 "abstained", UNANSWERABLE_TEXT,
                 warnings=["answer_generation_blocked_by_incomplete_correction_receipts"], **common,
             )
+
+        if (
+            route is not None
+            and route.reason == "structured_financial_lookup"
+            and any(marker in question for marker in _AMOUNT_VERIFICATION_MARKERS)
+        ):
+            available_ids = list(
+                tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
+            )
+            verification = self._deterministic_amount_verification_answer(
+                question, tool_response, available_ids,
+            )
+            if verification is not None:
+                generated, claimed_amount_matches = verification
+                citations = self._selected_citations(
+                    tool_call.name, generated.citation_ids, available_citations,
+                )
+                if citations:
+                    common["metadata"]["deterministic_amount_verification_used"] = True  # type: ignore[index]
+                    common["metadata"]["claimed_amount_matches"] = claimed_amount_matches  # type: ignore[index]
+                    return self._result(
+                        "answered", self._render_answer(generated.answer, citations),
+                        answer_allowed=True,
+                        citation_ids=[item.evidence_id for item in citations],
+                        citations=[item.to_dict() for item in citations],
+                        **common,
+                    )
 
         if route is not None and route.workflow == "financial_change_reason":
             data = tool_response.get("data")
@@ -1778,6 +1895,68 @@ class HcxFunctionCallingService:
             return None
         answer = sentences[0] if len(sentences) == 1 else "\n".join(f"- {item}" for item in sentences)
         return HcxGeneratedAnswer(answer, tuple(available_evidence_ids[:5]))
+
+    @classmethod
+    def _deterministic_amount_verification_answer(
+        cls,
+        question: str,
+        tool_response: Mapping[str, object],
+        available_evidence_ids: Sequence[str],
+    ) -> tuple[HcxGeneratedAnswer, bool] | None:
+        claimed_amounts = parse_korean_krw_amounts(question)
+        unit_tokens = list(_AMOUNT_UNIT_TOKEN.finditer(question))
+        if len(claimed_amounts) != 1 or not unit_tokens or not available_evidence_ids:
+            return None
+        data = tool_response.get("data")
+        facts = data.get("facts") if isinstance(data, Mapping) else None
+        ordered = sorted(
+            (dict(item) for item in facts if isinstance(item, Mapping)),
+            key=cls._fact_period_key,
+        ) if isinstance(facts, list) else []
+        candidates = [
+            fact for fact in ordered
+            if fact.get("support_level") == "structured"
+            and fact.get("validation_status") == "validated"
+        ]
+        if len(candidates) != 1:
+            return None
+        fact = candidates[0]
+        actual = normalized_financial_value(
+            fact.get("value_numeric"), fact.get("scale") or 1, fact.get("unit") or "KRW",
+        )
+        display_value = str(fact.get("display_value") or "") or format_financial_value(
+            fact.get("value_numeric"), fact.get("scale") or 1, fact.get("unit") or "KRW",
+        )
+        if actual is None or not display_value:
+            return None
+        claimed = claimed_amounts[0]
+        if re.search(r"(?:-|마이너스)\s*[0-9]", question):
+            claimed = -claimed
+        precision_text = unit_tokens[-1].group(1).replace(",", "")
+        decimal_places = len(precision_text.partition(".")[2])
+        rounding_step = _AMOUNT_UNIT_FACTOR[unit_tokens[-1].group(2)] / (Decimal(10) ** decimal_places)
+        claimed_amount_matches = abs(actual - claimed) <= rounding_step / 2
+
+        identifiers = fact.get("company_identifiers")
+        company = str(identifiers.get("company") or "") if isinstance(identifiers, Mapping) else ""
+        period = cls._fact_period_key(fact)[:4]
+        account = str(fact.get("account_name") or fact.get("account_id") or "재무 수치")
+        scope = {"consolidated": "연결", "separate": "별도"}.get(str(fact.get("scope") or ""), "")
+        subject = " ".join(item for item in (company, f"{period}년" if period else "", scope, account) if item)
+        if claimed_amount_matches:
+            answer = f"네. 공시 수치 기준으로 {subject}은 {display_value}입니다."
+        else:
+            answer = (
+                f"아니요. 질문에 제시된 금액은 공시 수치와 일치하지 않습니다. "
+                f"{subject}은 {display_value}입니다."
+            )
+        fact_evidence_ids = [
+            str(item) for item in fact.get("evidence_ids", [])
+            if str(item) in available_evidence_ids
+        ]
+        if not fact_evidence_ids:
+            return None
+        return HcxGeneratedAnswer(answer, tuple(fact_evidence_ids)), claimed_amount_matches
 
     @staticmethod
     def _deterministic_financial_comparison_answer(
