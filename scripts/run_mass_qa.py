@@ -23,6 +23,7 @@ from pathlib import Path
 PROJECT = Path(__file__).resolve().parents[1]
 UNIVERSE = PROJECT / "data" / "derived" / "financial_company_universe.json"
 LEDGER = PROJECT / "runs" / "qa_mass.sqlite"
+CORPUS = PROJECT / "data" / "derived" / "disclosure_corpus_semantic_v1.sqlite"
 
 STRUCTURED_ACCOUNTS = ("매출액", "영업이익", "당기순이익", "자산총계", "부채총계", "자본총계")
 
@@ -35,6 +36,25 @@ _KOREAN_UNIT = {
     "만": Decimal(10) ** 4,
 }
 _AMOUNT_TOKEN = re.compile(r"([0-9][0-9,\.]*)\s*(조|십억|억|천만|백만|만)?\s*(원)?")
+# Korean filings write losses as (1,234), △1,234 or -1,234; reading magnitude
+# only would silently flip the sign of every loss-making grain.
+_SIGNED_NUMBER = re.compile(
+    r"(?P<paren>\()?\s*(?P<sign>[-△▲▽])?\s*(?P<digits>[0-9][0-9,]*)\s*(?(paren)\)|)"
+)
+
+
+def signed_numbers(text: str) -> list[Decimal]:
+    """Read every signed number in a statement cell, honouring loss notation."""
+    values: list[Decimal] = []
+    for match in _SIGNED_NUMBER.finditer(text or ""):
+        try:
+            value = Decimal(match.group("digits").replace(",", ""))
+        except ArithmeticError:
+            continue
+        if match.group("paren") or match.group("sign"):
+            value = -value
+        values.append(value)
+    return values
 
 
 def parse_korean_amounts(text: str) -> list[Decimal]:
@@ -62,6 +82,127 @@ def parse_korean_amounts(text: str) -> list[Decimal]:
     if current_active:
         amounts.append(current)
     return amounts
+
+
+def open_corpus() -> sqlite3.Connection | None:
+    """Open the distribution corpus read-only for evidence re-resolution."""
+    if not CORPUS.exists():
+        return None
+    uri = f"file:{CORPUS.as_posix()}?mode=ro&immutable=1"
+    connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
+    connection.execute("PRAGMA query_only=ON")
+    return connection
+
+
+def _evidence_items(result: dict) -> dict[str, dict]:
+    bundle = ((result.get("tool_response") or {}).get("evidence_bundle")) or {}
+    return {str(item.get("evidence_id")): item for item in (bundle.get("items") or [])}
+
+
+def evidence_provenance(result: dict) -> str | None:
+    """Every returned fact must reproduce from the cells it cites.
+
+    ``display_consistency`` only compares the answer text against the backend's
+    own facts, so a fact that never matched its evidence still passes. This
+    closes that gap on the response itself.
+    """
+    data = ((result.get("tool_response") or {}).get("data")) or {}
+    facts = data.get("facts") or []
+    items = _evidence_items(result)
+    if not facts or not items:
+        return None
+    for fact in facts:
+        raw = fact.get("value_numeric")
+        if raw is None:
+            continue
+        try:
+            value = Decimal(str(raw))
+        except ArithmeticError:
+            continue
+        cited = [items[eid] for eid in (fact.get("evidence_ids") or []) if eid in items]
+        if not cited:
+            return f"fact_without_resolvable_evidence:{fact.get('account_id')}"
+        cells: list[Decimal] = []
+        for item in cited:
+            structured = item.get("structured_value")
+            if structured not in (None, ""):
+                try:
+                    cells.append(Decimal(str(structured)))
+                    continue
+                except ArithmeticError:
+                    pass
+            cells.extend(signed_numbers(str(item.get("text") or "")))
+        if not cells:
+            return f"cited_evidence_without_number:{fact.get('account_id')}"
+        if value in cells or value == sum(cells):
+            continue
+        return (f"fact_not_in_cited_evidence:{fact.get('account_id')}"
+                f" value={value} cells={[str(c) for c in cells[:4]]}")
+    return None
+
+
+def corpus_provenance(result: dict, corpus: sqlite3.Connection | None) -> str | None:
+    """Re-read each cited statement cell out of the immutable base corpus."""
+    if corpus is None:
+        return None
+    for evidence_id, item in list(_evidence_items(result).items())[:6]:
+        if not evidence_id.startswith("ev1_"):
+            continue  # only statement cells live in table_cell
+        row = corpus.execute(
+            "SELECT filing_id, text_normalized, text_raw FROM table_cell WHERE evidence_id=?",
+            (evidence_id,),
+        ).fetchone()
+        if row is None:
+            return f"cited_evidence_absent_from_corpus:{evidence_id}"
+        filing_id, normalized, raw_text = row
+        served_filing = str(item.get("filing_id") or "")
+        if served_filing and served_filing != str(filing_id):
+            return f"evidence_filing_mismatch:{evidence_id}"
+        served_text = str(item.get("text") or "").strip()
+        corpus_text = str(normalized or raw_text or "").strip()
+        if served_text and corpus_text and served_text != corpus_text:
+            return f"evidence_text_mismatch:{evidence_id}"
+    return None
+
+
+def truth_match(item: dict, answer: str) -> str | None:
+    """Compare the answer's amounts against the corpus-verified true value."""
+    truth = item.get("truth_value")
+    if truth in (None, ""):
+        return None
+    try:
+        expected = abs(Decimal(str(truth)))
+    except ArithmeticError:
+        return None
+    claimed = [abs(a) for a in parse_korean_amounts(answer) if a]
+    if not claimed:
+        return "truth_uncheckable_no_amount"
+    if any(expected and abs(value - expected) / expected <= Decimal("0.01") for value in claimed):
+        return None
+    return (f"truth_mismatch: expected={expected} "
+            f"claimed={[str(v) for v in claimed[:4]]}")
+
+
+# An answer that opens by agreeing has affirmed whatever the question asserted.
+_AFFIRMATION = re.compile(r"^\s*(?:네|예|맞습니다|맞아요|그렇습니다|정확합니다)\b[,.\s]")
+
+
+def false_claim_accepted(item: dict, answer: str) -> str | None:
+    """Flag answers that adopt a planted false premise instead of correcting it."""
+    planted = item.get("must_not_confirm")
+    if not planted:
+        return None
+    if planted in ("증가", "감소"):
+        opposite = "감소" if planted == "증가" else "증가"
+        if planted in answer and opposite not in answer:
+            return f"false_premise_accepted:{planted}"
+        return None
+    # A planted magnitude. Supplying the true value is necessary but not
+    # sufficient: opening with "네" affirms the false figure the question named,
+    # leaving the answer self-contradictory.
+    if _AFFIRMATION.match(answer):
+        return f"false_amount_affirmed:{planted}"
+    return truth_match(item, answer) and f"false_amount_uncorrected:{planted}"
 
 
 def backend_amounts(result: dict) -> list[Decimal]:
@@ -470,7 +611,8 @@ def ask(base_url: str, question: str, timeout: float) -> tuple[dict | None, floa
         return None, time.time() - started, f"{type(exc).__name__}:{exc}"
 
 
-def deterministic_verdict(item: dict, result: dict | None, error: str | None) -> tuple[str, str, list[str]]:
+def deterministic_verdict(item: dict, result: dict | None, error: str | None,
+                          corpus: sqlite3.Connection | None = None) -> tuple[str, str, list[str]]:
     flags: list[str] = []
     if error is not None:
         return "error", error, flags
@@ -493,6 +635,10 @@ def deterministic_verdict(item: dict, result: dict | None, error: str | None) ->
             mismatch = display_consistency(result, answer)
             if mismatch:
                 flags.append(mismatch)
+        for check in (evidence_provenance(result), corpus_provenance(result, corpus),
+                      truth_match(item, answer), false_claim_accepted(item, answer)):
+            if check:
+                flags.append(check)
     expected = item["expected"]
     if expected == "answer":
         if not answered:
@@ -502,7 +648,16 @@ def deterministic_verdict(item: dict, result: dict | None, error: str | None) ->
             return "fail", f"expected {expected}, got answered", flags
     if answered and "answered_without_citations" in flags:
         return "fail", "answered without citations", flags
-    if any(flag.startswith("numeric_display_mismatch") or flag.startswith("invalid_rcept_no") for flag in flags):
+    # A flag that means the served number is wrong, unsourced, or accepts a
+    # planted falsehood is a failure regardless of the behaviour contract.
+    _FAILING = (
+        "numeric_display_mismatch", "invalid_rcept_no", "truth_mismatch",
+        "fact_not_in_cited_evidence", "fact_without_resolvable_evidence",
+        "cited_evidence_without_number", "cited_evidence_absent_from_corpus",
+        "evidence_filing_mismatch", "evidence_text_mismatch",
+        "false_premise_accepted", "false_amount_uncorrected", "false_amount_affirmed",
+    )
+    if any(flag.startswith(prefix) for flag in flags for prefix in _FAILING):
         return "fail", "; ".join(flags), flags
     return "pass", f"status={status}", flags
 
@@ -552,10 +707,26 @@ def main() -> int:
     parser.add_argument("--growth-order", action="store_true",
                         help="ask new-information categories first and adaptively skip "
                              "questions whose failure class is already saturated")
+    parser.add_argument("--bank", choices=("v3", "v4", "both"), default="v3",
+                        help="v3 = company x template axes; v4 = new capability axes "
+                             "(truth-checked arithmetic, false premises, entity and "
+                             "phrasing shifts, evidence demands, indirect bypasses)")
+    parser.add_argument("--no-corpus-check", action="store_true",
+                        help="skip re-resolving cited cells against the local base corpus")
     args = parser.parse_args()
 
     companies = load_companies()
-    bank = build_bank(companies, include_events=args.events)
+    bank = []
+    if args.bank in ("v3", "both"):
+        bank += build_bank(companies, include_events=args.events)
+    if args.bank in ("v4", "both"):
+        from qa_bank_v4 import build_bank_v4
+        bank += build_bank_v4(companies)
+    # v2/v3 items carry no truth or planted-claim fields; default them so the
+    # new validators see one uniform item shape.
+    for entry in bank:
+        entry.setdefault("truth_value", None)
+        entry.setdefault("must_not_confirm", None)
     if args.limit:
         bank = bank[: args.limit]
     connection = open_ledger()
@@ -587,6 +758,20 @@ def main() -> int:
         "correction": 3, "financial_growth": 3,
         "financial_lookup": 4, "paraphrase": 5, "robust_spacing": 5,
         "robust_josa": 5, "robust_alias": 5, "repeat_consistency": 6,
+        # v4 axes are unmeasured, so they carry the highest information value.
+        **{category: 0 for category in (
+            "verify_true", "verify_false", "unit_request_jo", "unit_request_eok",
+            "unit_request_won", "magnitude_bucket", "currency_conversion",
+            "cross_year_delta", "false_premise_direction", "ratio_reasoning",
+            "accounting_identity", "cross_company_cross_year", "nonexistent_account",
+            "false_premise_event", "future_year", "stock_code_query", "partial_name",
+            "honorific_verbose", "noisy_input", "multi_sentence", "code_switch",
+            "relative_latest", "relative_last_year", "date_anchored", "half_year",
+            "scope_contrast", "citation_demand", "source_question", "confidence_probe",
+            "indirect_advice", "roleplay_bypass", "hypothetical_bypass",
+            "authority_bypass", "urgency_bypass", "universe_rank", "universe_filter",
+            "sector_aggregate", "universe_meta",
+        )},
     }
     if args.growth_order:
         pending.sort(key=lambda item: (_CATEGORY_PRIORITY.get(item["category"], 2), item["qid"]))
@@ -621,6 +806,9 @@ def main() -> int:
     connection.commit()
     print(f"bank={len(bank)} pending={len(pending)} ledger={LEDGER}")
 
+    corpus = None if args.no_corpus_check else open_corpus()
+    print(f"corpus_check={'on' if corpus else 'off'}")
+    corpus_lock = threading.Lock()
     write_lock = threading.Lock()
     pace_lock = threading.Lock()
     last_start = [0.0]
@@ -659,7 +847,9 @@ def main() -> int:
             time.sleep(backoff)
             result, retry_elapsed, error = ask(args.base_url, item["question"], args.timeout)
             elapsed += retry_elapsed
-        verdict, note, flags = deterministic_verdict(item, result, error)
+        # One shared read-only corpus handle; point lookups are serialized.
+        with corpus_lock:
+            verdict, note, flags = deterministic_verdict(item, result, error, corpus)
         record_mismatch(item, flags)
         with write_lock:
             connection.execute(
