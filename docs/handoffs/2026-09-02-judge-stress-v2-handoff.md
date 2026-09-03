@@ -163,3 +163,10 @@ python scripts/run_judge_stress_v2.py `
 ## 절대 커밋하지 말 것
 
 `.env`, API key, PEM, NCP credential, 원본/운영 DB, FAISS/model 대용량 artifact, live mount 내용, `eval/judge_stress_v2/` raw 질문. D 드라이브 원본 DB와 live overlay/index는 계속 read-only다.
+
+## GitHub 통합 순서
+
+- 후속 변경은 stacked PR #3 `agent/judge-stress-v2 → agent/financial-account-catalog-v1`에 있다: https://github.com/ksm12030-sudo/mirae-asset-project/pull/3
+- 팀원의 PR #2가 `agent/financial-account-catalog-v1 → main` 통합 경로다. PR #3을 먼저 병합하면 #2에 자동 포함된다. #2를 먼저 병합했다면 PR #3의 base를 `main`으로 변경한다.
+- PR #3 최초 CI는 기능 실패가 아니라 test-only `numpy`/`PyYAML` 설치 누락으로 수집 단계에서 실패했다. main `[agent]` image는 계속 NumPy-free이며, CI에만 `numpy==2.5.2`, `PyYAML==6.0.3`을 명시한다.
+- 리뷰·수정은 PR #3의 최신 head를 기준으로 하고, private holdout/provider 600건, 8001 staging, release hard gate와 production 승격은 별도 미완료 작업으로 유지한다.

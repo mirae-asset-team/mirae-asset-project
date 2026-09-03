@@ -122,7 +122,11 @@ class DeploymentArtifactTests(unittest.TestCase):
 
     def test_ci_installs_public_api_test_dependencies_and_runs_pytest(self):
         text = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-        self.assertIn('python -m pip install -e ".[agent]" pytest httpx', text)
+        self.assertIn(
+            'python -m pip install -e ".[agent]" pytest httpx numpy==2.5.2 PyYAML==6.0.3',
+            text,
+        )
+        self.assertNotIn('".[dense]"', text)
         self.assertIn("python -m pytest -q", text)
 
         smoke_test = Path("tests/test_smoke_agent.py").read_text(encoding="utf-8")

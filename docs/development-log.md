@@ -940,3 +940,11 @@
 - 마지막 정적 재리뷰에서 provider 장애 분기에는 workflow allowlist가 적용됐지만 provider 미설정 분기는 여전히 모든 routed 질문에 deterministic fallback을 시도하는 대칭 결함을 찾았다. `financial_change_reason` 무설정 회귀는 구현 전에 `1 failed`였다.
 - `_allows_deterministic_fallback` 단일 함수가 provider 미설정과 provider 장애 경로를 함께 통제한다. 허용되지 않은 route는 key가 없으면 `provider_unavailable`, provider 호출이 실패하면 `error`로 끝나며 숫자 답변을 만들지 않는다.
 - 핵심 대칭 회귀 `4 passed`; 최종 Python 전체 `877 passed, 2 skipped, 86 warnings, 240 subtests` (`74.35s`)다. Web 전체는 `13 passed`로 유지된다.
+
+## 2026-09-03 — stacked PR 생성과 CI 수집 실패 수정
+
+- 시각: `2026-09-03T11:07:45+09:00` / `2026-09-03T02:07:45Z`. 원격 `main`에는 초기 커밋만 있고, 팀원의 `agent/financial-account-catalog-v1 → main` PR #2가 열린 상태였다. `agent/judge-stress-v2 → main`으로 직접 PR을 만들면 기반 200여 커밋이 중복 표시되므로, 후속 22개 커밋만 검토할 수 있도록 `agent/judge-stress-v2 → agent/financial-account-catalog-v1` stacked PR #3을 생성했다.
+- PR: `https://github.com/ksm12030-sudo/mirae-asset-project/pull/3`. PR #3을 먼저 base 브랜치에 병합하면 #2가 전체 변경을 `main`으로 전달한다. #2를 먼저 병합할 경우 PR #3의 base를 `main`으로 바꾸는 것이 통합 경로다.
+- Evidence: 로컬에서는 `PYTHONPATH=src python -m pytest -q`가 `877 passed, 2 skipped, 240 subtests`, Web이 `13 passed`였지만 최초 GitHub Actions run `33706316028`은 collection에서 `numpy`와 `yaml`을 찾지 못해 4 errors로 실패했다. workflow가 `.[agent] pytest httpx`만 설치하면서 Dense 단위 테스트와 compose 계약 테스트도 모두 수집한 것이 원인이다.
+- Finding: 운영 main API의 `[agent]` extra와 `Dockerfile`에 NumPy를 추가하는 것은 기존 런타임 경계를 깨고 불필요한 의존성을 늘린다. CI 테스트 환경에만 현재 검증 버전 `numpy==2.5.2`, `PyYAML==6.0.3`을 설치하고, `[dense]` 전체(FAISS/모델 포함)는 설치하지 않는 최소 변경을 선택했다.
+- TDD: workflow 계약 테스트를 먼저 바꿔 누락 설치 명령으로 `1 failed`를 확인했고, workflow 수정 후 같은 테스트가 `1 passed`로 전환됐다. D 드라이브 원본 DB, live overlay/index, credential, `.env`, PEM, NCP 설정과 운영 이미지는 변경하지 않았다.
