@@ -1,8 +1,21 @@
 import unittest
 from pathlib import Path
+import tomllib
 
 
 class DeploymentArtifactTests(unittest.TestCase):
+    def test_numpy_is_pinned_for_the_dense_image_and_absent_from_the_agent_image(self):
+        project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+        extras = project["project"]["optional-dependencies"]
+        self.assertIn("numpy==2.5.2", extras["dense"])
+        self.assertFalse(any(item.casefold().startswith("numpy") for item in extras["agent"]))
+
+        agent_dockerfile = Path("Dockerfile").read_text(encoding="utf-8").casefold()
+        dense_dockerfile = Path("Dockerfile.dense").read_text(encoding="utf-8").casefold()
+        self.assertIn('".[agent]"', agent_dockerfile)
+        self.assertNotIn("numpy", agent_dockerfile)
+        self.assertIn('".[dense]"', dense_dockerfile)
+
     def test_compose_mounts_databases_read_only_and_has_healthcheck(self):
         text = Path("compose.yaml").read_text(encoding="utf-8")
         self.assertIn("/data/base/disclosure.sqlite:ro", text)
@@ -17,6 +30,7 @@ class DeploymentArtifactTests(unittest.TestCase):
         compose = Path("compose.yaml").read_text(encoding="utf-8")
         example = Path(".env.example").read_text(encoding="utf-8")
         dense_dockerfile = Path("Dockerfile.dense").read_text(encoding="utf-8")
+        self.assertIn("DENSE_RUNTIME_MANIFEST_PATH: /runtime/dense_runtime_manifest.json", compose)
         for name, value in (
             ("DISCLOSURE_DENSE_TIMEOUT_SECONDS", "5"),
             ("DISCLOSURE_DENSE_VECTOR_COUNT", "2571506"),
@@ -25,6 +39,37 @@ class DeploymentArtifactTests(unittest.TestCase):
             self.assertIn(f"{name}={value}", example)
         self.assertIn('CMD ["disclosure-dense"]', dense_dockerfile)
         self.assertIn('HF_HUB_OFFLINE=1', dense_dockerfile)
+
+    def test_agent_image_binds_dense_adoption_to_tracked_evaluation(self):
+        compose = Path("compose.yaml").read_text(encoding="utf-8")
+        dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+        dockerignore = Path(".dockerignore").read_text(encoding="utf-8").splitlines()
+        self.assertIn(
+            "COPY data/derived/freeform_retrieval_summary.json /app/data/derived/freeform_retrieval_summary.json",
+            dockerfile,
+        )
+        self.assertIn("data/*", dockerignore)
+        self.assertIn("!data/derived/", dockerignore)
+        self.assertIn("data/derived/*", dockerignore)
+        self.assertIn("!data/derived/freeform_retrieval_summary.json", dockerignore)
+        self.assertEqual(
+            compose.count("DISCLOSURE_DENSE_EVALUATION_SUMMARY: /app/data/derived/freeform_retrieval_summary.json"),
+            2,
+        )
+        self.assertEqual(
+            compose.count("DISCLOSURE_DENSE_ADOPTION_ARTIFACT: /runtime/dense_adoption.json"),
+            2,
+        )
+
+    def test_dense_model_identity_has_a_reproducible_staging_builder(self):
+        script = Path("scripts/build_dense_model_identity.py")
+        self.assertTrue(script.is_file())
+        text = script.read_text(encoding="utf-8")
+        self.assertIn("build_model_identity", text)
+        self.assertIn("snapshot_download", text)
+        self.assertIn("local_files_only=True", text)
+        self.assertIn("--model-path", text)
+        self.assertIn("--output", text)
 
     def test_public_limit_defaults_are_explicit_in_compose_and_example_env(self):
         compose = Path("compose.yaml").read_text(encoding="utf-8")
@@ -77,7 +122,11 @@ class DeploymentArtifactTests(unittest.TestCase):
 
     def test_ci_installs_public_api_test_dependencies_and_runs_pytest(self):
         text = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
-        self.assertIn('python -m pip install -e ".[agent]" pytest httpx', text)
+        self.assertIn(
+            'python -m pip install -e ".[agent]" pytest httpx numpy==2.5.2 PyYAML==6.0.3',
+            text,
+        )
+        self.assertNotIn('".[dense]"', text)
         self.assertIn("python -m pytest -q", text)
 
         smoke_test = Path("tests/test_smoke_agent.py").read_text(encoding="utf-8")
@@ -105,8 +154,9 @@ class DeploymentArtifactTests(unittest.TestCase):
         self.assertIn('EVAL_ENABLED: "1"', compose)
         self.assertIn("DISCLOSURE_DENSE_URL: http://dense-retriever:8080", compose)
         self.assertIn("qa-eval-data:/app/eval", compose)
-        self.assertIn("docker compose build disclosure-agent-staging", deploy)
-        self.assertIn("docker compose up -d --no-deps disclosure-agent-staging", deploy)
+        self.assertIn("& docker build", deploy)
+        self.assertIn("up -d --no-build dense-retriever disclosure-agent-staging", deploy)
+        self.assertNotIn("docker compose build disclosure-agent-staging", deploy)
         self.assertNotIn("docker compose down", deploy)
         self.assertNotIn("CLOVASTUDIO_API_KEY=", deploy)
 

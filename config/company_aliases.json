@@ -8,6 +8,10 @@
     {
       "canonical": "하이브",
       "aliases": ["HYBE", "하이브엔터테인먼트"]
+    },
+    {
+      "canonical": "삼성전자",
+      "aliases": ["Samsung Electronics"]
     }
   ]
 }

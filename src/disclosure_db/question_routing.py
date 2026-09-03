@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 import json
 import os
 from pathlib import Path
 import re
 from typing import Iterable, Mapping
 
+from .agent_contracts import QueryPlan
 from .financial_accounts import load_financial_account_catalog, normalize_account_text
+from .input_hardening import (
+    QuestionInputError,
+    detect_prompt_injection,
+    normalize_question_text,
+    preflight_public_question,
+)
 from .query_planner import plan_query
 
 
@@ -22,9 +30,14 @@ _CHANGE_REASON_MARKERS = ("증가한 이유", "감소한 이유", "증가 이유
 _UNAVAILABLE_MARKERS = ("시가총액", "목표주가", "미래 주가", "주가 예측", "예상 주가")
 _COMPARISON_MARKERS = ("비교", "중", "더 높은", "더 낮은", "큰 곳", "작은 곳", "어디")
 _PERIOD_COMPARISON_MARKERS = (
-    "비교", "대비", "보다", "변화", "추이", "증가", "감소", "상승", "하락", "늘", "줄",
+    "비교", "대비", "보다", "차이", "증감액", "변화", "추이", "증가", "감소", "상승", "하락", "늘", "줄",
 )
 _TOKEN = re.compile(r"[가-힣A-Za-z0-9]+")
+_CALENDAR_DATE = re.compile(
+    r"(?<!\d)(20\d{2})\s*[-./년]\s*(\d{1,2})"
+    r"(?:\s*[-./월]\s*(\d{1,2})\s*일?)?(?!\d)"
+)
+_FISCAL_YEAR_MENTION = re.compile(r"(?<!\d)(20\d{2}|\d{2})\s*년")
 _KOREAN_SUFFIXES = ("으로", "에서", "에게", "까지", "부터", "처럼", "보다", "의", "은", "는", "이", "가", "을", "를", "로")
 
 
@@ -107,18 +120,42 @@ class DeterministicQuestionRouter:
         if configured is not None:
             raw = configured
         else:
-            config_dir = Path(os.environ.get("DISCLOSURE_CONFIG_DIR") or Path(__file__).resolve().parents[2] / "config")
+            raw_aliases: dict[str, list[str]] = {}
+            project_root = Path(__file__).resolve().parents[2]
+            universe_path = project_root / "data" / "derived" / "financial_company_universe.json"
+            if universe_path.is_file():
+                with universe_path.open(encoding="utf-8") as handle:
+                    universe = json.load(handle)
+                rows = universe.get("companies", []) if isinstance(universe, Mapping) else []
+                for row in rows:
+                    if not isinstance(row, Mapping) or not row.get("issuer_name"):
+                        continue
+                    canonical = str(row["issuer_name"])
+                    surfaces = raw_aliases.setdefault(canonical, [])
+                    for surface in (
+                        canonical,
+                        row.get("listed_name"),
+                        *(row.get("aliases", []) if isinstance(row.get("aliases"), list) else []),
+                        row.get("stock_code"),
+                    ):
+                        if surface and str(surface) not in surfaces:
+                            surfaces.append(str(surface))
+
+            config_dir = Path(os.environ.get("DISCLOSURE_CONFIG_DIR") or project_root / "config")
             path = config_dir / "company_aliases.json"
-            if not path.is_file():
-                return {}
-            with path.open(encoding="utf-8") as handle:
-                payload = json.load(handle)
-            rows = payload.get("companies", []) if isinstance(payload, Mapping) else []
-            raw = {
-                str(row["canonical"]): tuple(str(item) for item in row.get("aliases", []))
-                for row in rows
-                if isinstance(row, Mapping) and row.get("canonical")
-            }
+            if path.is_file():
+                with path.open(encoding="utf-8") as handle:
+                    payload = json.load(handle)
+                rows = payload.get("companies", []) if isinstance(payload, Mapping) else []
+                for row in rows:
+                    if not isinstance(row, Mapping) or not row.get("canonical"):
+                        continue
+                    canonical = str(row["canonical"])
+                    surfaces = raw_aliases.setdefault(canonical, [])
+                    for alias in row.get("aliases", []):
+                        if alias and str(alias) not in surfaces:
+                            surfaces.append(str(alias))
+            raw = raw_aliases
         allowed = set(self.company_candidates)
         return {
             str(canonical): tuple(dict.fromkeys(str(alias) for alias in aliases if str(alias)))
@@ -131,7 +168,7 @@ class DeterministicQuestionRouter:
         corrections: list[str] = []
         surfaces = sorted(
             (
-                (alias, canonical)
+                (normalize_question_text(alias).casefold(), canonical)
                 for canonical, aliases in self.company_aliases.items()
                 for alias in aliases
             ),
@@ -139,9 +176,23 @@ class DeterministicQuestionRouter:
             reverse=True,
         )
         for alias, canonical in surfaces:
-            if alias in normalized:
-                normalized = normalized.replace(alias, canonical)
-                corrections.append(f"alias:{alias}->{canonical}")
+            if not alias:
+                continue
+            if alias.isdigit():
+                pattern = re.compile(rf"(?<!\d){re.escape(alias)}(?!\d)")
+            elif any(character.isascii() and character.isalnum() for character in alias):
+                pattern = re.compile(
+                    rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])",
+                    re.IGNORECASE,
+                )
+            else:
+                pattern = re.compile(re.escape(alias), re.IGNORECASE)
+            matched = pattern.search(normalized)
+            if matched is not None:
+                observed = matched.group(0)
+                normalized = pattern.sub(canonical, normalized)
+                if observed != canonical:
+                    corrections.append(f"alias:{observed.casefold()}->{canonical}")
         return normalized, tuple(dict.fromkeys(corrections))
 
     def _companies_in_text(self, text: str) -> tuple[str, ...]:
@@ -198,22 +249,146 @@ class DeterministicQuestionRouter:
             *(item for item in (company_correction, account_correction) if item),
         ])
 
+    def _structured_metrics(self, text: str, plan: QueryPlan) -> tuple[tuple[str, str], ...]:
+        if (
+            plan.account_status == "resolved"
+            and plan.account_support_level == "structured"
+            and plan.account_id
+            and plan.account_terms
+        ):
+            return ((plan.account_id, plan.account_terms[0]),)
+        if (
+            plan.account_status != "ambiguous"
+            or plan.account_match_type == "ambiguous_expression"
+            or len(plan.account_candidates) < 2
+        ):
+            return ()
+
+        compact = normalize_account_text(text)
+        found: list[tuple[int, str, str]] = []
+        for account_id in plan.account_candidates:
+            account = self.account_catalog.by_id.get(account_id)
+            if account is None or account.support_level != "structured":
+                return ()
+            positions = [
+                compact.find(normalize_account_text(surface))
+                for surface in (account.label_ko, *account.aliases)
+            ]
+            positions = [position for position in positions if position >= 0]
+            if not positions:
+                return ()
+            found.append((min(positions), account.canonical_id, account.label_ko))
+        return tuple((account_id, label) for _, account_id, label in sorted(found))
+
+    @staticmethod
+    def _has_invalid_calendar_date(text: str) -> bool:
+        for match in _CALENDAR_DATE.finditer(text):
+            year, month = int(match.group(1)), int(match.group(2))
+            day = int(match.group(3) or 1)
+            try:
+                date(year, month, day)
+            except ValueError:
+                return True
+        return False
+
+    @staticmethod
+    def _has_meaning_changing_duplicate_year(text: str, metric_count: int) -> bool:
+        years = [
+            2000 + int(raw) if len(raw) == 2 else int(raw)
+            for raw in _FISCAL_YEAR_MENTION.findall(text)
+        ]
+        return (
+            metric_count <= 1
+            and len(years) >= 2
+            and len(set(years)) < len(years)
+            and any(marker in text for marker in _PERIOD_COMPARISON_MARKERS)
+        )
+
     def route(self, question: str) -> QuestionRoute | None:
-        original = question.strip()
-        text, corrections = self._normalize_typos(original)
-        plan = plan_query(text, company_candidates=self.company_candidates)
-        companies = self._companies_in_text(text)
-        periods = tuple(dict.fromkeys(
-            str(period.get("end") or period.get("instant") or "")[:4]
-            for period in plan.target_periods
-            if str(period.get("end") or period.get("instant") or "")[:4]
-        ))
+        original = str(question).strip()
+        try:
+            normalized_input = preflight_public_question(question)
+        except QuestionInputError as exc:
+            messages = {
+                "question_date_invalid": "달력에 존재하는 날짜로 다시 입력해 주세요.",
+                "question_conditions_contradictory": "연결 또는 별도 재무제표 중 하나를 지정해 주세요.",
+                "question_duplicate_condition_changes_meaning": "같은 비교 기간이 중복되었습니다. 서로 다른 기간을 지정해 주세요.",
+            }
+            return QuestionRoute(
+                "clarification" if exc.code in messages else "unavailable",
+                exc.code,
+                response_mode="deterministic",
+                message=messages.get(exc.code, "질문 형식이 올바르지 않습니다."),
+                metric_kind="AMBIGUOUS" if exc.code in messages else "UNAVAILABLE",
+            )
+        text, corrections = self._normalize_typos(normalized_input)
         route_context = {
-            "normalized_question": text if corrections else None,
+            "normalized_question": text if text != original else None,
             "corrections": corrections,
         }
+        if detect_prompt_injection(text):
+            return QuestionRoute(
+                "unavailable",
+                "prompt_injection_detected",
+                response_mode="deterministic",
+                message="질문에 실행 지시 변경 요청이 포함되어 처리할 수 없습니다.",
+                metric_kind="UNAVAILABLE",
+                **route_context,
+            )
+        if self._has_invalid_calendar_date(text):
+            return QuestionRoute(
+                "clarification",
+                "question_date_invalid",
+                response_mode="deterministic",
+                message="달력에 존재하는 날짜로 다시 입력해 주세요.",
+                metric_kind="AMBIGUOUS",
+                **route_context,
+            )
+        if "연결" in text and "별도" in text:
+            return QuestionRoute(
+                "clarification",
+                "question_conditions_contradictory",
+                response_mode="deterministic",
+                message="연결 또는 별도 재무제표 중 하나를 지정해 주세요.",
+                metric_kind="AMBIGUOUS",
+                **route_context,
+            )
+        plan = plan_query(text, company_candidates=self.company_candidates)
+        companies = self._companies_in_text(text)
+        period_requirements: list[dict[str, str]] = []
+        for period in plan.target_periods:
+            start = str(period.get("start") or "")
+            end = str(period.get("end") or "")
+            instant = str(period.get("instant") or "")
+            if start.endswith("-01-01") and end == f"{start[:4]}-12-31":
+                label = start[:4]
+                requirement = {"period": label}
+            elif instant:
+                label = instant
+                requirement = {"period": label, "instant_date": instant}
+            elif end:
+                label = end
+                requirement = {"period": label, "end_date": end}
+                if start:
+                    requirement["start_date"] = start
+            else:
+                continue
+            if requirement not in period_requirements:
+                period_requirements.append(requirement)
+        periods = tuple(item["period"] for item in period_requirements)
+        metrics = self._structured_metrics(text, plan)
 
-        if plan.account_status == "ambiguous" and plan.account_warning:
+        if self._has_meaning_changing_duplicate_year(text, len(metrics)):
+            return QuestionRoute(
+                "clarification",
+                "question_duplicate_condition_changes_meaning",
+                response_mode="deterministic",
+                message="같은 비교 기간이 중복되었습니다. 서로 다른 기간을 지정해 주세요.",
+                metric_kind="AMBIGUOUS",
+                **route_context,
+            )
+
+        if plan.account_status == "ambiguous" and not metrics and plan.account_warning:
             return QuestionRoute(
                 "clarification",
                 "financial_account_ambiguous",
@@ -235,42 +410,46 @@ class DeterministicQuestionRouter:
                 **route_context,
             )
 
-        multi_company_comparison = (
-            len(companies) >= 2 and any(marker in text for marker in _COMPARISON_MARKERS)
-        )
-        multi_period_comparison = (
-            plan.company is not None
-            and len(periods) >= 2
-            and any(marker in text for marker in _PERIOD_COMPARISON_MARKERS)
-        )
         if (
-            (multi_company_comparison or multi_period_comparison)
-            and plan.account_status == "resolved"
-            and plan.account_support_level == "structured"
-            and plan.account_terms
+            metrics
+            and plan.company is not None
+            and (len(companies) >= 2 or len(periods) >= 2 or len(metrics) >= 2)
         ):
             required_companies = list(companies) if companies else [str(plan.company)]
-            required_periods: list[str | None] = list(periods) if periods else [None]
+            required_periods: list[dict[str, str | None]] = (
+                [dict(item) for item in period_requirements]
+                if period_requirements
+                else [{"period": None}]
+            )
             requirements = [
                 {
                     "company": company,
-                    "period": period,
-                    "account": plan.account_terms[0],
+                    **period,
+                    "account": metric,
                 }
                 for company in required_companies
                 for period in required_periods
+                for _, metric in metrics
             ]
             first_requirement = requirements[0]
             arguments: dict[str, object] = {
                 "company": first_requirement["company"],
-                "account": plan.account_terms[0],
+                "account": first_requirement["account"],
                 "correction_policy": plan.correction_policy,
                 "top_k": 1,
             }
             first_period = first_requirement["period"]
             if first_period:
-                arguments["start_date"] = f"{first_period}-01-01"
-                arguments["end_date"] = f"{first_period}-12-31"
+                if first_requirement.get("instant_date"):
+                    arguments["instant_date"] = first_requirement["instant_date"]
+                elif first_requirement.get("start_date") or first_requirement.get("end_date"):
+                    if first_requirement.get("start_date"):
+                        arguments["start_date"] = first_requirement["start_date"]
+                    if first_requirement.get("end_date"):
+                        arguments["end_date"] = first_requirement["end_date"]
+                else:
+                    arguments["start_date"] = f"{first_period}-01-01"
+                    arguments["end_date"] = f"{first_period}-12-31"
             if plan.scope:
                 arguments["scope"] = plan.scope
             return QuestionRoute(
@@ -284,8 +463,10 @@ class DeterministicQuestionRouter:
                     "companies": required_companies,
                     "period": periods[0] if len(periods) == 1 else None,
                     "periods": list(periods),
-                    "metric": plan.account_terms[0],
-                    "metric_id": plan.account_id,
+                    "metric": metrics[0][1] if len(metrics) == 1 else None,
+                    "metric_id": metrics[0][0] if len(metrics) == 1 else None,
+                    "metrics": [metric for _, metric in metrics],
+                    "metric_ids": [account_id for account_id, _ in metrics],
                     "intent": "financial_comparison",
                     "requirements": requirements,
                     "required_evidence": "validated_structured_fact_per_company_and_period",
@@ -459,10 +640,43 @@ class DeterministicQuestionRouter:
 
         if plan.account_support_level == "retrieval_only" and plan.company:
             quarter_match = re.search(r"([1-4])\s*분기", text)
-            statement_search = {
-                key: value for key, value in common_search.items()
-                if key not in {"start_date", "end_date"}
-            }
+            quarter = int(quarter_match.group(1)) if quarter_match else None
+            fiscal_year = int(plan.period_end[:4]) if plan.period_end else None
+            account_resolution = self.account_catalog.resolve(plan.account_terms[0]) if plan.account_terms else None
+            account = (
+                self.account_catalog.by_id.get(account_resolution.canonical_id)
+                if account_resolution is not None and account_resolution.canonical_id
+                else None
+            )
+            annual_period = bool(
+                quarter is None
+                and fiscal_year is not None
+                and plan.period_start == f"{fiscal_year}-01-01"
+                and plan.period_end == f"{fiscal_year}-12-31"
+            )
+            deterministic_supported = bool(
+                fiscal_year is not None
+                and plan.correction_policy == "current"
+                and plan.operation == "lookup"
+                and len(plan.target_periods) == 1
+                and account is not None
+                and account.statement_type == "income_statement"
+                and account.expected_value_type == "monetary"
+                and (annual_period or quarter == 1)
+            )
+            statement_search = dict(common_search)
+            if deterministic_supported:
+                statement_search.pop("start_date", None)
+                statement_search.pop("end_date", None)
+                statement_search.update({
+                    "account": plan.account_terms[0] if plan.account_terms else "",
+                    "fiscal_year": fiscal_year,
+                    "period_kind": "quarter" if quarter is not None else "annual",
+                })
+                if quarter is not None:
+                    statement_search["quarter"] = quarter
+                if plan.scope:
+                    statement_search["scope"] = plan.scope
             return QuestionRoute(
                 "tool",
                 "retrieval_only_financial_account",
@@ -472,9 +686,9 @@ class DeterministicQuestionRouter:
                 metric_kind="SEARCH",
                 context={
                     "metric": plan.account_terms[0] if plan.account_terms else None,
-                    "fiscal_year": plan.period_end[:4] if plan.period_end else None,
-                    "period_kind": "quarter" if quarter_match else "annual",
-                    "quarter": int(quarter_match.group(1)) if quarter_match else None,
+                    "fiscal_year": str(fiscal_year) if fiscal_year is not None else None,
+                    "period_kind": "quarter" if quarter is not None else "annual",
+                    "quarter": quarter,
                 },
                 **route_context,
             )

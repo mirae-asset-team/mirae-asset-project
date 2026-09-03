@@ -10,19 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from .analysis_contracts import AnalysisPlan, EvidenceSlot, PolicyDecision, QueryPlanSnapshot
+from .input_hardening import detect_prompt_injection
 from .query_planner import plan_query
 
 
 _DEFAULT_DIMENSIONS_PATH = Path(__file__).resolve().parents[2] / "config" / "analysis_dimensions.json"
-_PROMPT_INJECTION_MARKERS = (
-    "ignore previous",
-    "ignore all previous",
-    "system prompt",
-    "developer message",
-    "이전 지시를 무시",
-    "지시를 무시",
-    "시스템 프롬프트",
-)
 _ANALYSIS_MARKERS = ("공시", "사업보고서", "분기보고서", "반기보고서", "판단", "분석", "개선", "악화", "위험요인")
 _DIRECT_TRANSACTION_ACTION = re.compile(
     r"(?:"
@@ -76,6 +68,13 @@ _RECOMMENDATION_PATTERNS = (
     r"(?:매수|매도|보유|매집|매각|매입).{0,12}(?:해야|할까|해도|추천|의견|결론)",
     r"(?:사야|팔아야|들어가도|투자해도|포지션|비중|포트폴리오|숏|롱)",
     r"(?:나에게|저에게|개인\s*투자자|투자\s*성향|위험\s*감수).{0,20}(?:적합|맞|추천|투자)",
+)
+_FORECAST_REQUEST_PATTERNS = (
+    r"(?:내년|향후|미래|앞으로).{0,24}(?:전망|예상|예측|추정)",
+    r"(?:매출|영업이익|당기순이익|실적|현금흐름).{0,16}(?:전망|예상|예측|추정)(?:해|하|해서|해줘|해주세요|해볼)",
+)
+_HISTORICAL_FORECAST_TEXT = re.compile(
+    r"(?:공시|보고서).{0,24}(?:과거|기재|언급|공시된).{0,24}(?:전망|예상).{0,12}(?:내용|문구|표현)"
 )
 
 
@@ -227,11 +226,15 @@ def load_dimension_catalog(path: str | Path | None = None) -> tuple[Mapping[str,
 def classify_policy(question: str) -> PolicyDecision:
     """Apply recommendation, injection, and bounded-analysis policy in precedence order."""
     text = question.strip()
-    folded = text.casefold()
     if _is_direct_transaction_action(text) or any(re.search(pattern, text) for pattern in _RECOMMENDATION_PATTERNS):
         return PolicyDecision("refuse_recommendation", ("policy_recommendation_or_suitability_refusal",))
-    if any(marker in folded for marker in _PROMPT_INJECTION_MARKERS):
+    if detect_prompt_injection(text):
         return PolicyDecision("refuse_prompt_injection", ("policy_prompt_injection_refusal",))
+    if (
+        not _HISTORICAL_FORECAST_TEXT.search(text)
+        and any(re.search(pattern, text) for pattern in _FORECAST_REQUEST_PATTERNS)
+    ):
+        return PolicyDecision("refuse_forecast", ("policy_forecast_refusal",))
     if any(marker in text for marker in _ANALYSIS_MARKERS):
         return PolicyDecision("allow_analysis", ("policy_historical_disclosure_analysis",))
     return PolicyDecision("allow_lookup", ("policy_bounded_lookup",))
@@ -244,18 +247,25 @@ def _matches_dimension(text: str, dimension: Mapping[str, Any]) -> bool:
     return any(term in text for term in dimension.get("match_any", []))
 
 
-def _make_slot(slot: Mapping[str, Any], *, issuer: str | None, base_plan: Any) -> EvidenceSlot:
+def _make_slot(
+    slot: Mapping[str, Any],
+    *,
+    issuer: str | None,
+    base_plan: Any,
+    slot_id: str | None = None,
+    period: Mapping[str, str | None] | None = None,
+) -> EvidenceSlot:
     return EvidenceSlot(
-        slot_id=slot["slot_id"],
+        slot_id=slot_id or slot["slot_id"],
         domain=slot["domain"],
         issuer=issuer,
-        period_start=base_plan.period_start,
-        period_end=base_plan.period_end,
-        instant_date=base_plan.instant_date,
+        period_start=period.get("start") if period is not None else base_plan.period_start,
+        period_end=period.get("end") if period is not None else base_plan.period_end,
+        instant_date=period.get("instant") if period is not None else base_plan.instant_date,
         filing_date=base_plan.filing_date,
         report_types=tuple(slot.get("report_types", ())),
         search_concepts=tuple(slot["search_concepts"]),
-        min_periods=slot.get("min_periods", 1),
+        min_periods=1 if period is not None else slot.get("min_periods", 1),
         min_evidence=slot["min_evidence"],
         max_evidence=slot["max_evidence"],
         mandatory=bool(slot["mandatory"]),
@@ -267,6 +277,21 @@ def _ordered_reason_codes(*groups: Iterable[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(code for group in groups for code in group))
 
 
+def _explicit_issuers(
+    text: str,
+    candidates: Iterable[str],
+    fallback: str | None,
+) -> tuple[str | None, ...]:
+    normalized = unicodedata.normalize("NFKC", text).casefold()
+    matches = [
+        (normalized.find(unicodedata.normalize("NFKC", candidate).casefold()), candidate)
+        for candidate in candidates
+        if candidate and unicodedata.normalize("NFKC", candidate).casefold() in normalized
+    ]
+    ordered = tuple(candidate for _, candidate in sorted(matches, key=lambda item: item[0]))
+    return tuple(dict.fromkeys(ordered)) or (fallback,)
+
+
 def plan_analysis(
     question: str,
     *,
@@ -276,10 +301,13 @@ def plan_analysis(
 ) -> AnalysisPlan:
     """Create a bounded plan; prohibited requests receive no evidence slots."""
     text = question.strip()
+    candidates = tuple(dict.fromkeys(
+        str(candidate) for candidate in company_candidates if str(candidate)
+    ))
     policy = classify_policy(text)
     base_plan = QueryPlanSnapshot.from_query_plan(plan_query(
         text,
-        company_candidates=company_candidates,
+        company_candidates=candidates,
         company_hint=company_hint,
         as_of=as_of,
     ))
@@ -320,7 +348,29 @@ def plan_analysis(
             reason_codes=_ordered_reason_codes(policy.reason_codes, base_plan.reason_codes),
         )
 
-    slots = tuple(_make_slot(slot, issuer=base_plan.company, base_plan=base_plan) for slot in dimension["slots"])
+    issuers = _explicit_issuers(base_plan.question, candidates, base_plan.company)
+    periods: tuple[Mapping[str, str | None] | None, ...] = (
+        tuple(base_plan.target_periods)
+        if len(base_plan.target_periods) > 1
+        else (None,)
+    )
+    ownership_count = len(issuers) * len(periods)
+    slots = tuple(
+        _make_slot(
+            slot,
+            issuer=issuer,
+            base_plan=base_plan,
+            slot_id=(
+                str(slot["slot_id"])
+                if ownership_count == 1
+                else f"{slot['slot_id']}__i{issuer_index}_p{period_index}"
+            ),
+            period=period,
+        )
+        for issuer_index, issuer in enumerate(issuers, start=1)
+        for period_index, period in enumerate(periods, start=1)
+        for slot in dimension["slots"]
+    )
     return AnalysisPlan(
         question=text,
         analysis_mode="judgment",

@@ -20,7 +20,15 @@ import urllib.request
 import uuid
 
 from .generation import UNANSWERABLE_TEXT
+from .bounded_analysis import BoundedAnalysisExecution, BoundedAnalysisExecutor
+from .analysis_planner import classify_policy
 from .calculator import calculate
+from .claim_verification import (
+    ClaimAdmission,
+    HcxAnswerClaim,
+    build_claim_admission,
+    verify_generated_claims,
+)
 from .disclosure_tools import format_financial_value
 from .evidence_sufficiency import EvidenceSufficiencyChecker
 from .hcx_prompts import (
@@ -28,6 +36,12 @@ from .hcx_prompts import (
     HCX_FUNCTION_PROMPT_VERSION,
     HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT,
     HCX_TOOL_SELECTION_SYSTEM_PROMPT,
+)
+from .input_hardening import (
+    PUBLIC_QUESTION_MAX_CHARS,
+    QuestionInputError,
+    detect_prompt_injection,
+    preflight_public_question,
 )
 from .question_routing import QuestionRoute
 from .tool_registry import ToolRegistry
@@ -114,12 +128,25 @@ class HcxToolCall:
 class HcxGeneratedAnswer:
     answer: str
     citation_ids: tuple[str, ...]
+    conclusion: str | None = None
+    claims: tuple[HcxAnswerClaim, ...] = ()
+    limitations: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.answer, str) or not self.answer.strip() or len(self.answer) > 10_000:
             raise ValueError("hcx_final_answer_invalid")
         if not all(isinstance(item, str) and item for item in self.citation_ids):
             raise ValueError("hcx_final_citation_ids_invalid")
+        if self.conclusion is not None and not isinstance(self.conclusion, str):
+            raise ValueError("hcx_final_conclusion_invalid")
+        try:
+            claims = tuple(HcxAnswerClaim.from_value(item) for item in self.claims)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("hcx_final_claims_invalid") from exc
+        if not all(isinstance(item, str) and item for item in self.limitations):
+            raise ValueError("hcx_final_limitations_invalid")
+        object.__setattr__(self, "claims", claims)
+        object.__setattr__(self, "limitations", tuple(dict.fromkeys(self.limitations)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,7 +249,14 @@ def hcx_tool_schemas(registry: ToolRegistry) -> list[dict[str, object]]:
     return json.loads(json.dumps(tools, ensure_ascii=False))
 
 
-def _final_answer_tool(evidence_ids: Sequence[str]) -> dict[str, object]:
+def _final_answer_tool(
+    evidence_ids: Sequence[str],
+    allowed_conclusions: Sequence[str] = (),
+    *,
+    fact_refs: Sequence[str] = (),
+    calculation_refs: Sequence[str] = (),
+    evidence_slot_ids: Sequence[str] = (),
+) -> dict[str, object]:
     """Build the private HCX output contract from admitted Evidence IDs."""
 
     allowed_ids = list(dict.fromkeys(str(item) for item in evidence_ids if item))
@@ -230,6 +264,70 @@ def _final_answer_tool(evidence_ids: Sequence[str]) -> dict[str, object]:
         raise HcxProtocolError(
             "hcx_final_evidence_ids_empty", stage="final_generation_preflight"
         )
+    properties: dict[str, object] = {
+        "answer": {
+            "type": "string",
+            "description": "DART Tool Evidence에만 근거한 한국어 최종 답변",
+        },
+        "citation_ids": {
+            "type": "array",
+            "description": "답변에 실제 사용한 evidence ID",
+            "items": {"type": "string", "enum": allowed_ids},
+            "minItems": 1,
+        },
+        "claims": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "claim_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                    "text": {"type": "string", "minLength": 1, "maxLength": 4000},
+                    "citation_ids": {
+                        "type": "array", "minItems": 1,
+                        "items": {"type": "string", "enum": allowed_ids},
+                    },
+                    "fact_refs": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(fact_refs)},
+                    },
+                    "calculation_refs": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": list(calculation_refs)},
+                    },
+                    "evidence_slot_ids": {
+                        "type": "array", "minItems": 1,
+                        "items": {"type": "string", "enum": list(evidence_slot_ids)},
+                    },
+                    "numeric_values": {
+                        "type": "array", "items": {"type": "string"},
+                    },
+                },
+                "required": [
+                    "claim_id", "text", "citation_ids", "fact_refs",
+                    "calculation_refs", "evidence_slot_ids", "numeric_values",
+                ],
+            },
+        },
+        "limitations": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {"type": "string", "maxLength": 256},
+        },
+    }
+    required = ["answer", "citation_ids", "claims", "limitations"]
+    bounded_conclusions = list(dict.fromkeys(
+        str(item) for item in allowed_conclusions if item != "insufficient_evidence"
+    ))
+    if bounded_conclusions:
+        properties["conclusion"] = {
+            "type": "string",
+            "description": "백엔드가 허용한 과거 공시 판단 범주",
+            "enum": bounded_conclusions,
+        }
+        required.append("conclusion")
     return {
         "type": "function",
         "function": {
@@ -239,19 +337,9 @@ def _final_answer_tool(evidence_ids: Sequence[str]) -> dict[str, object]:
             ),
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "answer": {
-                        "type": "string",
-                        "description": "DART Tool Evidence에만 근거한 한국어 최종 답변",
-                    },
-                    "citation_ids": {
-                        "type": "array",
-                        "description": "답변에 실제 사용한 evidence ID",
-                        "items": {"type": "string", "enum": allowed_ids},
-                        "minItems": 1,
-                    },
-                },
-                "required": ["answer", "citation_ids"],
+                "additionalProperties": False,
+                "properties": properties,
+                "required": required,
             },
         },
     }
@@ -396,8 +484,30 @@ class HyperClovaFunctionClient:
             if isinstance(raw_evidence_ids, (list, tuple))
             else []
         )
-        final_tool = _final_answer_tool(evidence_ids)
-        tool_content = json.dumps(tool_response, ensure_ascii=False, separators=(",", ":"))
+        data = tool_response.get("data")
+        raw_conclusions = data.get("allowed_conclusions") if isinstance(data, Mapping) else None
+        allowed_conclusions = (
+            [str(item) for item in raw_conclusions if isinstance(item, str)]
+            if isinstance(raw_conclusions, (list, tuple))
+            else []
+        )
+        admission = build_claim_admission(tool_response)
+        final_tool = _final_answer_tool(
+            evidence_ids,
+            allowed_conclusions,
+            fact_refs=tuple(admission.facts),
+            calculation_refs=tuple(admission.calculations),
+            evidence_slot_ids=tuple(admission.evidence_slots),
+        )
+        provider_tool_response = dict(tool_response)
+        raw_metadata = tool_response.get("metadata")
+        provider_tool_response["metadata"] = {
+            **(dict(raw_metadata) if isinstance(raw_metadata, Mapping) else {}),
+            "claim_contract": admission.public_contract(),
+        }
+        tool_content = json.dumps(
+            provider_tool_response, ensure_ascii=False, separators=(",", ":")
+        )
         data = self._chat({
             "model": self.model,
             "messages": [
@@ -425,27 +535,41 @@ class HyperClovaFunctionClient:
             stage="final_generation_response",
             expected_name=FINAL_ANSWER_TOOL_NAME,
         )
-        if set(final_call.arguments) != {"answer", "citation_ids"}:
+        expected_fields = {"answer", "citation_ids", "claims", "limitations"}
+        if allowed_conclusions:
+            expected_fields.add("conclusion")
+        if set(final_call.arguments) != expected_fields:
             raise HcxProtocolError(
                 "hcx_final_output_schema_mismatch", stage="final_generation_response"
             )
         answer = final_call.arguments.get("answer")
         citations = final_call.arguments.get("citation_ids")
+        conclusion = final_call.arguments.get("conclusion")
+        claims = final_call.arguments.get("claims")
+        limitations = final_call.arguments.get("limitations")
         if not isinstance(answer, str) or not isinstance(citations, list) or not all(
             isinstance(item, str) for item in citations
-        ):
+        ) or not isinstance(claims, list) or not isinstance(limitations, list) or not all(
+            isinstance(item, str) for item in limitations
+        ) or (allowed_conclusions and not isinstance(conclusion, str)):
             raise HcxProtocolError(
                 "hcx_final_output_schema_mismatch", stage="final_generation_response"
             )
         try:
-            return HcxGeneratedAnswer(answer, tuple(citations))
+            return HcxGeneratedAnswer(
+                answer,
+                tuple(citations),
+                str(conclusion) if conclusion is not None else None,
+                tuple(HcxAnswerClaim.from_value(item) for item in claims),
+                tuple(limitations),
+            )
         except ValueError as exc:
             raise HcxProtocolError(str(exc), stage="final_generation_response") from exc
 
     def generate_routed_answer(
         self, question: str, tool_call: HcxToolCall, tool_response: Mapping[str, object],
     ) -> HcxGeneratedAnswer:
-        """Generate once after a deterministic route without another Tool Call."""
+        """Generate once after a deterministic route using the private final Tool."""
 
         bundle = tool_response.get("evidence_bundle")
         raw_evidence_ids = bundle.get("evidence_ids") if isinstance(bundle, Mapping) else None
@@ -456,6 +580,80 @@ class HyperClovaFunctionClient:
             raise HcxProtocolError(
                 "hcx_final_evidence_ids_empty", stage="final_generation_preflight"
             )
+        metadata = tool_response.get("metadata")
+        strict_contract = (
+            tool_response.get("status") is not None
+            and isinstance(metadata, Mapping)
+            and isinstance(metadata.get("sufficiency_check"), Mapping)
+        )
+        if strict_contract:
+            admission = build_claim_admission(tool_response)
+            final_tool = _final_answer_tool(
+                evidence_ids,
+                fact_refs=tuple(admission.facts),
+                calculation_refs=tuple(admission.calculations),
+                evidence_slot_ids=tuple(admission.evidence_slots),
+            )
+            data = self._chat({
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": json.dumps({
+                            "question": question,
+                            "tool_name": tool_call.name,
+                            "tool_result": tool_response,
+                            "claim_contract": admission.public_contract(),
+                        }, ensure_ascii=False, separators=(",", ":")),
+                    },
+                ],
+                "tools": [final_tool],
+                "tool_choice": {
+                    "type": "function",
+                    "function": {"name": FINAL_ANSWER_TOOL_NAME},
+                },
+                "temperature": 0,
+                "max_tokens": FUNCTION_CALLING_MAX_TOKENS,
+            }, stage="routed_final_generation_request")
+            final_call = self._tool_call(
+                self._message(data, stage="routed_final_generation_response"),
+                stage="routed_final_generation_response",
+                expected_name=FINAL_ANSWER_TOOL_NAME,
+            )
+            expected_fields = {"answer", "citation_ids", "claims", "limitations"}
+            if set(final_call.arguments) != expected_fields:
+                raise HcxProtocolError(
+                    "hcx_final_output_schema_mismatch",
+                    stage="routed_final_generation_response",
+                )
+            answer = final_call.arguments.get("answer")
+            citations = final_call.arguments.get("citation_ids")
+            claims = final_call.arguments.get("claims")
+            limitations = final_call.arguments.get("limitations")
+            if (
+                not isinstance(answer, str)
+                or not isinstance(citations, list)
+                or not all(isinstance(item, str) for item in citations)
+                or not isinstance(claims, list)
+                or not isinstance(limitations, list)
+                or not all(isinstance(item, str) for item in limitations)
+            ):
+                raise HcxProtocolError(
+                    "hcx_final_output_schema_mismatch",
+                    stage="routed_final_generation_response",
+                )
+            try:
+                return HcxGeneratedAnswer(
+                    answer,
+                    tuple(citations),
+                    claims=tuple(HcxAnswerClaim.from_value(item) for item in claims),
+                    limitations=tuple(limitations),
+                )
+            except ValueError as exc:
+                raise HcxProtocolError(
+                    str(exc), stage="routed_final_generation_response"
+                ) from exc
         data = self._chat({
             "model": self.model,
             "messages": [
@@ -559,14 +757,33 @@ class HcxFunctionCallingService:
         *,
         max_question_chars: int = 2_000,
         router: QuestionRouter | None = None,
+        analysis_executor: BoundedAnalysisExecutor | None = None,
     ) -> None:
         if max_question_chars <= 0:
             raise ValueError("max_question_chars_must_be_positive")
+        if max_question_chars > PUBLIC_QUESTION_MAX_CHARS:
+            raise ValueError("max_question_chars_exceeds_public_limit")
         self.registry = registry
         self.client = client
         self.max_question_chars = max_question_chars
         self.router = router
+        self.analysis_executor = analysis_executor
         self.evidence_checker = EvidenceSufficiencyChecker()
+
+    @staticmethod
+    def _analysis_metadata(execution: BoundedAnalysisExecution) -> dict[str, object]:
+        return {
+            "execution_mode": "bounded_analysis",
+            "analysis_dimension": execution.plan.judgment_dimension,
+            "conclusion": execution.conclusion,
+            "evidence_slots": [dict(slot) for slot in execution.evidence_slots],
+            "limitations": [
+                "historical_disclosure_only",
+                "no_transaction_recommendation",
+                "no_forecast",
+                *execution.reason_codes,
+            ],
+        }
 
     def available_tools(self) -> list[dict[str, object]]:
         return hcx_tool_schemas(self.registry)
@@ -580,10 +797,16 @@ class HcxFunctionCallingService:
 
     @staticmethod
     def _calculation_payload(result: object) -> dict[str, object]:
+        value = str(getattr(result, "value"))
+        unit = getattr(result, "unit")
+        display_value = format_financial_value(value, 1, unit)
+        if display_value is None and unit == "%":
+            display_value = f"{Decimal(value):.2f}%"
         return {
             "operation": str(getattr(result, "operation")),
-            "value": str(getattr(result, "value")),
-            "unit": getattr(result, "unit"),
+            "value": value,
+            "display_value": display_value,
+            "unit": unit,
             "evidence_ids": list(getattr(result, "evidence_ids")),
             "operands": [str(item) for item in getattr(result, "operands")],
         }
@@ -592,6 +815,252 @@ class HcxFunctionCallingService:
     def _bundle_from_response(response: Mapping[str, object]) -> Mapping[str, object]:
         bundle = response.get("evidence_bundle")
         return bundle if isinstance(bundle, Mapping) else {}
+
+    @staticmethod
+    def _generated_claims(generated: object) -> tuple[object, ...]:
+        raw_claims = getattr(generated, "claims", ())
+        if isinstance(raw_claims, (list, tuple)):
+            return tuple(raw_claims)
+        return ()
+
+    @staticmethod
+    def _fact_row_admitted(
+        row: Mapping[str, object], admission: ClaimAdmission,
+    ) -> bool:
+        fact_ref: str | None = None
+        for key in ("financial_fact_id", "event_fact_id", "fact_id"):
+            if row.get(key):
+                fact_ref = str(row[key])
+                break
+        if fact_ref is None:
+            return False
+        admitted_fact = admission.facts.get(fact_ref)
+        if admitted_fact is None:
+            return False
+        raw_ids = row.get("evidence_ids")
+        ids = [str(item) for item in raw_ids if item] if isinstance(raw_ids, (list, tuple)) else []
+        if row.get("evidence_id"):
+            ids.insert(0, str(row["evidence_id"]))
+        return tuple(dict.fromkeys(ids)) == admitted_fact.evidence_ids
+
+    def _deterministic_claim_fallback(
+        self,
+        tool_response: Mapping[str, object],
+        admission: ClaimAdmission,
+        available_evidence_ids: Sequence[str],
+        route: QuestionRoute | None,
+    ) -> HcxGeneratedAnswer | None:
+        if not admission.facts:
+            return None
+        safe_response = dict(tool_response)
+        raw_data = tool_response.get("data")
+        data = dict(raw_data) if isinstance(raw_data, Mapping) else {}
+        raw_facts = data.get("facts")
+        if isinstance(raw_facts, list):
+            safe_facts: list[dict[str, object]] = []
+            for raw_row in raw_facts:
+                if not isinstance(raw_row, Mapping) or not self._fact_row_admitted(raw_row, admission):
+                    continue
+                row = dict(raw_row)
+                if not row.get("display_value") and row.get("value_numeric") is not None:
+                    unit = str(row.get("unit") or "KRW")
+                    scale = Decimal(str(row.get("scale") or 1))
+                    raw_value = Decimal(str(row["value_numeric"]))
+                    if unit in {"KRW", "원"} and scale == 1 and raw_value.is_finite():
+                        rendered = (
+                            f"{int(raw_value):,}원"
+                            if raw_value == raw_value.to_integral_value()
+                            else f"{raw_value:,}원"
+                        )
+                    else:
+                        rendered = format_financial_value(raw_value, scale, unit)
+                    if rendered:
+                        row["display_value"] = rendered
+                safe_facts.append(row)
+            data["facts"] = safe_facts
+        if admission.rejected_calculations:
+            data["calculations"] = []
+            comparison = data.get("comparison")
+            if isinstance(comparison, Mapping):
+                data["comparison"] = {**dict(comparison), "calculations": []}
+        safe_response["data"] = data
+        safe_ids = [
+            evidence_id for evidence_id in available_evidence_ids
+            if any(evidence_id in fact.evidence_ids for fact in admission.facts.values())
+        ]
+        if not safe_ids:
+            safe_ids = list(available_evidence_ids)
+        comparison = data.get("comparison")
+        if isinstance(comparison, Mapping) and comparison.get("status") == "complete":
+            comparison_answer = self._deterministic_financial_comparison_answer(
+                safe_response, safe_ids,
+            )
+            if comparison_answer is not None:
+                return comparison_answer
+        if isinstance(data.get("facts"), list) and data["facts"]:
+            return self._deterministic_financial_answer(safe_response, safe_ids)
+        if data.get("total_count") is not None or (
+            isinstance(data.get("quantitative_trend"), Mapping)
+            and data["quantitative_trend"].get("total_count") is not None
+        ):
+            trend_data = data.get("quantitative_trend")
+            if isinstance(trend_data, Mapping):
+                safe_response["data"] = dict(trend_data)
+            return self._deterministic_trend_answer(safe_response, safe_ids)
+        if route is not None and route.workflow == "financial_statement_metric":
+            values = data.get("validated_statement_values")
+            rows = [row for row in values if isinstance(row, Mapping)] if isinstance(values, list) else []
+            if rows:
+                text = "\n".join(
+                    f"{row.get('period') or ''} {row.get('metric') or '재무 수치'}은 {row.get('display_value')}입니다.".strip()
+                    for row in rows if row.get("display_value")
+                )
+                if text:
+                    return HcxGeneratedAnswer(text, tuple(safe_ids[:5]))
+        return None
+
+    @staticmethod
+    def _claim_metadata(
+        claims: Sequence[HcxAnswerClaim], limitations: Sequence[str], trace: Mapping[str, object],
+    ) -> dict[str, object]:
+        return {
+            "claim_support": [claim.to_dict() for claim in claims],
+            "limitations": list(dict.fromkeys(str(item) for item in limitations if item)),
+            "verification_trace": dict(trace),
+        }
+
+    @staticmethod
+    def _allows_deterministic_fallback(
+        tool_call: HcxToolCall, route: QuestionRoute | None,
+    ) -> bool:
+        if route is None:
+            return False
+        if route.workflow == "financial_statement_metric":
+            return True
+        return bool(
+            tool_call.name == "get_financial_facts"
+            and route.workflow in {"single", "financial_derived", "financial_comparison"}
+        )
+
+    def _verified_deterministic_fallback_result(
+        self,
+        *,
+        tool_call: HcxToolCall,
+        tool_response: Mapping[str, object],
+        route: QuestionRoute | None,
+        available_citations: Mapping[str, HcxEvidenceCitation],
+        common: Mapping[str, object],
+        warning_codes: Sequence[str],
+        limitation_code: str,
+    ) -> FunctionCallingResult:
+        result_common = dict(common)
+        result_common["metadata"] = dict(
+            common.get("metadata") if isinstance(common.get("metadata"), Mapping) else {}
+        )
+        admission = build_claim_admission(tool_response)
+        fallback = self._deterministic_claim_fallback(
+            tool_response,
+            admission,
+            tuple(available_citations),
+            route,
+        )
+        if fallback is None:
+            result_common["recommended_action"] = "abstain"
+            return self._result(
+                "abstained",
+                UNANSWERABLE_TEXT,
+                warnings=[*warning_codes, "deterministic_fallback_not_available"],
+                **result_common,
+            )
+        citations = self._selected_citations(
+            tool_call.name,
+            fallback.citation_ids,
+            available_citations,
+        )
+        citation_ids = tuple(dict.fromkeys(
+            evidence_id
+            for evidence_id in fallback.citation_ids
+            if evidence_id in available_citations
+        ))
+        selected_facts = {
+            fact_ref: fact
+            for fact_ref, fact in admission.facts.items()
+            if set(fact.evidence_ids).issubset(set(citation_ids))
+        }
+        selected_calculations = {
+            calculation_ref: calculation
+            for calculation_ref, calculation in admission.calculations.items()
+            if set(calculation.evidence_ids).issubset(set(citation_ids))
+        }
+        owned_slots = tuple(dict.fromkeys(
+            slot_id
+            for item in (*selected_facts.values(), *selected_calculations.values())
+            for slot_id in item.evidence_slot_ids
+        ))
+        fallback_claim = HcxAnswerClaim(
+            "deterministic-fallback-1",
+            fallback.answer,
+            citation_ids,
+            tuple(selected_facts),
+            tuple(selected_calculations),
+            owned_slots,
+            tuple(dict.fromkeys(
+                [
+                    value
+                    for fact in selected_facts.values()
+                    for value in fact.numeric_values
+                ] + [
+                    value
+                    for calculation in selected_calculations.values()
+                    for value in calculation.numeric_values
+                ]
+            )),
+        )
+        limitations = (
+            "historical_disclosure_only",
+            "no_transaction_recommendation",
+            "no_forecast",
+            limitation_code,
+        )
+        verification = verify_generated_claims(
+            answer=fallback.answer,
+            citation_ids=citation_ids,
+            raw_claims=(fallback_claim,),
+            raw_limitations=limitations,
+            admission=admission,
+        )
+        if not verification.verified or not citations:
+            result_common["recommended_action"] = "abstain"
+            result_common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
+                (), limitations, verification.trace("abstained"),
+            ))
+            return self._result(
+                "abstained",
+                UNANSWERABLE_TEXT,
+                warnings=[
+                    *warning_codes,
+                    "deterministic_fallback_verification_failed",
+                    *verification.failure_codes,
+                ],
+                **result_common,
+            )
+        result_common["metadata"].update({  # type: ignore[union-attr]
+            "execution_mode": "deterministic",
+            **self._claim_metadata(
+                verification.claims,
+                verification.limitations,
+                verification.trace("fallback"),
+            ),
+        })
+        return self._result(
+            "answered",
+            self._render_answer(fallback.answer, citations),
+            answer_allowed=True,
+            citation_ids=list(citation_ids),
+            citations=[item.to_dict() for item in citations],
+            warnings=list(warning_codes),
+            **result_common,
+        )
 
     def _merged_response(
         self,
@@ -796,6 +1265,9 @@ class HcxFunctionCallingService:
     ) -> dict[str, object]:
         companies = [str(item) for item in route.context.get("companies", []) if item]
         periods = [str(item) for item in route.context.get("periods", []) if item]
+        metrics = [str(item) for item in route.context.get("metrics", []) if item]
+        if not metrics and route.context.get("metric"):
+            metrics = [str(route.context["metric"])]
         raw_requirements = route.context.get("requirements")
         requirements = [
             dict(item) for item in raw_requirements if isinstance(item, Mapping)
@@ -815,10 +1287,24 @@ class HcxFunctionCallingService:
             }
             period = str(requirement.get("period") or "")
             if period:
-                request.update({"start_date": f"{period}-01-01", "end_date": f"{period}-12-31"})
+                request.pop("instant_date", None)
+                if requirement.get("instant_date"):
+                    request.pop("start_date", None)
+                    request.pop("end_date", None)
+                    request["instant_date"] = requirement["instant_date"]
+                elif requirement.get("start_date") or requirement.get("end_date"):
+                    request.pop("start_date", None)
+                    request.pop("end_date", None)
+                    if requirement.get("start_date"):
+                        request["start_date"] = requirement["start_date"]
+                    if requirement.get("end_date"):
+                        request["end_date"] = requirement["end_date"]
+                else:
+                    request.update({"start_date": f"{period}-01-01", "end_date": f"{period}-12-31"})
             else:
                 request.pop("start_date", None)
                 request.pop("end_date", None)
+                request.pop("instant_date", None)
             responses.append(self.registry.dispatch("get_financial_facts", request))
         selected: list[tuple[dict[str, object], dict[str, object], Decimal]] = []
         all_facts: list[dict[str, object]] = []
@@ -851,7 +1337,7 @@ class HcxFunctionCallingService:
             all_facts.append(fact)
         calculations: list[dict[str, object]] = []
         calculation_failed = False
-        if len(companies) == 1 and len(periods) >= 2:
+        if len(metrics) == 1 and len(companies) == 1 and len(periods) >= 2:
             ordered_selected = sorted(selected, key=lambda item: str(item[0].get("period") or ""))
             for (previous_requirement, previous, previous_value), (current_requirement, current, current_value) in zip(
                 ordered_selected, ordered_selected[1:],
@@ -892,18 +1378,25 @@ class HcxFunctionCallingService:
             len(requirements) >= 2
             and len(selected) == len(requirements)
             and not calculation_failed
-            and (len(companies) != 1 or len(periods) < 2 or len(calculations) == 2 * (len(periods) - 1))
+            and (
+                len(metrics) != 1
+                or len(companies) != 1
+                or len(periods) < 2
+                or len(calculations) == 2 * (len(periods) - 1)
+            )
         )
         comparison: dict[str, object] = {
             "status": "complete" if complete else "incomplete",
             "companies": companies,
             "metric": route.context.get("metric"),
+            "metrics": metrics,
             "period": route.context.get("period"),
             "periods": periods,
             "values": [
                 {
                     "company": requirement.get("company"),
                     "period": requirement.get("period"),
+                    "metric": requirement.get("account"),
                     "display_value": fact.get("display_value"),
                 }
                 for requirement, fact, _ in selected
@@ -911,12 +1404,12 @@ class HcxFunctionCallingService:
             "calculations": calculations,
             "winner": None,
         }
-        if complete and len(companies) >= 2 and len(periods) <= 1:
+        if complete and len(metrics) == 1 and len(companies) >= 2 and len(periods) <= 1:
             maximum = max(value for _, _, value in selected)
             winners = [str(requirement.get("company")) for requirement, _, value in selected if value == maximum]
             comparison["winner"] = winners[0] if len(winners) == 1 else None
             comparison["tie"] = len(winners) > 1
-        elif complete and len(companies) == 1 and periods:
+        elif complete and len(metrics) == 1 and len(companies) == 1 and periods:
             maximum = max(value for _, _, value in selected)
             largest = [str(requirement.get("period")) for requirement, _, value in selected if value == maximum]
             comparison["largest_period"] = largest[0] if len(largest) == 1 else None
@@ -1241,12 +1734,111 @@ class HcxFunctionCallingService:
         return tool_call, primary
 
     def answer(self, question: object) -> FunctionCallingResult:
-        if not isinstance(question, str) or not question.strip() or len(question) > self.max_question_chars:
+        try:
+            question = preflight_public_question(question)
+        except QuestionInputError as exc:
+            if exc.code in {
+                "question_date_invalid",
+                "question_conditions_contradictory",
+                "question_duplicate_condition_changes_meaning",
+            }:
+                return self._result(
+                    "abstained",
+                    "질문의 날짜 또는 조건을 명확히 다시 입력해 주세요.",
+                    recommended_action="ask_clarification",
+                    warnings=[exc.code],
+                    metadata={"tool_selection_called": False, "final_generation_called": False},
+                )
             return self._result(
-                "invalid_request", "질문 형식이 올바르지 않습니다.", warnings=["question_invalid"]
+                "invalid_request", "질문 형식이 올바르지 않습니다.", warnings=[exc.code]
             )
-        question = question.strip()
-        route = self.router.route(question) if self.router is not None else None
+        if len(question) > self.max_question_chars:
+            return self._result(
+                "invalid_request", "질문 형식이 올바르지 않습니다.", warnings=["question_too_long"]
+            )
+        if detect_prompt_injection(question):
+            return self._result(
+                "abstained",
+                "질문에 실행 지시 변경 요청이 포함되어 처리할 수 없습니다.",
+                recommended_action="abstain",
+                warnings=["prompt_injection_detected"],
+                metadata={
+                    "provider_configured": bool(self.client.configured),
+                    "route_source": "deterministic",
+                    "route_reason": "prompt_injection_detected",
+                    "tool_selection_called": False,
+                    "final_generation_called": False,
+                },
+            )
+
+        analysis_execution: BoundedAnalysisExecution | None = None
+        if self.analysis_executor is not None:
+            try:
+                analysis_execution = self.analysis_executor.execute(question)
+            except Exception as exc:
+                diagnostics = self._record_failure("bounded_analysis", exc)
+                return self._result(
+                    "error",
+                    UNANSWERABLE_TEXT,
+                    recommended_action="abstain",
+                    warnings=["bounded_analysis_failed_closed"],
+                    metadata={
+                        "provider_configured": bool(self.client.configured),
+                        "route_source": "deterministic",
+                        "route_reason": "bounded_analysis_failed_closed",
+                        "tool_selection_called": False,
+                        "final_generation_called": False,
+                        **diagnostics,
+                    },
+                )
+        if analysis_execution is not None and analysis_execution.plan.analysis_mode == "prohibited":
+            reason = analysis_execution.reason_codes[0] if analysis_execution.reason_codes else "policy_refusal"
+            message = (
+                "공시 근거를 사용하더라도 매수·매도 추천은 제공하지 않습니다."
+                if reason == "policy_recommendation_or_suitability_refusal"
+                else "공시되지 않은 미래 수치나 전망은 제공하지 않습니다."
+                if reason == "policy_forecast_refusal"
+                else "해당 요청은 공시 분석 범위에서 처리할 수 없습니다."
+            )
+            return self._result(
+                "abstained",
+                message,
+                recommended_action="abstain",
+                warnings=list(analysis_execution.reason_codes),
+                metadata={
+                    "provider_configured": bool(self.client.configured),
+                    "route_source": "deterministic",
+                    "route_reason": reason,
+                    "execution_mode": "policy_refusal",
+                    "conclusion": None,
+                    "tool_selection_called": False,
+                    "final_generation_called": False,
+                },
+            )
+        if analysis_execution is not None and not analysis_execution.complete:
+            tool_response = analysis_execution.to_tool_response()
+            return self._result(
+                "abstained",
+                "확인된 공시 근거가 필수 항목을 모두 충족하지 않아 판단을 보류합니다.",
+                tool_name="build_summary_context",
+                tool_response=tool_response,
+                recommended_action="abstain",
+                warnings=list(analysis_execution.reason_codes),
+                metadata={
+                    "provider_configured": bool(self.client.configured),
+                    "route_source": "deterministic",
+                    "route_reason": "mandatory_analysis_evidence_missing",
+                    "tool_selection_called": False,
+                    "final_generation_called": False,
+                    **self._analysis_metadata(analysis_execution),
+                },
+            )
+
+        route = (
+            self.router.route(question)
+            if analysis_execution is None and self.router is not None
+            else None
+        )
         if route is not None and route.kind in {"clarification", "unavailable"}:
             recommended_action = "ask_clarification" if route.kind == "clarification" else "abstain"
             bundle = ToolEvidenceBundle(
@@ -1293,21 +1885,44 @@ class HcxFunctionCallingService:
                 },
             )
 
-        tool_selection_called = route is None
-        if not self.client.configured:
+        tool_selection_called = analysis_execution is None and route is None
+        if not self.client.configured and route is None:
+            analysis_response = (
+                analysis_execution.to_tool_response()
+                if analysis_execution is not None
+                else None
+            )
             return self._result(
                 "provider_unavailable", UNANSWERABLE_TEXT,
+                tool_name="build_summary_context" if analysis_execution is not None else None,
+                tool_response=analysis_response,
                 warnings=["hcx_api_key_not_configured"],
                 metadata={
                     "provider_configured": False,
-                    "route_source": "deterministic" if route is not None else "provider",
-                    "route_reason": route.reason if route is not None else "provider_tool_selection",
+                    "route_source": "deterministic" if route is not None or analysis_execution is not None else "provider",
+                    "route_reason": (
+                        "bounded_analysis"
+                        if analysis_execution is not None
+                        else route.reason if route is not None
+                        else "provider_tool_selection"
+                    ),
                     "question_corrections": list(route.corrections) if route is not None else [],
                     "tool_selection_called": False,
                     "final_generation_called": False,
+                    **(
+                        self._analysis_metadata(analysis_execution)
+                        if analysis_execution is not None
+                        else {}
+                    ),
                 },
             )
-        if route is not None:
+        if analysis_execution is not None:
+            tool_call = HcxToolCall(
+                f"call_{uuid.uuid4().hex[:24]}",
+                "build_summary_context",
+                {"question": question},
+            )
+        elif route is not None:
             tool_call = HcxToolCall(
                 f"call_{uuid.uuid4().hex[:24]}",
                 str(route.tool_name),
@@ -1340,7 +1955,9 @@ class HcxFunctionCallingService:
                     ),
                 },
             )
-        if route is not None:
+        if analysis_execution is not None:
+            tool_response = analysis_execution.to_tool_response()
+        elif route is not None:
             tool_call, tool_response = self._execute_route(question, route, tool_call)
         else:
             tool_response = self.registry.dispatch(tool_call.name, tool_call.arguments)
@@ -1360,13 +1977,32 @@ class HcxFunctionCallingService:
                 "provider_configured": bool(self.client.configured),
                 "model": self.client.model,
                 "prompt_version": HCX_FUNCTION_PROMPT_VERSION,
-                "route_source": "deterministic" if route is not None else "provider",
-                "route_reason": route.reason if route is not None else "provider_tool_selection",
-                "metric_kind": route.metric_kind if route is not None else "SEARCH",
-                "workflow": route.workflow if route is not None else "function_calling_fallback",
+                "route_source": "deterministic" if route is not None or analysis_execution is not None else "provider",
+                "route_reason": (
+                    "bounded_analysis"
+                    if analysis_execution is not None
+                    else route.reason if route is not None
+                    else "provider_tool_selection"
+                ),
+                "metric_kind": (
+                    "ANALYSIS" if analysis_execution is not None
+                    else route.metric_kind if route is not None
+                    else "SEARCH"
+                ),
+                "workflow": (
+                    "bounded_analysis"
+                    if analysis_execution is not None
+                    else route.workflow if route is not None
+                    else "function_calling_fallback"
+                ),
                 "question_corrections": list(route.corrections) if route is not None else [],
                 "tool_selection_called": tool_selection_called,
                 "final_generation_called": False,
+                **(
+                    self._analysis_metadata(analysis_execution)
+                    if analysis_execution is not None
+                    else {}
+                ),
             },
         }
         if tool_status == "invalid_request":
@@ -1407,58 +2043,210 @@ class HcxFunctionCallingService:
                 warnings=["answer_generation_blocked_by_incomplete_correction_receipts"], **common,
             )
 
+        if not self.client.configured:
+            if not self._allows_deterministic_fallback(tool_call, route):
+                common["recommended_action"] = "abstain"
+                return self._result(
+                    "provider_unavailable",
+                    UNANSWERABLE_TEXT,
+                    warnings=["hcx_api_key_not_configured"],
+                    **common,
+                )
+            return self._verified_deterministic_fallback_result(
+                tool_call=tool_call,
+                tool_response=tool_response,
+                route=route,
+                available_citations=available_citations,
+                common=common,
+                warning_codes=("provider_unavailable_deterministic_fallback",),
+                limitation_code="provider_unavailable_deterministic_fallback",
+            )
+
         common["metadata"]["final_generation_called"] = True  # type: ignore[index]
         failure_stage = "final_generation"
         try:
-            generated = self.client.generate_routed_answer(question, tool_call, tool_response)
-            failure_stage = "final_citation_validation"
-            data = tool_response.get("data")
-            facts = data.get("facts") if isinstance(data, Mapping) else None
-            has_validated_actual = isinstance(facts, list) and any(
-                isinstance(fact, Mapping)
-                and fact.get("support_level") == "structured"
-                and fact.get("validation_status") == "validated"
-                and bool(fact.get("display_value"))
-                for fact in facts
+            generated = (
+                self.client.generate_answer(question, tool_call, tool_response)
+                if analysis_execution is not None
+                else self.client.generate_routed_answer(question, tool_call, tool_response)
             )
-            if has_validated_actual and _FORECAST_CLAIM.search(generated.answer):
-                available_ids = list(
-                    tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
-                )
-                grounded = (
-                    self._deterministic_financial_answer(tool_response, available_ids)
-                    if route is not None and route.workflow == "single"
-                    else self._deterministic_financial_comparison_answer(tool_response, available_ids)
-                    if route is not None and route.workflow == "financial_comparison"
-                    else None
-                )
-                if grounded is None:
-                    raise HcxProtocolError("hcx_final_forecast_conflicts_with_validated_actual")
-                generated = grounded
-            known_ids = {
-                str(item) for item in (
-                    tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
-                ) if item
-            }
-            if not generated.citation_ids or any(item not in known_ids for item in generated.citation_ids):
-                raise HcxProtocolError("hcx_final_citations_not_in_evidence_bundle")
-            if _DART_RCEPT_NO_IN_TEXT.search(generated.answer):
-                raise HcxProtocolError("hcx_final_answer_contains_provider_rendered_rcept_no")
-            citations = self._selected_citations(
-                tool_call.name, generated.citation_ids, available_citations
-            )
-            if not citations:
-                raise HcxProtocolError("hcx_final_citations_missing_valid_rcept_no")
         except Exception as exc:
             common["metadata"].update(  # type: ignore[union-attr]
                 self._record_failure(failure_stage, exc, tool_name=tool_call.name)
             )
+            if (
+                isinstance(exc, HcxFunctionCallingError)
+                and analysis_execution is None
+                and self._allows_deterministic_fallback(tool_call, route)
+            ):
+                return self._verified_deterministic_fallback_result(
+                    tool_call=tool_call,
+                    tool_response=tool_response,
+                    route=route,
+                    available_citations=available_citations,
+                    common=common,
+                    warning_codes=(
+                        "hcx_final_generation_failed",
+                        "provider_failure_deterministic_fallback",
+                    ),
+                    limitation_code="provider_failure_deterministic_fallback",
+                )
             common["recommended_action"] = "abstain"
             return self._result(
                 "error", UNANSWERABLE_TEXT, warnings=["hcx_final_generation_failed"], **common,
             )
+
+        failure_stage = "claim_verification"
+        admission = build_claim_admission(tool_response)
+        raw_claims = self._generated_claims(generated)
+        limitations = tuple(
+            str(item) for item in getattr(generated, "limitations", ()) if item
+        ) or tuple(
+            str(item) for item in (
+                tool_response.get("data", {}).get("limitations", [])  # type: ignore[union-attr]
+            ) if item
+        ) or (
+            "historical_disclosure_only",
+            "no_transaction_recommendation",
+            "no_forecast",
+        )
+        generated_text = str(getattr(generated, "answer", ""))
+        generated_policy = classify_policy(generated_text)
+        policy_ok = (
+            generated_policy.action not in {"refuse_recommendation", "refuse_forecast"}
+            and _FORECAST_CLAIM.search(generated_text) is None
+            and _DART_RCEPT_NO_IN_TEXT.search(generated_text) is None
+        )
+        generated_conclusion = getattr(generated, "conclusion", None)
+        response_data = tool_response.get("data")
+        response_conclusion = (
+            response_data.get("conclusion") if isinstance(response_data, Mapping) else None
+        )
+        conclusion_ok = True
+        if analysis_execution is not None:
+            conclusion_ok = (
+                isinstance(generated_conclusion, str)
+                and generated_conclusion != "insufficient_evidence"
+                and generated_conclusion in analysis_execution.plan.allowed_conclusions
+                and response_conclusion in (None, generated_conclusion)
+            )
+        elif generated_conclusion is not None:
+            conclusion_ok = response_conclusion == generated_conclusion
+        verification = verify_generated_claims(
+            answer=generated_text,
+            citation_ids=tuple(str(item) for item in getattr(generated, "citation_ids", ()) if item),
+            raw_claims=raw_claims,
+            raw_limitations=limitations,
+            admission=admission,
+            policy_ok=policy_ok,
+            conclusion_ok=conclusion_ok,
+        )
+        if not verification.verified:
+            available_ids = list(admission.evidence_ids)
+            fallback = (
+                None
+                if analysis_execution is not None
+                else self._deterministic_claim_fallback(
+                    tool_response, admission, available_ids, route
+                )
+            )
+            trace_status = "fallback" if fallback is not None else "abstained"
+            common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
+                (),
+                (*limitations, "provider_output_rejected"),
+                verification.trace(trace_status),
+            ))
+            failure_warnings = [
+                "claim_verification_failed", *verification.failure_codes,
+            ]
+            if analysis_execution is not None:
+                safe_data = dict(response_data) if isinstance(response_data, Mapping) else {}
+                safe_data["conclusion"] = "insufficient_evidence"
+                tool_response = {**tool_response, "data": safe_data}
+                common["tool_response"] = tool_response
+                common["metadata"]["conclusion"] = "insufficient_evidence"  # type: ignore[index]
+            if fallback is None:
+                common["recommended_action"] = "abstain"
+                return self._result(
+                    "abstained",
+                    UNANSWERABLE_TEXT,
+                    warnings=failure_warnings,
+                    **common,
+                )
+            citations = self._selected_citations(
+                tool_call.name, fallback.citation_ids, available_citations
+            )
+            if not citations:
+                common["recommended_action"] = "abstain"
+                return self._result(
+                    "abstained",
+                    UNANSWERABLE_TEXT,
+                    warnings=failure_warnings,
+                    **common,
+                )
+            citation_ids = tuple(item.evidence_id for item in citations)
+            owned_slots = tuple(
+                slot_id for slot_id, evidence_ids in admission.evidence_slots.items()
+                if set(citation_ids).issubset(set(evidence_ids))
+            ) or tuple(admission.evidence_slots)
+            fallback_claim = HcxAnswerClaim(
+                "deterministic-fallback-1",
+                fallback.answer,
+                citation_ids,
+                tuple(admission.facts),
+                tuple(admission.calculations),
+                owned_slots,
+                tuple(dict.fromkeys(
+                    value
+                    for fact in admission.facts.values()
+                    for value in fact.numeric_values
+                )),
+            )
+            common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
+                (fallback_claim,),
+                (*limitations, "provider_output_rejected", "deterministic_fallback"),
+                verification.trace("fallback"),
+            ))
+            return self._result(
+                "answered",
+                self._render_answer(fallback.answer, citations),
+                answer_allowed=True,
+                citation_ids=list(citation_ids),
+                citations=[item.to_dict() for item in citations],
+                warnings=failure_warnings,
+                **common,
+            )
+
+        verified_text = "\n".join(claim.text for claim in verification.claims)
+        citations = self._selected_citations(
+            tool_call.name,
+            tuple(str(item) for item in getattr(generated, "citation_ids", ()) if item),
+            available_citations,
+        )
+        if not citations:
+            common["recommended_action"] = "abstain"
+            common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
+                (), (*limitations, "provider_output_rejected"),
+                verification.trace("abstained"),
+            ))
+            return self._result(
+                "abstained", UNANSWERABLE_TEXT,
+                warnings=["claim_verification_failed", "citation_receipt_missing"],
+                **common,
+            )
+        if analysis_execution is not None:
+            safe_data = dict(response_data) if isinstance(response_data, Mapping) else {}
+            safe_data["conclusion"] = generated_conclusion
+            tool_response = {**tool_response, "data": safe_data}
+            common["tool_response"] = tool_response
+            common["metadata"]["conclusion"] = generated_conclusion  # type: ignore[index]
+        common["metadata"].update(self._claim_metadata(  # type: ignore[union-attr]
+            verification.claims,
+            verification.limitations,
+            verification.trace("verified"),
+        ))
         return self._result(
-            "answered", self._render_answer(generated.answer, citations), answer_allowed=True,
+            "answered", self._render_answer(verified_text, citations), answer_allowed=True,
             citation_ids=[item.evidence_id for item in citations],
             citations=[item.to_dict() for item in citations], **common,
         )
@@ -1515,9 +2303,9 @@ class HcxFunctionCallingService:
         rows = [item for item in values if isinstance(item, Mapping)] if isinstance(values, list) else []
         if len(rows) < 2:
             return None
-        metric = str(comparison.get("metric") or "재무 수치")
         lines = [
-            f"{row.get('company')} {row.get('period')}년 {metric}은 {row.get('display_value')}입니다."
+            f"{row.get('company')} {row.get('period')}년 "
+            f"{row.get('metric') or comparison.get('metric') or '재무 수치'}은 {row.get('display_value')}입니다."
             for row in rows
             if row.get("company") and row.get("period") and row.get("display_value")
         ]
@@ -1525,6 +2313,7 @@ class HcxFunctionCallingService:
             return None
         largest_period = comparison.get("largest_period")
         winner = comparison.get("winner")
+        metric = str(comparison.get("metric") or "재무 수치")
         if largest_period:
             lines.append(f"따라서 {largest_period}년 {metric}이 더 큽니다.")
         elif winner:
@@ -1659,24 +2448,29 @@ class HcxFunctionCallingService:
     ) -> list[HcxEvidenceCitation]:
         identifiers = list(available) if tool_name == "get_correction_lineage" else list(generated_ids)
         selected: list[HcxEvidenceCitation] = []
-        seen_receipts: set[str] = set()
         for evidence_id in identifiers:
             citation = available.get(evidence_id)
-            if citation is None or citation.rcept_no in seen_receipts:
+            if citation is None:
                 continue
-            seen_receipts.add(citation.rcept_no)
             selected.append(citation)
         return selected
 
     @staticmethod
     def _render_answer(answer: str, citations: Sequence[HcxEvidenceCitation]) -> str:
+        displayed: list[HcxEvidenceCitation] = []
+        seen_receipts: set[str] = set()
+        for citation in citations:
+            if citation.rcept_no in seen_receipts:
+                continue
+            seen_receipts.add(citation.rcept_no)
+            displayed.append(citation)
         lines = [answer.strip(), "", "근거 공시"]
-        if len(citations) == 1:
-            citation = citations[0]
+        if len(displayed) == 1:
+            citation = displayed[0]
             label = " ".join(item for item in (citation.correction_role, citation.report_name) if item)
             lines.extend([f"- {label or 'DART 공시'}", f"- 접수번호: {citation.rcept_no}"])
         else:
-            for index, citation in enumerate(citations, start=1):
+            for index, citation in enumerate(displayed, start=1):
                 label = " ".join(item for item in (citation.correction_role, citation.report_name) if item)
                 lines.append(f"{index}. {label or 'DART 공시'} — 접수번호: {citation.rcept_no}")
         return "\n".join(lines)

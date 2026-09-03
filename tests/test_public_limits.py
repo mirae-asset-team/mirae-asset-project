@@ -205,3 +205,82 @@ def test_official_get_answer_route_uses_the_same_limit(ready_agent) -> None:
     assert response.status_code == 429
     assert response.json()["detail"] == "rate_limited"
     assert response.headers["Retry-After"] == "60"
+
+
+def _question_schema(openapi: dict[str, object], path: str, method: str) -> dict[str, object]:
+    operation = openapi["paths"][path][method]  # type: ignore[index]
+    if method == "get":
+        return next(  # type: ignore[return-value]
+            parameter["schema"]
+            for parameter in operation["parameters"]
+            if parameter["name"] == "question"
+        )
+    schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    if "$ref" in schema:
+        schema = openapi["components"]["schemas"][schema["$ref"].rsplit("/", 1)[-1]]  # type: ignore[index]
+    return schema["properties"]["question"]  # type: ignore[return-value]
+
+
+def test_every_public_question_field_has_the_exact_2000_character_contract(ready_agent) -> None:
+    from fastapi.testclient import TestClient
+
+    openapi = TestClient(create_app(ready_agent)).get("/openapi.json").json()
+    endpoints = (
+        ("/query", "post"),
+        ("/answer", "get"),
+        ("/v1/query/plan", "post"),
+        ("/v1/evidence/search", "post"),
+        ("/v1/answer", "post"),
+        ("/v1/hcx/function-answer", "post"),
+        ("/v1/eval/cases", "post"),
+        ("/v1/eval/cases/{identifier}", "put"),
+        ("/v1/eval/quick-answer", "post"),
+    )
+
+    for path, method in endpoints:
+        assert _question_schema(openapi, path, method)["maxLength"] == 2_000, (path, method)
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [
+        ("post", "/query", None),
+        ("post", "/v1/query/plan", None),
+        ("post", "/v1/answer", None),
+        ("get", "/answer", {"question_id": "Q-boundary"}),
+    ],
+)
+def test_public_question_boundaries_accept_2000_and_reject_2001(
+    ready_agent, method: str, path: str, payload: dict[str, str] | None,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    client = TestClient(create_app(ready_agent))
+    accepted = "가" * 2_000
+    rejected = "가" * 2_001
+    if method == "get":
+        accepted_response = client.get(path, params={**(payload or {}), "question": accepted})
+        rejected_response = client.get(path, params={**(payload or {}), "question": rejected})
+    else:
+        accepted_response = client.post(path, json={**(payload or {}), "question": accepted})
+        rejected_response = client.post(path, json={**(payload or {}), "question": rejected})
+
+    assert accepted_response.status_code == 200, accepted_response.text
+    assert rejected_response.status_code == 422, rejected_response.text
+
+
+@pytest.mark.parametrize(("method", "path"), [("post", "/query"), ("get", "/answer")])
+def test_public_as_of_rejects_impossible_calendar_dates(
+    ready_agent, method: str, path: str,
+) -> None:
+    from fastapi.testclient import TestClient
+
+    client = TestClient(create_app(ready_agent))
+    if method == "get":
+        response = client.get(path, params={
+            "question_id": "Q-date", "question": "질문", "as_of": "2025-02-30",
+        })
+    else:
+        response = client.post(path, json={"question": "질문", "as_of": "2025-02-30"})
+
+    assert response.status_code == 422

@@ -1,7 +1,10 @@
 .git
 .github
 .env
-data/
+data/*
+!data/derived/
+data/derived/*
+!data/derived/freeform_retrieval_summary.json
 eval/qa_results/
 references/official/source_archives/
 tests/

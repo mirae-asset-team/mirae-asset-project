@@ -4,6 +4,7 @@ WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
 COPY config ./config
+COPY data/derived/freeform_retrieval_summary.json /app/data/derived/freeform_retrieval_summary.json
 COPY --chown=10001:10001 eval ./eval
 RUN pip install --no-cache-dir ".[agent]"
 RUN useradd --create-home --uid 10001 agent

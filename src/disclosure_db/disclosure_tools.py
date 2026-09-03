@@ -12,12 +12,19 @@ from dataclasses import asdict, dataclass, is_dataclass
 from decimal import Decimal, InvalidOperation
 import json
 from pathlib import Path
+import re
 import sqlite3
 from typing import Mapping, Protocol
 
 from .agent_contracts import EvidenceBundle as ServiceEvidenceBundle
-from .evidence_service import EvidenceService
-from .financial_accounts import FinancialAccountResolution, resolve_financial_account
+from .evidence_service import EvidenceService, evidence_text_is_admitted
+from .financial_accounts import (
+    FinancialAccountResolution,
+    load_financial_account_catalog,
+    normalize_account_text,
+    resolve_financial_account,
+)
+from .financial_extraction import classify_statement_table, parse_numeric_value
 from .hybrid_retrieval import HybridRetriever, RetrievalResult
 from .query_planner import plan_query
 from .tool_contracts import COMMON_OUTPUT_SCHEMA, ToolEvidenceBundle, ToolResponse
@@ -26,6 +33,9 @@ from .tool_registry import ToolDefinition, ToolRegistry, object_schema
 
 TOOL_BACKEND_VERSION = "tool-registry-v1"
 CORRECTION_POLICIES = ("current", "original", "corrected", "both")
+_STATEMENT_TERM = re.compile(r"제\s*(\d+)\s*기")
+_STATEMENT_YEAR = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
+_STATEMENT_QUARTER = re.compile(r"([1-4])\s*분기")
 
 
 def normalized_financial_value(
@@ -162,6 +172,7 @@ def _evidence_item(row: Mapping[str, object]) -> dict[str, object]:
     evidence_ids = _row_evidence_ids(row)
     locator = _json_object(row.get("locator") or row.get("locator_json"))
     section = _json_object(row.get("section") or row.get("section_path") or row.get("section_path_json"))
+    text = row.get("text_normalized") or row.get("text") or row.get("excerpt")
     if section in (None, "") and isinstance(locator, Mapping):
         section = locator.get("section") or locator.get("section_path")
     return {
@@ -188,10 +199,14 @@ def _evidence_item(row: Mapping[str, object]) -> dict[str, object]:
         "table_id": row.get("table_id") or (locator.get("table_id") if isinstance(locator, Mapping) else None),
         "locator": locator,
         "source_path": row.get("source_path"),
-        "text": row.get("text_normalized") or row.get("text") or row.get("excerpt"),
+        "text": text if evidence_text_is_admitted(text) else None,
         "structured_value": row.get("structured_value") or row.get("value_numeric"),
         "scale": row.get("scale"),
         "unit": row.get("unit") or row.get("currency") or row.get("unit_raw"),
+        "unit_raw": row.get("unit_raw"),
+        "account_name_raw": row.get("account_name_raw"),
+        "statement_type": row.get("statement_type"),
+        "scope": row.get("scope"),
         "quality_status": _quality_status(row),
         "retrieval_path": _retrieval_path(row),
         "score": row.get("rrf_score") if row.get("rrf_score") is not None else row.get("score"),
@@ -272,6 +287,80 @@ def _read_only_connection(path: Path) -> sqlite3.Connection:
     return connection
 
 
+def _string_list(value: object) -> list[str]:
+    if not isinstance(value, str) or not value:
+        return []
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return [str(item).strip() for item in decoded if str(item).strip()] if isinstance(decoded, list) else []
+
+
+def _statement_period(
+    fiscal_year: int, period_kind: str, quarter: int | None,
+) -> dict[str, object] | None:
+    if period_kind == "annual":
+        return {
+            "period_type": "duration",
+            "period_start": f"{fiscal_year}-01-01",
+            "period_end": f"{fiscal_year}-12-31",
+        }
+    if period_kind != "quarter" or quarter != 1:
+        return None
+    return {
+        "period_type": "duration",
+        "period_start": f"{fiscal_year}-01-01",
+        "period_end": f"{fiscal_year}-03-31",
+    }
+
+
+def _statement_column_candidates(
+    cells: list[Mapping[str, object]],
+    *,
+    fiscal_year: int,
+    period_kind: str,
+    quarter: int | None,
+) -> list[tuple[int, str]]:
+    headers: dict[int, list[str]] = {}
+    for cell in cells:
+        column = int(cell.get("column_index") or 0)
+        if column <= 0:
+            continue
+        path = _string_list(cell.get("column_header_path_json"))
+        if path:
+            headers[column] = path
+    terms = {
+        column: int(match.group(1))
+        for column, path in headers.items()
+        if (match := _STATEMENT_TERM.search(" ".join(path))) is not None
+    }
+    latest_term = max(terms.values()) if terms else None
+    candidates: list[tuple[int, int, str]] = []
+    for column, path in headers.items():
+        label = " > ".join(path)
+        joined = " ".join(path)
+        term_matches = latest_term is not None and terms.get(column) == latest_term
+        year_match = _STATEMENT_YEAR.search(joined)
+        year_matches = year_match is not None and int(year_match.group(1)) == fiscal_year
+        if not (term_matches or year_matches):
+            continue
+        if period_kind == "annual":
+            if _STATEMENT_QUARTER.search(joined):
+                continue
+            candidates.append((0, column, label))
+            continue
+        quarter_match = _STATEMENT_QUARTER.search(joined)
+        if quarter_match is None or int(quarter_match.group(1)) != quarter:
+            continue
+        if "3개월" not in joined and not (quarter == 1 and "누적" in joined):
+            continue
+        rank = 0 if "3개월" in joined else 1
+        candidates.append((rank, column, label))
+    candidates.sort()
+    return [(column, label) for _, column, label in candidates]
+
+
 def _period_for_fact(fact: Mapping[str, object]) -> dict[str, object]:
     return {
         "period_type": fact.get("period_type"),
@@ -342,7 +431,12 @@ class DisclosureToolBackend:
             correction_policy=str(request.get("correction_policy") or "current"),
             limit=int(request.get("top_k") or 10),
         )
-        rows = [dict(row) for row in result.hits]
+        rows = [
+            dict(row) for row in result.hits
+            if evidence_text_is_admitted(
+                row.get("text_normalized") or row.get("text") or row.get("excerpt")
+            )
+        ]
         bundle = _retrieval_bundle("search_disclosures", request, rows, result)
         warnings = list(bundle.quality_warnings)
         return ToolResponse(
@@ -421,7 +515,10 @@ class DisclosureToolBackend:
                 "evidence_ids": list(fact.get("evidence_ids") or []),
             })
         allowed_ids = {str(item) for fact in facts for item in fact["evidence_ids"]}  # type: ignore[union-attr]
-        refs = [ref for ref in service_bundle.evidence if ref.evidence_id in allowed_ids]
+        refs = [
+            ref for ref in service_bundle.evidence
+            if ref.evidence_id in allowed_ids and evidence_text_is_admitted(ref.text)
+        ]
         actual_dates = sorted(
             str(value) for fact in facts for value in (
                 fact["period"].get("period_start"), fact["period"].get("period_end"), fact["period"].get("instant_date")  # type: ignore[union-attr]
@@ -598,15 +695,225 @@ class DisclosureToolBackend:
             bundle, warnings, _metadata(version_count=len(rows)),
         )
 
+    def _statement_metric_rows(self, request: Mapping[str, object]) -> list[dict[str, object]]:
+        if str(request.get("correction_policy") or "current") != "current":
+            return []
+        resolution = resolve_financial_account(str(request.get("account") or ""))
+        if resolution.status != "resolved" or not resolution.canonical_id:
+            return []
+        account = load_financial_account_catalog().by_id.get(resolution.canonical_id)
+        if (
+            account is None
+            or account.expected_value_type != "monetary"
+            or account.statement_type != "income_statement"
+        ):
+            return []
+        try:
+            fiscal_year = int(request["fiscal_year"])
+        except (KeyError, TypeError, ValueError):
+            return []
+        period_kind = str(request.get("period_kind") or "")
+        quarter = int(request["quarter"]) if request.get("quarter") is not None else None
+        period = _statement_period(fiscal_year, period_kind, quarter)
+        if period is None:
+            return []
+        if period_kind == "annual":
+            subtype, month = "annual", 12
+        elif quarter == 1:
+            subtype, month = "quarter", 3
+        else:
+            return []
+        company = str(request.get("company") or "")
+        if not company:
+            return []
+        with closing(_read_only_connection(self._database())) as connection:
+            filing_columns = {
+                str(row["name"]) for row in connection.execute("PRAGMA table_info(filing)")
+            }
+            reporter_select = "f.reporter_name" if "reporter_name" in filing_columns else "NULL AS reporter_name"
+            company_clauses = [
+                "f.issuer_name=?", "f.listed_name=?", "f.stock_code=?", "f.issuer_corp_code=?",
+            ]
+            company_params: list[object] = [company, company, company, company]
+            if "reporter_name" in filing_columns:
+                company_clauses.insert(2, "f.reporter_name=?")
+                company_params.insert(2, company)
+            filing = connection.execute(
+                f"""SELECT f.filing_id,f.issuer_corp_code,f.stock_code,f.issuer_name,f.listed_name,
+                          {reporter_select},f.report_name_raw,f.filed_at,f.is_correction,
+                          v.lineage_status,v.is_current
+                     FROM filing f JOIN filing_version v ON v.filing_id=f.filing_id
+                    WHERE ({' OR '.join(company_clauses)})
+                      AND f.base_year=? AND f.base_month=? AND f.doc_subtype_normalized=?
+                      AND v.is_current=1 AND v.lineage_status IN ('root','resolved')
+                    ORDER BY f.filed_at DESC,f.filing_id DESC LIMIT 1""",
+                (*company_params, fiscal_year, month, subtype),
+            ).fetchone()
+            if filing is None:
+                return []
+            tables = [dict(row) for row in connection.execute(
+                """SELECT table_id,filing_id,source_id,sequence_no,section_path_json,caption,
+                          unit_text,row_count,column_count,parse_status,locator_json
+                     FROM table_record WHERE filing_id=? AND parse_status='success'
+                    ORDER BY sequence_no,table_id""",
+                (filing["filing_id"],),
+            )]
+            candidates: list[dict[str, object]] = []
+            aliases = {
+                normalize_account_text(surface)
+                for surface in (account.label_ko, *account.aliases)
+            }
+            accepted_statement_types = {"IS", "CIS"}
+            for table in tables:
+                classification = classify_statement_table(table)
+                if classification is None or classification["statement_type"] not in accepted_statement_types:
+                    continue
+                cells = [dict(row) for row in connection.execute(
+                    """SELECT evidence_id,table_id,source_id,filing_id,row_index,column_index,
+                              cell_kind,row_header_path_json,column_header_path_json,locator_json,
+                              text_raw,text_normalized
+                         FROM table_cell WHERE table_id=? ORDER BY row_index,column_index""",
+                    (table["table_id"],),
+                )]
+                columns = _statement_column_candidates(
+                    cells, fiscal_year=fiscal_year, period_kind=period_kind, quarter=quarter,
+                )
+                if not columns:
+                    continue
+                by_row: dict[int, list[dict[str, object]]] = {}
+                for cell in cells:
+                    by_row.setdefault(int(cell.get("row_index") or 0), []).append(cell)
+                for row_index, row_cells in by_row.items():
+                    labels = [
+                        cell for cell in row_cells
+                        if normalize_account_text(str(cell.get("text_raw") or "")) in aliases
+                    ]
+                    if len(labels) != 1:
+                        continue
+                    label_cell = labels[0]
+                    for column, column_label in columns:
+                        value_cell = next(
+                            (cell for cell in row_cells if int(cell.get("column_index") or 0) == column),
+                            None,
+                        )
+                        if value_cell is None:
+                            continue
+                        value = parse_numeric_value(str(value_cell.get("text_raw") or ""))
+                        if value is None:
+                            continue
+                        locator = _json_object(value_cell.get("locator_json"))
+                        locator = dict(locator) if isinstance(locator, Mapping) else {}
+                        locator.update({
+                            "table_id": table["table_id"],
+                            "row": row_index,
+                            "column": column,
+                            "row_label": str(label_cell.get("text_raw") or ""),
+                            "column_label": column_label,
+                        })
+                        candidates.append({
+                            "evidence_id": value_cell["evidence_id"],
+                            "evidence_ids": [value_cell["evidence_id"], label_cell["evidence_id"]],
+                            "filing_id": filing["filing_id"],
+                            "rcept_no": filing["filing_id"],
+                            "issuer_corp_code": filing["issuer_corp_code"],
+                            "stock_code": filing["stock_code"],
+                            "issuer_name": filing["issuer_name"],
+                            "listed_name": filing["listed_name"],
+                            "reporter_name": filing["reporter_name"],
+                            "company": company,
+                            "report_name_raw": filing["report_name_raw"],
+                            "filed_at": filing["filed_at"],
+                            "lineage_status": filing["lineage_status"],
+                            "is_current": filing["is_current"],
+                            "is_correction": filing["is_correction"],
+                            "period": period,
+                            "section_path_json": table["section_path_json"],
+                            "table_id": table["table_id"],
+                            "locator": locator,
+                            "text_normalized": (
+                                f"{label_cell.get('text_raw')} | {value_cell.get('text_raw')} | {column_label}"
+                            ),
+                            "structured_value": value,
+                            "scale": classification["scale"],
+                            "unit": "KRW",
+                            "unit_raw": classification["unit_raw"],
+                            "account_name_raw": label_cell.get("text_raw"),
+                            "statement_type": classification["statement_type"],
+                            "statement_priority": classification["priority"],
+                            "scope": classification["scope"],
+                            "quality_status": "validated_statement_cell",
+                            "retrieval_source": "deterministic_statement_cell",
+                        })
+                        # Quarter statements can expose both the discrete
+                        # three-month amount and a cumulative amount.  The
+                        # ordered column contract prefers the discrete period.
+                        break
+            if not candidates:
+                return []
+            requested_scope = request.get("scope")
+            if requested_scope:
+                scope = str(requested_scope)
+                if not any(row["scope"] == scope for row in candidates):
+                    return []
+            else:
+                scope = "consolidated" if any(row["scope"] == "consolidated" for row in candidates) else "separate"
+            scoped = [row for row in candidates if row["scope"] == scope]
+            priority = min(int(row["statement_priority"]) for row in scoped)
+            preferred = [row for row in scoped if int(row["statement_priority"]) == priority]
+            distinct_values = {
+                (str(row["structured_value"]), int(row["scale"])) for row in preferred
+            }
+            if len(distinct_values) != 1:
+                return []
+            preferred.sort(key=lambda row: (str(row["table_id"]), str(row["evidence_id"])))
+            return [preferred[0]]
+
     def build_summary_context(self, request: Mapping[str, object]) -> ToolResponse:
-        result = self.hybrid_retriever.search(
-            str(request["question"]),
-            company=request.get("company"), filing_id=request.get("filing_id"),
-            start_date=request.get("start_date"), end_date=request.get("end_date"),
-            correction_policy=str(request.get("correction_policy") or "current"),
-            limit=int(request.get("top_k") or 10),
+        statement_resolution = resolve_financial_account(str(request.get("account") or ""))
+        statement_account = (
+            load_financial_account_catalog().by_id.get(statement_resolution.canonical_id)
+            if statement_resolution.canonical_id
+            else None
         )
-        rows = [dict(row) for row in result.hits]
+        try:
+            statement_year = int(request["fiscal_year"])
+            statement_quarter = int(request["quarter"]) if request.get("quarter") is not None else None
+        except (KeyError, TypeError, ValueError):
+            statement_year = 0
+            statement_quarter = None
+        deterministic_statement = bool(
+            self.base_database is not None
+            and request.get("account")
+            and request.get("fiscal_year")
+            and request.get("period_kind")
+            and str(request.get("correction_policy") or "current") == "current"
+            and statement_account is not None
+            and statement_account.statement_type == "income_statement"
+            and statement_account.expected_value_type == "monetary"
+            and _statement_period(
+                statement_year, str(request.get("period_kind") or ""), statement_quarter,
+            ) is not None
+        )
+        if deterministic_statement:
+            statement_rows = self._statement_metric_rows(request)
+            result = RetrievalResult(
+                tuple(statement_rows), "not_used", 0, False,
+                "deterministic_statement_cell", False,
+            )
+        else:
+            result = self.hybrid_retriever.search(
+                str(request["question"]),
+                company=request.get("company"), filing_id=request.get("filing_id"),
+                start_date=request.get("start_date"), end_date=request.get("end_date"),
+                correction_policy=str(request.get("correction_policy") or "current"),
+                limit=int(request.get("top_k") or 10),
+            )
+        rows = [
+            dict(row) for row in result.hits
+            if evidence_text_is_admitted(
+                row.get("text_normalized") or row.get("text") or row.get("excerpt")
+            )
+        ]
         maximum = int(request.get("max_chars") or 6000)
         context_parts: list[str] = []
         remaining = maximum
@@ -624,6 +931,9 @@ class DisclosureToolBackend:
             remaining -= len(part)
         context = "".join(context_parts)
         bundle = _retrieval_bundle("build_summary_context", request, rows, result)
+        if deterministic_statement and rows:
+            bundle.covered_scope["account"] = [str(request["account"])]
+            bundle.covered_scope["scope"] = sorted({str(row["scope"]) for row in rows if row.get("scope")})
         warnings = list(bundle.quality_warnings)
         if not context:
             warnings.append("summary_context_text_unavailable")
@@ -775,6 +1085,11 @@ def tool_definitions(backend: DisclosureToolBackend) -> tuple[ToolDefinition, ..
                 **search_properties,
                 "top_k": _top_k(50),
                 "max_chars": {"type": "integer", "minimum": 100, "maximum": 20000},
+                "account": _optional_string(),
+                "fiscal_year": {"type": "integer", "minimum": 1900, "maximum": 2200},
+                "period_kind": {"type": "string", "enum": ["annual", "quarter"]},
+                "quarter": {"type": "integer", "minimum": 1, "maximum": 4},
+                "scope": {"type": "string", "enum": ["consolidated", "separate"]},
             }, required=("question",)),
             _tool_output_schema(
                 {

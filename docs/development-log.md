@@ -750,3 +750,201 @@
 - 테스트: Node Web `12 passed`; Web/runtime focused pytest `21 passed`; 전체 pytest `486 passed, 2 skipped, 48 warnings, 45 subtests`; `python -m compileall -q src`와 `git diff --check` 통과. 실제 로컬 FastAPI fake endpoint를 in-app browser에서 데스크톱/390px 모바일로 열어 empty/예시, loading, 정상 answered+Evidence sufficient+receipt, insufficient abstain, API/connection error와 재시도를 확인했다. fake runtime은 key/DB를 사용하지 않았다.
 - 변경 파일: production Web은 `src/disclosure_db/web/index.html`, `app.css`, `api.js`, `app.js`; 회귀는 `tests/web_api.test.mjs`, `tests/web_history.test.mjs`, `tests/test_public_web.py`; 이 HCX superpower spec, README와 개발 로그를 실제 동작에 맞췄다.
 - 현재 제한/다음 작업: 이번 로컬 검증은 UI와 fake endpoint control flow이고 실제 NCP corpus/HCX를 다시 호출하지 않았다. Dense는 계속 `None`/artifact pending이며 embedding, GraphRAG, 새 framework는 건드리지 않았다. NCP에서 code-only image를 rebuild/recreate한 뒤 `/`, `/health`, 실제 5종 Function Calling smoke와 `citations[].rcept_no`를 확인하고 공개 8000 포트 또는 기존 reverse proxy URL을 팀에 공유한다.
+
+## 2026-09-02T14:09:46+09:00 / 2026-09-02T05:09:46Z — NCP QA 복구·매출총이익 재무제표 cell 경로
+
+- 기준선: 팀 최신 브랜치 `origin/agent/financial-account-catalog-v1` 커밋 `a3413a3` 기준으로 격리 worktree를 만들었다. NCP staging `:8001` 접속 장애는 container 오류가 아니라 이전 관리자 IP `/32` ACG 규칙이 남은 것이 원인이었다. 현재 관리 IP의 `22`, `8001` 규칙만 추가한 뒤 `GET :8001/health` 의 `ready=true`, `company_count=76`, provider/function calling/dense full-corpus 상태를 확인했다. `:8000` 공개 규칙은 유지했고 staging `:8001`을 전체 공개하지 않았다.
+- QA 실패: staging 실제 QA `qa-20260902-044633-81f6ca72`는 5건 중 3건 통과, 2건 실패(60%)였다. 실패는 `financial_annual_gross_profit_001`, `financial_q1_gross_profit_001`이고 둘 다 `deterministic_financial_format_missing`/`financial_statement_cell_contract_not_met`였다. SM엔터테인먼트–하이브 2025 매출액 비교는 alias 보정·정확한 두 수치·두 citation으로 정상 답변했다.
+- systematic debugging 결과: retrieval-only 계정은 `build_summary_context` generic Hybrid 검색만 실행했고, 실제 후보는 서술 또는 table-row chunk이어서 `structured_value`, 단위, 회계기간, row/column locator 계약을 채우지 못했다. 기존 guard 테스트는 이 필드를 이미 가공한 synthetic item으로 제공해 실제 DB–Tool 간 gap을 발견하지 못했다.
+- TDD RED: 실제 table schema와 같은 SQLite fixture에서 사업보고서 연결/별도 매출총이익과 1분기 `3개월`/누적 열을 구성했다. 첫 RED는 route의 `account/fiscal_year/period_kind/quarter` 누락과 Tool schema `invalid_request`를 재현했다. 최소 구현 후에는 Evidence Gate의 `scope_mismatch:account`, 원본 DB에서는 구형 schema의 `reporter_name` 없음, 분기표에서 `3개월`보다 누적 열이 선택될 수 있는 문제를 각각 추가 RED로 고정했다.
+- 최소 구현: 5개 Tool 공개 계약을 늘리지 않고 `build_summary_context` 내부에 선택적 read-only deterministic statement-cell 경로를 추가했다. 현재 유효한 기간보고서만 선택하고, `III. 재무에 관한 사항` 기본 재무제표·정확한 카탈로그 label/alias·해당 기간 열·파싱된 KRW 단위가 모두 있을 때만 수치를 낸다. 연결을 우선하고 없을 때만 별도를 선택하며, 같은 우선순위의 충돌값은 fail-closed한다. 분기 질문은 누적보다 `3개월` 열을 선택한다. generic text를 숫자로 역파싱하지 않고 HCX는 검증된 cell 수치의 문장화만 담당한다.
+- 실제 DB 검증: 원본 `D:\\mirae-asset-project\\db\\semantic-v1_129f5b0\\disclosure_corpus_semantic_v1.sqlite`는 `38,773,280,768` bytes, distribution manifest SHA-256 `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563`이고 `mode=ro&immutable=1`, `PRAGMA query_only=ON`으로만 열었다. 삼성전자 2025 연간 연결 매출총이익은 `131,370,425 백만원` / `20260310002820`, 2025 1분기 연결 3개월 매출총이익은 `28,130,572 백만원` / `20250515001922`로 확인했다. 두 질문 모두 service E2E에서 `answered`, `answer_allowed=true`, 정확한 value-cell citation과 `rcept_no`를 반환했다.
+- 검증: 관련 route/Tool/statement guard `27` tests 통과, 전체 `python -m unittest discover -s tests` `415` tests 통과·2 optional skip, 실제 DB Tool·service E2E 2건 통과, `git diff --check` 통과. 첫 전체 실행은 기본 런타임의 `numpy` 누락으로 2개 module import가 멈춰고, 프로젝트 선언 범위 `numpy>=1.26,<3` 설치 후 같은 런타임에서 전체를 통과했다. credential, `.env`, PEM, provider 원문, live overlay/index는 읽거나 변경하지 않았다.
+- 배포 경계: 이 시점은 로컬 통과 후이며 NCP staging 재배포·5/5 QA·공개 `:8000` 승격은 아직 실행하지 않았다. 승격 hard gate는 staging QA 5/5, 전체 회귀, health/API/Web smoke, rollback 커밋 보존이다.
+
+### 2026-09-02T14:23:53+09:00 / 2026-09-02T05:23:53Z — 독립 검토 후 결정론 경계 보강
+
+- 검토에서 2·3분기 누적 열을 단일 분기값으로 오인할 가능성, 명시적 별도 범위와 정정 정책 유실, 현금흐름·재무상태표 계정까지 새 경로가 가로채는 위험을 확인했다. 재현 테스트는 별도 범위 누락 `KeyError`와 Tool schema `invalid_request`로 먼저 실패했다.
+- 최소 수정으로 새 statement-cell 경로를 `current` 정책의 연간 및 1분기 손익계정으로 제한했다. 연도 없음, 2·3·4분기, CF·BS·SCE·주당 계정, 최초/정정 정책은 기존 hybrid 경로를 유지해 근거 계약이 부족하면 답변을 보류한다. 1분기는 `3개월`을 우선하되 `누적`도 같은 기간인 경우만 허용한다.
+- 명시적 `separate`는 Tool schema와 DB 선택 단계까지 전달해 별도 표만 허용하고, 미지정 시에만 연결 우선·별도 fallback을 적용한다. 응답 coverage에도 실제 선택 scope를 기록한다.
+- 수정 직후 새 회귀 2건이 통과했고, route/Tool/statement guard 묶음은 `29` tests 통과했다. 전체 회귀와 실제 NCP 승격 결과는 이후 hard gate 항목에 별도로 기록한다.
+- 독립 리뷰의 추가 재현에서 월 지정, 다중연도 차이, 기본주당이익이 연간 statement-cell 경로로 잘못 들어가고, public Tool 직접 호출의 2분기·주당계정이 hybrid fallback 없이 빈 결정론 결과를 내는 문제가 확인됐다. 각각 RED로 고정한 뒤 라우터를 단일 기간 `lookup` 및 실제 catalog의 monetary income-statement 계정으로 제한하고, Tool handler에도 동일한 지원 범위 검사를 추가했다. 월·다중연도·주당·Q2~Q4는 다시 기존 검색으로 전달된다.
+- 2026-09-02T14:33:27+09:00 / 2026-09-02T05:33:27Z 최종 독립 재검토는 Critical/Important `0`, `READY`였다. 최종 전체 Python 회귀 `418` tests 통과·2 optional skip, Web `12/12`, `compileall`, `git diff --check`, 변경분 secret scan을 통과했다. 실제 원본 DB의 연간/Q1 read-only 조회도 기존 filing/value/evidence ID를 그대로 재현했다. NCP staging 5/5와 production 승격은 아직 별도 hard gate다.
+
+## 2026-09-02 — Judge Stress V2 Task 1 runtime/dependency baseline
+
+- 범위와 안전 경계: `99893d4`에서 분기한 `agent/judge-stress-v2` linked worktree에서만 작업했다. credential, `.env`, PEM, D-drive corpus, NCP, live DB/overlay/search는 접근하거나 변경하지 않았다. 5개 public Tool과 기존 API response field는 변경하지 않았다.
+- 기준선: process-local `PYTHONPATH=src`로 전체 Python `539 passed, 2 skipped, 54 warnings, 74 subtests`, Web `12/12`를 확인했다. 첫 Python 실행은 linked worktree에 editable install이 없어 `ModuleNotFoundError: disclosure_db`로 collection 중단됐고, repository 변경이나 package 설치 없이 `PYTHONPATH`를 지정해 동일 suite를 재실행했다.
+- TDD RED: identity/dependency focused suite는 `runtime_manifest_schema_version` 누락, `runtime_manifest_path` 미지원, `DenseRuntime.runtime_identity` 부재, Dense NumPy pin 부재로 `4 failed, 15 passed`였다. Compose runtime-manifest 경로도 별도 RED에서 누락을 재현했다.
+- 최소 GREEN: `[dense]` extra에만 `numpy==2.5.2`를 고정하고 기본 `[agent]` extra/main `Dockerfile`은 NumPy-free로 유지했다. Dense startup은 allowlist된 `python_version`, `numpy_version`, `faiss_version`, model/revision, vector dimension/count, index type/metric/normalization을 atomic `/runtime/dense_runtime_manifest.json`에 쓰고 sidecar `/health`에 같은 값을 추가한다. 기존 `ready`, `model`, `model_revision`, `dimension`, `vector_count`는 유지한다. 임의 runtime mapping의 credential/path/environment 필드는 manifest와 health에서 제외한다.
+- Sparse fallback audit: missing/invalid Dense index, filtered empty result, sidecar unavailable 4개 focused regression이 통과했다. 이는 실행 중 query-time fallback evidence다. Compose의 `depends_on: condition: service_healthy` 때문에 agent cold start/restart fallback은 아직 검증되지 않았다.
+- 로컬 GREEN evidence: Dense/runtime/deployment focused `19 passed`; fallback audit `4 passed`. 전체 최종 회귀와 diff evidence는 Task 1 report에 기록한다.
+- 최종 verification: Dense/dependency/hybrid/client focused `34 passed, 1 skipped, 6 warnings, 3 subtests`; 전체 Python `543 passed, 2 skipped, 58 warnings, 74 subtests`; Web `12/12`를 통과했다. 경고는 기존 FastAPI `on_event` deprecation이다. `python -m compileall -q src`, `git diff --check`, commit 직전 staged-file 검사는 별도 fresh gate로 실행했다.
+- `BLOCKED_ENVIRONMENT`: Docker CLI client `29.7.2`는 있었지만 Docker Desktop Linux engine named pipe가 없어 server 연결에 실패했다. 사용자 지시대로 Docker를 재시도하지 않았다. 따라서 main image의 실제 NumPy 부재, Dense image의 실제 Python/NumPy/FAISS 조합, container manifest, container `/health`, restart behavior는 검증했다고 주장하지 않는다.
+- Release status: local dependency/identity/query-time fallback contract만 검증되었다. Dense artifact identity와 Sparse 대비 Recall@20 `+5%p`, wrong issuer/version `0`, p95 `<=2s`, cold-start fallback은 `UNVERIFIED`; Docker가 가능한 환경에서 별도 release gate로 실행한다.
+
+### 2026-09-02 — Task 1 fix round 1: validated Dense artifact/model identity
+
+- 원인: Dense runtime이 vector manifest의 `index.metric`과 `normalized_embeddings`, 실제 FAISS `metric_type`을 확인하지 않은 채 `inner_product`/`normalized=true`를 공개했다. 또한 model/revision은 vector manifest에서만 가져와 임의의 `model_path`가 같은 모델인지 확인하지 않았다.
+- TDD RED: incompatible vector metric, missing normalization contract, loaded FAISS metric mismatch, missing mounted-model identity, mismatched mounted-model identity의 5개 회귀를 먼저 추가했다. 기존 구현에서 의도대로 `5 failed, 7 passed`였다.
+- 최소 GREEN: vector manifest가 `IndexFlatIP`, `inner_product`, `normalized_embeddings=true`를 선언해야 하고, loaded FAISS index의 type/metric이 이를 확인해야 startup이 진행된다. `/model/model_identity.json`의 schema/model/revision도 pinned `BAAI/bge-m3` revision과 일치해야 한다. Runtime manifest와 `/health`는 이 검증된 값만 공개하며 기존 health 필드는 유지한다.
+- 검증: focused Dense runtime `12 passed, 6 warnings`; 전체 Python `548 passed, 2 skipped, 58 warnings, 74 subtests passed`; Web `12 passed`; `python -m compileall -q src scripts` 통과. 전체 Python/Web/compile 결과는 fix 구현 직후 실행한 완료 evidence이고, 사용자 지시에 따라 최종 단계에서는 focused suite만 재실행했다.
+- 문서/환경 경계: 2026-08-20 `dcf44b8` local Docker/compose evidence와 2026-08-21 `d3e909a` NCP image evidence를 `PASS_HISTORICAL`로 범위 지정했다. 현재 Task 1 compose/image/container 및 Dense image/health 측정은 Docker engine unavailable로 `BLOCKED_ENVIRONMENT`이며 Docker를 재시도하거나 image validation을 주장하지 않았다.
+
+### 2026-09-02 — Task 1 fix round 2: immutable Dense files and vector norms
+
+- 재리뷰 원인: `normalized_embeddings=true`와 model identity JSON 자체가 여전히 self-asserted 선언이었다. Vector/build manifest에는 이미 artifact SHA-256이 있으므로 runtime이 이를 직접 검증하고, mounted model identity도 실제 전체 파일 hash에 묶어야 했다.
+- TDD RED: 잘못된 FAISS SHA-256, 실제 non-unit vector, 변경된 mounted model file의 세 회귀를 먼저 추가해 기존 코드에서 `3 failed, 12 passed`를 확인했다. 모델 identity builder 부재도 별도 artifact test에서 `1 failed`로 확인했다.
+- 최소 GREEN: FAISS/metadata SHA-256을 build manifest와 비교하고, `IndexFlatIP`의 모든 vector를 bounded batch로 reconstruct하여 L2 norm `1±1e-4`를 검증한다. Staging 전용 builder가 model directory 전체 regular file의 size/SHA-256 identity를 원자적으로 만들며 runtime은 파일 집합·크기·hash를 모두 확인한다. Live/read-only mount를 쓰지 않으며 main agent에는 NumPy를 추가하지 않았다.
+- 검증: Dense runtime 및 deployment artifact `28 passed`; 전체 Python `552 passed, 2 skipped, 58 warnings, 74 subtests`; Web `12/12`; `compileall src scripts`와 `git diff --check` 통과. Docker/NCP/live artifact 측정은 계속 `BLOCKED_ENVIRONMENT`이다.
+
+### 2026-09-02 — Task 1 fix round 3 and handoff
+
+- 재리뷰 요구를 좁혀 staging model을 임의 파일 집합으로 self-assert하지 못하게 했다. Builder는 `huggingface_hub.snapshot_download(repo_id='BAAI/bge-m3', revision=<pinned commit>, local_files_only=True)`가 해석한 snapshot과 staged model 전체 파일을 byte-for-byte 비교한 뒤에만 identity를 만든다.
+- TDD RED: reference snapshot 비교 API와 local-only snapshot resolver가 없는 상태에서 `2 failed`를 확인했다. GREEN 후 focused `29 passed`, 전체 Python `553 passed, 2 skipped, 58 warnings, 74 subtests`, Web `12/12`, compileall/diff check를 통과했다.
+- Review boundary: mounted files가 pinned local snapshot과 동일함은 검증하지만 로컬 Hugging Face cache 자체의 공급망 진위는 별도 신뢰 루트다. 서명된 upstream file manifest가 없는 현재 환경에서는 이를 더 강하게 증명할 수 없으므로 후속 supply-chain gate로 명시한다.
+- 사용자 요청에 따라 이번 작업자는 Task 1에서 종료한다. Task 2~8과 Docker/NCP staging/production promotion은 미완료이며 `docs/handoffs/2026-09-02-judge-stress-v2-handoff.md`로 넘긴다.
+
+## 2026-09-03 — Judge Stress V2 Task 2 independent 600-case suite
+
+- 범위: 기존 `stress_generation.py`/`stress_evaluation.py`, 300-case config/scripts/tests/artifacts와 `financial_release_evaluation.json` 856-case 결과를 수정하지 않고 독립 V2 contract/library/build/report scripts/tests를 추가했다. credential, `.env`, PEM, D-drive/live/NCP DB와 보안 설정은 읽거나 변경하지 않았다.
+- 최초 TDD: V2 module 부재 `7 failed`, build/report CLI 부재 `2 failed`, machine-specific legacy path `1 failed`, audited seed 선택 누락 `1 failed`, stale case hash 수용 `1 failed`을 각각 구현 전에 확인했고 최소 GREEN을 거쳤다.
+- review fix round 1 TDD: `passed`가 bool이 아니어도 failure 분기로 들어가고 changed-but-total-600 allocation을 허용하는 RED `2 failed`를 확인한 뒤 exact bool/category/allocation/split fail-closed로 `2 passed`를 만들었다. private 경계 전체 RED는 `14 failed`로, tracked generator의 holdout 합성, seed 노출, private CLI 부재, 독립 document/template group 부재를 각각 재현했다. 최소 refactor 후 V2 focused는 `14 passed`다. 원문 RED 출력은 git-ignored Task 2 report에 보존했다.
+- suite contract: 총 600건과 category `120/90/120/90/90/60/30`, development/holdout `480/120`을 코드 상수와 config 모두에서 exact match로 강제한다. tracked 코드는 audited source에서 development 480건만 생성한다. 개발 case-bearing source는 broad audited financial facts 208회, human-validated seed 32회, free-form 168회, Gold 72회이며 231개 source record와 401개 unique question hash를 사용한다.
+- private holdout: review 전 ignored holdout 120건은 SHA-256 `f87ce4555dd3b237dc2830d58935e155c642e295e0160af3aefbe26c31c654f9` 그대로 private archive에 먼저 보존했다. active private input에는 tracked 코드에 없는 holdout paraphrase/template family와 private rubric identity를 저작했다. builder는 명시적인 git-ignored private input이 없으면 development 480건만 쓴 뒤 `BLOCKED_PRIVATE_HOLDOUT`으로 종료하고, non-ignored 입력도 거부한다. tracked contract/code에는 실제 holdout selection seed나 raw 질문/oracle이 없다.
+- split/privacy: 실제 600건 기준 development/holdout case-covered issuer group은 정확히 `46/12`다. issuer, source, 독립 document, 독립 question-template-family, exact-question hash overlap은 모두 `0`; document group은 `72/17`, template family는 `167/28`이다. underlying audited source facts는 tracked 입력으로 유지하지만 exact hidden 질문·oracle·private selection은 오직 ignored evaluator input에만 있다. tracked application runtime은 evaluator를 import하지 않는다.
+- artifacts: suite SHA-256 `47664c91b6d241288ab4cd928955321eae301658de5681b06a40665054125a87`; raw development SHA-256 `d7d9ff063fe560bc7fac67656e9eba57cd9c8438e6ad5f8dffe28a7a1778b4f4`; private holdout SHA-256 `e132dbccf2698473fdf405ea0a54d311552576a5170350331d7c083585004bcb`; tracked manifest SHA-256 `a462e4ccacd18905038e586d97985a73ed745ef0c4880fcf8a8e836622718f3f`; JSON summary `601fbcbb3dc529893ba46604dc4a54148bb94cd1da9db2ca9b0e368755e1d429`; standalone HTML `fcdc53b782b7b2a5d1116a36e88513718f34ab7452cf5a415d55c5cec6d3a0e0`이다.
+- failure taxonomy: JSON/HTML은 entity, period, account, routing, retrieval, evidence, calculation, generation, security, runtime 정확히 10개 category만 허용한다. `passed`는 exact bool이어야 하고, 모든 supplied failure category를 branching 전에 검증하며 passing row의 non-null category도 거부한다. 원문 응답 같은 추가 result payload는 report로 전달하지 않는다.
+- 검증: Judge Stress V2 focused `14 passed`; V2+legacy 300/856 묶음 `38 passed`; 전체 Python `567 passed, 2 skipped, 58 warnings, 74 subtests passed`; Web `12/12`; `compileall src scripts`, `git diff --check` 통과. legacy 300/856 guarded 9개 tracked file diff는 `0`이다. 실제 private question/rubric tracked leak, tracked raw artifact, application evaluator import도 모두 `0`이다.
+- review fix round 2: `build_summary`가 manifest `cases`를 검증 없이 case-ID dict로 축약해 599-row, bad split/category, duplicate ID, bad suite hash를 받아들이고 evaluator CLI도 invalid manifest report를 쓰는 문제를 확인했다. 네 mutation과 CLI RED는 `5 failed, 14 deselected`; category total/per-split guard mutation은 별도로 `1 failed, 18 deselected`였다. 단일 manifest validator가 top-level 선언과 600 raw rows에서 unique rows/IDs, `480/120`, exact seven-category total 및 per-split allocation, row split/category, canonical suite hash를 독립 재계산한 뒤에만 summary를 만든다. 최소 GREEN 후 V2 focused는 `19 passed`다.
+- review fix round 2 privacy ruling: 요구 경계는 exact authored private 질문과 private rubric ID를 개발 코드에서 조회·재구성하지 못하게 하는 것이다. literal scan `0`을 유지한다. 공개 issuer/fact provenance나 공개 DB fact answer의 암호학적 비밀성은 요구하거나 주장하지 않으며, finite public corpus에서 hashed group/source identity를 대조할 수 있는 잔여 가능성이 있다. pre-paraphrase/public-fact reconstruction은 evaluator가 보관하는 exact private holdout 원문이 아니다. 이 round에서는 suite를 재설계하거나 provenance ID를 제거하지 않았다.
+- review fix round 2 최종 검증: V2 focused `19 passed`; V2+legacy 300/856 `43 passed`; 전체 Python `572 passed, 2 skipped, 58 warnings, 74 subtests passed`; Web `12/12`; compileall/diff 통과. legacy guarded diff, actual private question literal leak, private rubric literal leak은 모두 `0`이다. suite SHA-256은 `47664c91b6d241288ab4cd928955321eae301658de5681b06a40665054125a87`로 유지됐다.
+- 상태: suite 구축과 report contract만 완료했으므로 tracked summary는 의도적으로 `status=NOT_RUN`이다. Task 3 입력 정규화/분해부터 Task 7 실제 실행까지 통과하기 전에는 Judge Stress V2 품질 PASS를 주장하지 않으며, Task 8 promotion도 진행하지 않는다.
+
+## 2026-09-03 — Judge Stress V2 Task 3 input and routing hardening
+
+- 범위와 기준선: 요청된 `agent/judge-stress-v2` linked worktree의 `ab143611f000279ff8f8e2bd099dcdbbc7829272`에서 시작했다. 첫 focused 실행은 editable install이 없어 `ModuleNotFoundError: disclosure_db`로 collection 중단됐고, repository 지침대로 process-local `PYTHONPATH=src`만 지정한 재실행은 `96 passed, 26 subtests`였다. D-drive/live/NCP, credential, `.env`, PEM, 보안·배포 설정은 접근하거나 변경하지 않았다.
+- TDD RED/GREEN: 공개 질문 길이와 alias/normalization RED는 `9 failed, 2 passed` 후 GREEN `8 passed, 3 subtests`; 다중 metric·잘못된 날짜·충돌 조건 RED는 `10 failed, 2 passed` 후 GREEN `7 passed, 5 subtests`; encoded/multilingual injection RED는 Function Calling/agent가 provider·search 경로에 진입하는 실패를 재현한 뒤 GREEN `4 passed, 2 subtests`가 됐다. 중간의 중복 연도 1건 실패는 기존 기간 연산 표지에 `차이`가 빠진 동일 원인으로 진단해 최소 수정했다.
+- 입력 계약: 공통 NFKC, Unicode 공백 축약, zero-width/format character 제거를 적용한다. 회사 alias는 고정 `data/derived/financial_company_universe.json`의 issuer/listed/alias/stock-code와 검토된 `config/company_aliases.json`만 사용하고 case-insensitive하게 정규화한다. `SM엔터테인먼트 → 에스엠`, `Samsung Electronics → 삼성전자`, `005930 → 삼성전자`를 회귀로 고정했으며 catalog 밖 `Samsung`과 둘 이상 후보가 있는 한 글자 오타는 추론하지 않는다.
+- routing 계약: 여러 회사·연도·structured metric을 독립 Cartesian 요구사항으로 만들고 모든 요구사항의 근거가 있을 때만 complete로 처리한다. 잘못된 달력 날짜, 연결/별도 충돌, 의미를 바꾸는 중복 비교 연도는 stable reason code로 Tool/provider 호출 전에 clarification한다. 공개 `as_of`도 모양뿐 아니라 실제 달력 날짜를 검증한다.
+- 공개·보안 계약: 모든 공개 question-bearing FastAPI schema의 `maxLength`는 정확히 `2000`이고 2,000/2,001 경계를 실제 endpoint에서 확인했다. Dense `/search` 내부 한도는 유지했다. URL/percent, Base64, Unicode/공백, 다국어 prompt-injection은 2,000자 bounded detector에서 탐지만 하며 decoded 문자열을 반환·전달하지 않는다. 기존 추천 거부가 injection 거부보다 먼저 적용되는 정책과 public Tool 5개/기존 필드는 유지했다.
+- 검증: 확대 focused suite `159 passed, 36 subtests`; 전체 Python `591 passed, 2 skipped, 72 warnings, 84 subtests`; Web `12/12`; public Tool exact-five focused `2 passed`; `compileall src scripts`와 `git diff --check`가 통과했다. 경고는 기존 FastAPI/Dense `on_event` deprecation이고 skip은 기존 optional 환경 항목이다. 600-case 앱 평가, Docker/image, Dense 품질, live/provider/NCP 평가는 실행하지 않았고 PASS를 주장하지 않는다.
+
+### 2026-09-03T03:44:52+09:00 — Task 3 독립 리뷰 수정
+
+- 독립 리뷰에서 URL/Base64를 두 번 중첩하면 detector를 통과하고, 직접 `DisclosureAgent`·routerless HCX가 2,001자/잘못된 날짜/연결·별도 모순을 provider 또는 search까지 전달하며, fact 조회 API 일부가 존재하지 않는 `as_of` 날짜를 받는 우회 경로를 확인했다. 전각·zero-width English 회사 alias가 public answer 경로에서 canonical 회사명으로 전달되지 않는 문제도 재현했다.
+- TDD RED는 우회 13건 실패로 시작했다. 공통 preflight가 원문 길이를 정규화 전에 검사하고 NFKC/format-character/공백 정리, 달력 날짜, scope 모순, 의미를 바꾸는 중복 비교 기간을 단일 reason code로 판정하도록 수정했다. encoded injection은 최대 깊이 2·decode 시도 16회·각 view 2,000자로 제한해 nested URL/Base64 조합을 탐지하되 decoded payload를 응답·로그·도구에 전달하지 않는다.
+- `plan_query`, 직접 agent, router 유무와 무관한 HCX, 모든 public question model, GET `/answer`, financial/event fact `as_of`가 같은 경계를 사용한다. config에 명시된 `Samsung Electronics → 삼성전자` alias는 public planner/answer에도 적용하며 catalog 밖 alias는 추가하지 않았다. 기존 5개 public Tool과 응답 필드는 유지했다.
+- 수정 focused 회귀는 `142 passed, 86 subtests`, 전체 Python은 `610 passed, 2 skipped, 86 warnings, 134 subtests`, Web은 `12/12`였다. `npm test`는 이 저장소에 package manifest가 없어 검증 명령이 아니며 실제 Web gate는 기존 방식인 `node --test tests/*.test.mjs`로 실행했다. 경고는 기존 FastAPI/Dense `on_event` deprecation이다. credential, `.env`, PEM, D-drive/live/NCP 데이터와 보안 설정은 접근·변경하지 않았다.
+
+### 2026-09-03 — Task 3 독립 리뷰 수정 2
+
+- 재검토에서 16개의 무해한 Base64 token으로 decode budget을 먼저 소진하는 입력, 공백을 끼운 Base64, public planner가 universe의 종목코드 alias를 읽지 않는 경로, `당기순이익` 안의 `순이익`을 두 metric으로 세어 중복 기간 검사를 건너뛰는 네 재현을 확보했다. 구현 전 신규 테스트는 정확히 `4 failed`였다.
+- decoder는 전체 candidate가 남은 16회 예산보다 많으면 모호한 public input으로 fail-closed하고, bounded spaced-Base64 candidate도 검사한다. decode 호출 수와 깊이/길이 제한은 그대로다. planner alias는 기존 고정 universe manifest와 검토된 config만 합쳐 사용하며 `005930 → 삼성전자`를 public answer까지 보존한다. metric count는 긴 canonical 명칭에 포함된 짧은 alias를 중복 계산하지 않는다.
+- 수정 focused gate는 `140 passed, 86 subtests`, Web은 `12/12`였다. 전체 회귀와 최종 독립 승인은 이 수정 커밋 직전/직후 별도 검증 결과로 기록한다.
+
+### 2026-09-03 — Task 3 독립 리뷰 수정 3
+
+- 재검토에서 `2024-12-31과 2024-12-31` 비교가 중복 기간 검사를 통과하고, 서로 다른 ISO 날짜 두 개도 planner가 첫 날짜만 보존하는 문제를 확인했다. 두 회귀는 구현 전에 `2 failed`였다.
+- 공통 preflight는 유효성이 확인된 ISO 날짜 mention도 중복 비교 대상으로 삼는다. planner는 명시한 모든 달력 날짜를 독립 `target_periods`로 보존하며 손익계정은 각 연도 시작일부터 해당 날짜까지, 재무상태계정은 각 instant로 표현한다. 따라서 계산·비교 경로가 두 번째 기간을 조용히 버릴 수 없다.
+- 수정 focused gate는 `142 passed, 86 subtests`다. 최종 전체 회귀와 새 독립 승인 전까지 Task 3 완료를 주장하지 않는다.
+
+### 2026-09-03 — Task 3 독립 리뷰 수정 4
+
+- 세 번째 재검토에서 planner가 보존한 ISO 날짜를 router가 다시 연도 네 자리로 축약해 같은 연도의 서로 다른 날짜를 하나로 합치고, HCX executor가 날짜 경계를 연말로 바꾸는 downstream 결함을 확인했다.
+- router는 연간 기간만 기존 `YYYY` label/계약으로 유지하고, 부분기간·instant는 전체 날짜와 명시적 `start_date`/`end_date`/`instant_date`를 requirement별로 보존한다. HCX 비교 실행기는 각 requirement의 정확한 경계를 Tool 요청에 전달한다. 기존 연간 multi-axis 응답 형식은 그대로다.
+- exact-boundary route/dispatch 회귀를 먼저 추가하고 수정 후 ISO focused `10 passed, 5 subtests`, Task 3 확대 focused `144 passed, 86 subtests`를 확인했다. 전체 회귀와 새 독립 승인 전에는 완료로 표시하지 않는다.
+
+## 2026-09-03 — Judge Stress V2 Task 4 bounded analysis executor
+
+- 범위와 기준선: 최종 Task 3 커밋 `3b11110e18f6b61c7c2f24d54c3c2099afff687a` 위에서만 작업했다. Task 3를 amend하지 않았고 public Tool 5개와 기존 최상위 응답 필드를 유지했다. credential, `.env`, PEM, provider, Docker, NCP, D-drive 원본·live overlay/index는 접근하거나 변경하지 않았다.
+- TDD 경로: 9개 판단 차원·미래 전망 거절은 최초 `5 failed, 5 passed`에서 `10 passed`; executor 모듈 부재와 HCX constructor/public 연결은 각각 import/`4 failed` RED 뒤 focused `15 passed`와 `20 passed`로 전환했다. 엄격 소유권 검토에서는 잘못된 issuer fact 잔존 `1 failed`, 다중 기업·다중 기간 슬롯 누락 `2 failed`, canonical alias 비교 누락 `1 failed`, issuer와 period 불일치가 섞인 근거 잔존 `1 failed`를 각각 재현한 뒤 최소 수정했다.
+- 실행 구조: 공개 Function Calling 서비스가 판단 질문에 `BoundedAnalysisExecutor`를 호출하고 내부에서 `plan_analysis -> EvidenceService.search_analysis`를 순차 실행한다. HCX에게 여섯 번째 검색 Tool을 공개하거나 Tool 선택을 맡기지 않고 기존 `build_summary_context` 응답 계약을 재사용한다. HCX는 backend가 허용한 결론 enum과 admission된 citation으로 문장화만 한다.
+- 판단 범위: 수익성, 재무건전성, 현금흐름·유동성, 차입·자금조달, CAPEX, 사업위험, 지배구조, 정정 중요성, 기업 비교의 9개 dimension을 catalog로 제한했다. 매수·매도·적합성 요청과 미래 수치·전망은 검색/provider 호출 전 거절하고, 공시된 과거 사실에 대한 catalog 결론만 허용한다. HCX가 허용 범위 밖 결론이나 전망 문구를 반환하면 최종 답변을 폐기한다.
+- strict fail-close: canonical alias를 적용한 명시 기업과 모든 명시 기간의 Cartesian pair마다 고유 evidence slot을 만든다. issuer와 period 검사를 독립 적용해 하나라도 다른 근거는 context/fact/event에서 제거한다. mandatory slot 누락, 최소 evidence 미달, retrieval incomplete는 `conclusion=insufficient_evidence`, `answer_allowed=false`로 고정하고 HCX 최종 생성을 호출하지 않는다.
+- 검증: Task 3/4 관련 focused suite `146 passed, 12 warnings, 86 subtests`; 전체 Python `641 passed, 2 skipped, 86 warnings, 134 subtests`; Web `12/12`; `python -m compileall -q src scripts`와 `git diff --check`가 통과했다. warnings는 기존 FastAPI/Dense `on_event` deprecation이고 skips는 기존 optional 환경 항목이다. 실제 provider·staging·600-case 평가와 Task 5~8은 실행하거나 통과로 주장하지 않는다.
+## 2026-09-03 — Judge Stress V2 Task 5 independent-review fixup
+
+- 시각: `2026-09-03T05:04:46+09:00` / `2026-09-02T20:04:46Z`. 기준 커밋은 `3748871`이다. 다른 작업자의 Task 6 미추적 파일 `src/disclosure_db/claim_verification.py`, `tests/test_claim_level_function_answer.py`는 읽기 전용 경계로 두고 수정·stage·커밋하지 않았다. D 드라이브, live overlay/index, NCP, credential, `.env`, PEM도 접근하거나 변경하지 않았다.
+- 독립 리뷰가 다섯 blocker를 확인했다: 채택 artifact의 tracked evaluator/runtime 결속 부재, Sparse recall 및 gate 숫자의 NaN/Inf 수용, Dense hit와 hydrated filing의 개별 불일치 수용, text slot 기간 prefilter 누락, NFKC/zero-width/control로 우회되는 instruction-like evidence. 최초 RED는 `22 failed, 115 passed, 21 subtests`였고, 동일 evidence ID의 상충 filing 선언과 네트워크 없는 fail-closed 경계도 별도 RED로 고정했다.
+- 최소 수정은 `dense-adoption-v2`를 Git 신뢰 앵커가 된 evaluator raw/semantic hash, 재계산된 ADOPTED 결정, 평가 runtime identity, 실제 sidecar `/health` identity에 함께 묶는다. runtime identity에는 검증된 Dense manifest, FAISS, metadata, model identity hash가 포함된다. health가 닿지 않거나 local artifact/summary가 없거나 값이 stale/non-finite/mismatched이면 Dense client를 만들지 않고 Sparse로 남는다.
+- Evidence hydration은 각 Dense hit의 선언 filing과 실제 evidence filing/receipt가 정확히 일치하고, 같은 evidence ID의 모든 선언이 하나의 실제 filing으로 수렴할 때만 허용한다. text slot의 `period_start`/`period_end`는 Sparse와 Dense 양쪽 prefilter에 전달된다. summary context를 포함한 단일 evidence gate는 NFKC 후 Unicode Cc/Cf 제거, 공백 축약, compact marker 비교를 수행한다.
+- 재검토 중 Dockerfile이 복사하는 tracked evaluator summary를 `.dockerignore`의 `data/`가 제외한다는 배포 결함을 추가로 발견했다. RED deployment test `1 failed` 후 `data`의 나머지는 계속 제외하고 `data/derived/freeform_retrieval_summary.json` 한 파일만 build context에 허용해 GREEN `1 passed`를 확인했다.
+- 검증: Task 5 확대 묶음 `237 passed, 1 skipped, 34 warnings, 31 subtests`; Git 추적 Python 전체 `666 passed, 2 skipped, 86 warnings, 146 subtests`; Web `12/12`; `compileall`, `git diff --check`, 임시 non-secret host path를 사용한 `docker compose config --quiet` 통과. 문자 그대로의 전체 `pytest`는 별도 미완성 Task 6 미추적 테스트에서만 `11 failed`였고 나머지 `666 passed, 2 skipped`였다. 이 fixup은 해당 Task 6 실패를 수정하거나 완료로 주장하지 않는다.
+- 현재 tracked evaluator summary는 ADOPTED 결과가 아니므로 Dense는 계속 비활성이고 구조화 경로의 zero-Dense 및 Sparse fallback은 보존된다. Docker image build, sidecar network identity, 600-case provider 평가, NCP staging/production 배포는 실행하지 않았고 PASS를 주장하지 않는다.
+
+## 2026-09-03 — Judge Stress V2 Task 6 claim-level verification
+
+- 시각: `2026-09-03T05:21:31+09:00` / `2026-09-02T20:21:31Z`. 검토 완료된 Task 5 커밋 `39649d3dd696ba156700cf80aa65d4515d56bd08`에서 시작했다. Task 5의 `dense_client.py`, `freeform_evaluation.py`, `evidence_service.py`, `disclosure_tools.py`는 수정하지 않았고 credential, `.env`, PEM, D-drive 원본·live overlay/index, provider, Docker, NCP에도 접근하거나 변경하지 않았다.
+- TDD RED/GREEN: 최초 claim suite는 `11 failed`였다. claim admission이 중첩 기간 mapping을 별도 synthetic fact로 노출하는 문제, legacy 최종 payload, 미등록 14자리 숫자, unknown citation과 invented 접수번호의 기존 기대를 strict fail-close 계약에 맞춰 원인별로 수정했다. 새 11개 claim 테스트가 GREEN이 된 뒤 exact KRW fallback의 `1,234,567원` 보존, direct/routed provider claim contract 전달, 선언 배열 밖의 `NaN`/`Infinity` 우회를 추가 RED로 고정하고 최소 구현으로 통과시켰다.
+- 구현 계약: private `submit_grounded_answer`는 `claims`, `limitations`, citation/fact/calculation/slot/numeric refs를 요구한다. 서버는 Tool 결과에서 admission을 만들고 모든 citation과 slot 소유권, 모든 본문 숫자의 finite `Decimal` 일치, 계산 재연산과 전체 피연산자 evidence, 정책 및 bounded conclusion 일치를 검증한다. 미등록·혼합 support나 검증 실패 시 provider 문장을 절대 재사용하지 않고 admitted 구조화 fact/계산으로 fallback하거나 generic/bounded 판단을 보류한다. bounded 결론은 response metadata와 Tool data에서 항상 동일하게 유지한다.
+- 공개 호환성과 추적: public Tool은 정확히 5개이며 기존 Function Calling 최상위 필드는 유지된다. 추가 `claim_support`, `limitations`, `verification_trace`만 metadata에 들어간다. trace는 schema version, 결과, claim 개수, 검증 개수, 고정 5개 check와 stable failure code로 제한되며 prompt, raw evidence, provider content, credential, 내부 chain-of-thought를 포함하지 않는다.
+- 검증: controller focused `60 passed, 6 subtests`; Task 6 핵심 focused `53 passed`; runtime/public/safety 확대 묶음 `92 passed, 1 skipped`; 전체 Python `678 passed, 2 skipped, 86 warnings, 146 subtests`; Web `12/12`; `compileall`과 `git diff --check` 통과. warnings는 기존 FastAPI `on_event` deprecation이고 skips는 기존 optional 환경 항목이다. 실제 HCX/provider, 600-case 평가, Docker image, NCP staging/production 배포는 실행하지 않았고 PASS로 주장하지 않는다.
+
+## 2026-09-03 — Judge Stress V2 Task 7 automated execution harness
+
+- 시각: 시작 `2026-09-03T05:43:01+09:00` / `2026-09-02T20:43:01Z`, 최종 검증 `2026-09-03T05:49:43+09:00` / `2026-09-02T20:49:43Z`. Task 6 최종 재리뷰 승인 HEAD `75ae106` 위에서 Task 7 전용 코드·테스트·산출물을 구현했다. credential, `.env`, PEM, D-drive 원본·live overlay/index, provider, Dense sidecar, Docker, NCP에는 접근하거나 변경하지 않았다.
+- TDD: 새 execution module 부재 RED, CLI 부재 RED, summary의 blockers/run metadata 미지원 RED `7 failed`, provider probe contract 변조 미검출 RED, malformed observation과 restart 미실행 RED `2 failed`, fake fault adapter 부재 RED, hidden provider `252 != 120` RED, non-release runtime 메타데이터 RED `7 failed`, HTML의 contract-harness 표식 부재 RED를 각각 확인했다. 독립 리뷰가 `JudgeObservation` 인스턴스의 malformed typed field 검증 우회를 찾아 추가 RED로 재현했고, mapping과 dataclass가 동일한 runtime validation을 통과하도록 수정했다. 최종 Task 7 focused suite는 `42 passed`, legacy stress 포함 focused suite는 `61 passed`였다.
+- lane/probe 계약: structured와 alias/period/correction은 deterministic, development free-form/multi-evidence는 retrieval precheck, policy는 guard, holdout free-form/multi-evidence만 provider, 나머지는 concurrency/fault lane이다. hidden provider는 새 root 120개가 아니라 holdout root `42`개(24+18)에서 파생한 `judge-probes-v1` observation `120`개다. private 원문이 없으면 이를 생성·실행하지 않는다.
+- 검증 경계: 한국어/영어·오타·JSON·순서 probe의 answerability, finite Decimal, unit, scope, conclusion, citation set을 비교한다. 직접·간접·Base64·URL·zero-width 주입, prompt/key 추출, SQL/XSS, nonexistent issuer/fact/period와 wrong issuer/version/unit/scope는 policy guard에서 provider를 호출하지 않는다. provider timeout/429/5xx/malformed, Dense unavailable/malformed, restart identity는 in-memory fault adapter로 검사하고 raw 오류 본문을 폐기한다.
+- 산출물: ignored `eval/judge_stress_v2/results.jsonl`과 `failures.jsonl`, tracked JSON/HTML은 allowlist field만 쓴다. raw question/answer/provider body/prompt/decoded payload/secret은 기록하지 않는다. manifest SHA-256과 600 root·480/120 split은 변경하지 않았다.
+- 실제 로컬 실행: development root `480/480` contract check 통과, failure/evaluator/security/concurrency/provider/forbidden-provider call은 모두 `0`이었다. 20-request contract concurrency p95는 tracked summary에 기록했다. `ContractJudgeRuntime`은 평가 계약 하네스이지 앱 정확도 runtime이 아니므로 `runtime_release_eligible=false`, `PARTIAL`, `BLOCKED_PRIVATE_HOLDOUT`, `BLOCKED_PROVIDER`, `non_release_runtime`, provider p95 미측정, `hard_gate_passed=false`로 기록했다.
+- 검증: Task 7 focused `42 passed`; Task 7+legacy stress `61 passed`; 전체 Python `706 passed, 2 skipped, 86 warnings, 146 subtests`; Web `12/12`; `python -m compileall -q src scripts tests`와 worktree/staged `git diff --check` 통과. 최초 독립 리뷰 차단 1건은 위 RED/GREEN으로 해소했고, 범위 재리뷰는 `APPROVED`였다.
+
+## 2026-09-03 — Judge Stress V2 Task 8 fail-closed release gate
+
+- 시각: 최종 통합 검증 `2026-09-03T07:07:59+09:00` / `2026-09-02T22:07:59Z`. Task 7 문서 HEAD `0e4e5b3`에서 시작했다. credential, `.env`, PEM, D-drive 원본·live overlay/index, NCP 보안 설정과 공개 서버는 읽거나 변경하지 않았고 실제 Docker/SSH/SCP/NCP 배포도 실행하지 않았다.
+- 통합 gate: 856개 재무 결과, 원시 Judge 600 case, numeric exactness, claim citation coverage, answerability/metamorphic consistency, Recall@20, 20-request concurrency, 120 provider observations, 보안 카운터, freshness와 commit/image/base/overlay/search identity를 독립 재계산한다. 상위 PASS boolean·집계 숫자를 신뢰하지 않으며 raw 결과 누락·중복·불완전·NaN/Inf·stale·trust-anchor 불일치는 모두 차단한다.
+- staging 검사: 실제 응답에서 숫자·모든 citation·issuer/filing·정책·secret을 재검사한다. `error`/`invalid`/`abstained`는 동시성 실패이고, NFKC·zero-width·circled/fullwidth·hex·한글 숫자와 매수/매도 권유 동의어 우회를 회귀로 고정했다. 내부 chain-of-thought, 질문·답변 원문, provider body, credential은 tracked JSON/HTML에 기록하지 않는다.
+- 배포 계약: PowerShell 스크립트가 gate schema/state/identity와 27개 metric의 타입·임계값을 외부 명령 전에 다시 검증한다. 원격 경로 traversal, rollback image 부재, image/mount 불일치를 fail-closed로 거부한다. agent image는 한 번만 build/save/hash하고 8001/8000 모두 `--no-build`로 같은 image ID를 사용하며 보호 mount는 `RW=false`여야 한다.
+- TDD/리뷰: 변조된 빈 PASS, 상위 집계 위조, 미참조 wrong citation, 20개 error 응답, 추천·Unicode 우회, 경로 traversal, rollback 성공 오판을 각각 RED로 재현한 뒤 최소 수정했다. 평가 gate와 배포 경로의 최종 독립 재리뷰는 모두 `APPROVED`였다.
+- 검증: Task 8 focused `181 passed, 94 subtests`; 전체 Python `868 passed, 2 skipped, 86 warnings, 240 subtests`; Web `12/12`; compileall/diff 통과. 경고는 기존 FastAPI `on_event` deprecation이며 optional skip 2건은 기존 환경 항목이다.
+- 현재 판정: [release gate JSON](../data/derived/release_gate_summary.json)은 `BLOCKED_HARD_GATE`, `hard_gate_passed=false`, 차단 사유 34개다. 원시 600-case 결과·staging security observations·trusted deployment identity가 없고 provider `0/120`, provider p95 미측정, Recall@20 `0.487179... < 0.95`, 재무/검색 보고서가 release freshness 기준상 stale이다. 기준은 낮추지 않았으며 8001/8000 승격을 실행하지 않았다.
+
+### Task 8 post-commit whole-branch review fix
+
+- 최초 Task 8 커밋 `c7d1631` 뒤 전체 브랜치 독립 리뷰가 상위 집계값 위조, staging 평가와 PASS gate의 순환 의존, commit 이후 고정 HEAD test를 발견했다. 후속 공격 리뷰에서는 raw per-case p95, 실제 HCX 실행 표지, untracked build input과 `/health` identity 결속도 추가로 재현했다.
+- gate는 answerability, metamorphic consistency, provider/concurrency 호출·오류·latency, Recall@20과 보안 수치를 원시 case/observation에서 다시 계산한다. per-result provider/concurrency p95도 같은 case의 완전한 원시 latency 집합과 일치해야 하며 누락·NaN/Inf·음수·초과·불일치는 차단한다. provider 호출은 lane 이름이 아니라 응답 metadata의 `provider_configured=true`와 `final_generation_called=true`가 함께 관측된 경우만 센다.
+- staging은 최종 PASS를 선행 조건으로 사용하지 않는다. 최신 financial/retrieval/Judge 입력과 외부 commit/data trust anchor를 검증한 pre-stage만으로 정확한 `ExpectedCommit` Git archive를 build context로 만들고, hash-trusted retrieval summary만 별도 추가한다. 작업 디렉터리의 tracked dirty/untracked `src`·`config`는 이미지에 들어갈 수 없다.
+- 후보는 8001에서만 `--no-build`로 실행한다. evaluator는 실제 `/health.identity`의 commit/image/base/overlay/search 값을 외부 trust anchor와 평가 전후 대조하고 sanitized 600-case 결과를 만든다. 그 결과로 최종 gate를 다시 계산한 뒤에만 별도의 production 스크립트가 8000을 변경할 수 있다. staging 스크립트에는 production 변경 경로가 없다.
+- TDD: post-commit HEAD 실패 `1 failed, 822 passed`, aggregate 우회 `14 failed`, circular-flow `3 failed`, identity/provider/raw-latency 우회와 최종 per-result p95 `6 failed`를 각각 재현했다. 최종 targeted 독립 재리뷰는 `APPROVED`; 실제 외부 Docker/SSH/NCP/provider는 호출하지 않았다.
+
+## 2026-09-03 — providerless structured answer QA hardening
+
+- 시각: `2026-09-03T08:50:15+09:00` / `2026-09-02T23:50:15Z`. 기준 커밋은 `fbe5305`다. D 드라이브 base DB, live overlay와 search index는 read-only 조회로만 사용했고 credential, `.env`, PEM, NCP 보안 설정은 변경하지 않았다.
+- 원인: `HcxFunctionCallingService.answer()`가 결정론적 structured route를 이미 확정한 뒤에도 provider 설정 여부를 Tool 실행보다 먼저 검사했다. 따라서 DB에 검증된 삼성전자 수치가 있어도 HCX key가 없으면 `provider_unavailable`로 종료됐다. provider는 설명 문장화에만 필요하고 정형 조회·Decimal 계산에는 필요하지 않다는 기존 설계와 어긋났다.
+- TDD: provider 미설정 단일 fact, `SM엔터테인먼트 → 에스엠`, 근거 부족, 최신 다중 지표, 기간 차이·증가율을 실패 테스트로 먼저 고정했다. 다중 지표는 같은 사업보고서에 속해도 서로 다른 evidence ID를 claim verifier와 구조화 citation에 모두 보존하고, 렌더링된 접수번호 목록만 중복 제거한다. 계산 답변은 원시 Decimal뿐 아니라 서버가 만든 원화 단위·백분율 표시값도 admission에 등록한 뒤 재계산과 숫자 일치를 검증한다.
+- 안전 경계: provider 미설정 fallback은 deterministic route에서만 동작한다. 근거가 부족하거나 claim/citation/calculation 검증이 실패하면 답하지 않으며, 자유형 질문은 기존처럼 provider 없이 생성하지 않는다. 매수 추천, prompt injection, 연결/별도 모순은 Tool/provider 호출 전에 각각 정책 거절·공격 거절·명확화로 끝난다.
+- 실제 DB QA: 삼성전자 최신 연결 매출액, 에스엠 alias 최신 연결 매출액, 삼성전자 매출액+영업이익, 삼성전자/SK하이닉스 2024 매출 비교, 삼성전자 2023/2025 영업이익 차이·증가율은 모두 `answered`, deterministic execution, claim verification failure `0`이었다. 정책·prompt injection·모순 scope 3건은 모두 `abstained`였다. focused 회귀는 `75 passed, 56 subtests`다.
+- 외부 상태: `http://101.79.31.221:8001/health`는 10초 안에 응답하지 않아 `TaskCanceledException`으로 관측됐다. release gate는 기존 `BLOCKED_HARD_GATE` 34개 사유와 임계값을 그대로 유지했으며 staging/production 배포를 실행하지 않았다.
+- 최초 리뷰 전 전체 회귀: Python `873 passed, 2 skipped, 86 warnings, 240 subtests` (`69.80s`). skip 2건과 FastAPI `on_event` deprecation warning은 기존 환경 항목이다.
+
+### 푸시 전 독립 리뷰 수정
+
+- 시각: `2026-09-03T09:10:32+09:00` / `2026-09-03T00:10:32Z`. 독립 리뷰가 Critical 1건과 Important 2건을 발견해 최초 커밋 `ebc2530`의 즉시 푸시를 중단했다.
+- 숫자 검증 RED: 계산 표시 `37조 340억 7,500만 원`의 구성요소 `340`을 독립적으로 claim하면 잘못된 `340원`도 승인됐다. 원화 표기 전체를 단일 Decimal `37034075000000`으로 복원하고 해당 span의 구성 숫자를 별도 token으로 등록하지 않도록 수정했다. 조작 claim은 `numeric_value_not_grounded`로 폐기되고 안전 fallback만 남는다.
+- 장애 fallback RED: key는 설정됐지만 provider가 timeout/5xx 계열 `HcxFunctionCallingError`를 내면 DB 근거가 있어도 `error`였다. `get_financial_facts`와 재무제표 structured workflow에만 검증된 deterministic fallback을 재사용한다. provider 오류 진단과 `final_generation_called=true`는 보존하며 자유형/다중근거 판단은 fallback 범위에 넣지 않았다.
+- citation RED: 같은 접수번호의 두 evidence ID를 하나의 응답 card로 합치면 staging gate가 두 번째 ID의 filing을 확인할 수 없어 cross-filing으로 차단했다. API `citations`는 evidence ID마다 1:1 card를 제공하고 화면 답변의 접수번호 목록만 중복 제거한다.
+- 검증: 세 반례 최초 `3 failed`; 수정 후 `3 passed`; claim/HCX/staging/runtime 확대 회귀 `117 passed, 56 subtests`. 실제 read-only DB 8종 재실행도 structured 5건 `answered`, 안전 거절 3건 `abstained`, claim verification failure `0`, 모든 `citation_ids`의 card 매핑 일치를 확인했다.
+- 독립 리뷰 수정 후 전체 회귀: Python `875 passed, 2 skipped, 86 warnings, 240 subtests` (`68.76s`).
+
+### 푸시 전 독립 재리뷰 수정
+
+- 시각: `2026-09-03T09:19:37+09:00` / `2026-09-03T00:19:37Z`. 첫 후속 커밋 `5dc846f` 재리뷰에서 Important 2건을 추가로 확인했다.
+- fallback 범위 RED: `financial_change_reason`도 내부적으로 `get_financial_facts`를 사용해 provider 장애 때 증가 원인 대신 단순 숫자를 `answered`로 반환할 수 있었다. fallback 허용 workflow를 `single`, `financial_derived`, `financial_comparison`, `financial_statement_metric`으로 명시하고, 앞의 세 workflow는 실제 Tool이 `get_financial_facts`인 경우로 제한했다. 증가 이유·자유형·다중근거 판단은 provider 실패 시 계속 fail-closed다.
+- 웹 중복 RED: release gate가 evidence별 filing을 검증할 수 있도록 API `citations`를 1:1로 보존한 결과 같은 접수번호 카드가 웹에서 반복됐다. 순수 함수 `uniqueCitationCards`가 화면에 표시할 카드만 접수번호 기준으로 합치며, 원 API 배열과 저장된 evidence ID는 변경하지 않는다.
+- 검증: 두 신규 RED는 Python `1 failed`, Web module export failure `1`로 확인했고 수정 후 Python `1 passed`, Web `8 passed`; 확대 회귀 Python `118 passed, 56 subtests`, Web 전체 `13 passed`; 최종 Python 전체 `876 passed, 2 skipped, 86 warnings, 240 subtests` (`68.68s`)다.
+
+### 푸시 전 독립 재리뷰 수정 2
+
+- 마지막 정적 재리뷰에서 provider 장애 분기에는 workflow allowlist가 적용됐지만 provider 미설정 분기는 여전히 모든 routed 질문에 deterministic fallback을 시도하는 대칭 결함을 찾았다. `financial_change_reason` 무설정 회귀는 구현 전에 `1 failed`였다.
+- `_allows_deterministic_fallback` 단일 함수가 provider 미설정과 provider 장애 경로를 함께 통제한다. 허용되지 않은 route는 key가 없으면 `provider_unavailable`, provider 호출이 실패하면 `error`로 끝나며 숫자 답변을 만들지 않는다.
+- 핵심 대칭 회귀 `4 passed`; 최종 Python 전체 `877 passed, 2 skipped, 86 warnings, 240 subtests` (`74.35s`)다. Web 전체는 `13 passed`로 유지된다.
+
+## 2026-09-03 — stacked PR 생성과 CI 수집 실패 수정
+
+- 시각: `2026-09-03T11:07:45+09:00` / `2026-09-03T02:07:45Z`. 원격 `main`에는 초기 커밋만 있고, 팀원의 `agent/financial-account-catalog-v1 → main` PR #2가 열린 상태였다. `agent/judge-stress-v2 → main`으로 직접 PR을 만들면 기반 200여 커밋이 중복 표시되므로, 후속 22개 커밋만 검토할 수 있도록 `agent/judge-stress-v2 → agent/financial-account-catalog-v1` stacked PR #3을 생성했다.
+- PR: `https://github.com/ksm12030-sudo/mirae-asset-project/pull/3`. PR #3을 먼저 base 브랜치에 병합하면 #2가 전체 변경을 `main`으로 전달한다. #2를 먼저 병합할 경우 PR #3의 base를 `main`으로 바꾸는 것이 통합 경로다.
+- Evidence: 로컬에서는 `PYTHONPATH=src python -m pytest -q`가 `877 passed, 2 skipped, 240 subtests`, Web이 `13 passed`였지만 최초 GitHub Actions run `33706316028`은 collection에서 `numpy`와 `yaml`을 찾지 못해 4 errors로 실패했다. workflow가 `.[agent] pytest httpx`만 설치하면서 Dense 단위 테스트와 compose 계약 테스트도 모두 수집한 것이 원인이다.
+- Finding: 운영 main API의 `[agent]` extra와 `Dockerfile`에 NumPy를 추가하는 것은 기존 런타임 경계를 깨고 불필요한 의존성을 늘린다. CI 테스트 환경에만 현재 검증 버전 `numpy==2.5.2`, `PyYAML==6.0.3`을 설치하고, `[dense]` 전체(FAISS/모델 포함)는 설치하지 않는 최소 변경을 선택했다.
+- TDD: workflow 계약 테스트를 먼저 바꿔 누락 설치 명령으로 `1 failed`를 확인했고, workflow 수정 후 같은 테스트가 `1 passed`로 전환됐다. D 드라이브 원본 DB, live overlay/index, credential, `.env`, PEM, NCP 설정과 운영 이미지는 변경하지 않았다.

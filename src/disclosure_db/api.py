@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 import sqlite3
 import os
 from pathlib import Path
@@ -15,6 +16,11 @@ from .agent_contracts import to_jsonable
 from .calculator import calculate
 from .qa_evaluation import QA_CATEGORIES, QaCaseStore, QaEvaluator
 from .public_limits import PublicLimitSettings, PublicRequestLimiter
+from .input_hardening import (
+    PUBLIC_QUESTION_MAX_CHARS,
+    QuestionInputError,
+    preflight_public_question,
+)
 from .query_planner import plan_query
 
 
@@ -28,6 +34,23 @@ SECURITY_HEADERS = {
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
 }
+
+
+def _validated_as_of(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("as_of_date_invalid") from exc
+    return value
+
+
+def _validated_question(value: str) -> str:
+    try:
+        return preflight_public_question(value)
+    except QuestionInputError as exc:
+        raise ValueError(exc.code) from exc
 
 
 def _fetch_financial_facts(
@@ -153,39 +176,74 @@ def create_app(
         from fastapi import FastAPI, HTTPException, Query
         from fastapi.responses import FileResponse, JSONResponse
         from fastapi.staticfiles import StaticFiles
-        from pydantic import BaseModel, Field
+        from pydantic import BaseModel, Field, field_validator
     except ImportError as exc:  # pragma: no cover - depends on optional deployment extra
         raise RuntimeError("FastAPI is optional; install miraeasset-disclosure-db[agent]") from exc
 
     class QueryRequest(BaseModel):
-        question: str = Field(min_length=1)
+        question: str = Field(min_length=1, max_length=PUBLIC_QUESTION_MAX_CHARS)
         company: str | None = None
-        as_of: str | None = None
+        as_of: str | None = Field(default=None, pattern=r"^20\d{2}-\d{2}-\d{2}$")
         limit: int = Field(default=20, ge=1, le=100)
 
+        @field_validator("as_of")
+        @classmethod
+        def validate_as_of(cls, value: str | None) -> str | None:
+            return _validated_as_of(value)
+
+        @field_validator("question")
+        @classmethod
+        def validate_question(cls, value: str) -> str:
+            return _validated_question(value)
+
     class HcxFunctionCallingRequest(BaseModel):
-        question: str = Field(min_length=1, max_length=2000)
+        question: str = Field(min_length=1, max_length=PUBLIC_QUESTION_MAX_CHARS)
+
+        @field_validator("question")
+        @classmethod
+        def validate_question(cls, value: str) -> str:
+            return _validated_question(value)
 
     class EvalCaseRequest(BaseModel):
         id: str = Field(min_length=3, max_length=100)
-        question: str = Field(min_length=1, max_length=2000)
+        question: str = Field(min_length=1, max_length=PUBLIC_QUESTION_MAX_CHARS)
         category: str
         expected: dict[str, Any] = Field(default_factory=dict)
         forbidden_phrases: list[str] = Field(default_factory=list)
+
+        @field_validator("question")
+        @classmethod
+        def validate_question(cls, value: str) -> str:
+            return _validated_question(value)
 
     class EvalRunRequest(BaseModel):
         ids: list[str] = Field(default_factory=list)
         failed_only: bool = False
 
     class EvalQuickQuestionRequest(BaseModel):
-        question: str = Field(min_length=1, max_length=2000)
+        question: str = Field(min_length=1, max_length=PUBLIC_QUESTION_MAX_CHARS)
+
+        @field_validator("question")
+        @classmethod
+        def validate_question(cls, value: str) -> str:
+            return _validated_question(value)
 
     class ContestQueryRequest(BaseModel):
         question_id: str | None = Field(default=None, max_length=200)
-        question: str = Field(min_length=1, max_length=4000)
+        question: str = Field(min_length=1, max_length=PUBLIC_QUESTION_MAX_CHARS)
         company: str | None = Field(default=None, max_length=200)
         as_of: str | None = Field(default=None, pattern=r"^20\d{2}-\d{2}-\d{2}$")
         limit: int = Field(default=20, ge=1, le=100)
+
+        @field_validator("as_of")
+        @classmethod
+        def validate_as_of(cls, value: str | None) -> str | None:
+            return _validated_as_of(value)
+
+        @field_validator("question")
+        @classmethod
+        def validate_question(cls, value: str) -> str:
+            return _validated_question(value)
 
     class SearchRequest(QueryRequest):
         limit: int = Field(default=20, ge=1, le=100)
@@ -318,6 +376,12 @@ def create_app(
         health_status = runtime_health()
         if not health_status["ready"]:
             raise HTTPException(status_code=503, detail="runtime_not_ready")
+        question = plan_query(
+            question,
+            company_candidates=agent.evidence_service.company_candidates(),
+            company_hint=company,
+            as_of=as_of,
+        ).question
         return agent.answer(
             question,
             company=company,
@@ -351,10 +415,21 @@ def create_app(
 
     def official_answer(
         question_id: str = Query(min_length=1, max_length=200),
-        question: str = Query(min_length=1, max_length=4000),
+        question: str = Query(min_length=1, max_length=PUBLIC_QUESTION_MAX_CHARS),
         company: str | None = Query(default=None, max_length=200),
         as_of: str | None = Query(default=None, pattern=r"^20\d{2}-\d{2}-\d{2}$"),
     ) -> dict[str, str]:
+        try:
+            as_of = _validated_as_of(as_of)
+            question = _validated_question(question)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="question_or_as_of_invalid") from None
+        question = plan_query(
+            question,
+            company_candidates=agent.evidence_service.company_candidates(),
+            company_hint=company,
+            as_of=as_of,
+        ).question
         verified = verified_answer(question, company=company, as_of=as_of)
         citations = list(getattr(verified, "citations", []) or [])[:20]
         context_rows = []
@@ -408,6 +483,10 @@ def create_app(
         limit: int = Query(default=100, ge=1, le=100),
     ) -> dict[str, Any]:
         started = perf_counter()
+        try:
+            as_of = _validated_as_of(as_of)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="as_of_date_invalid") from None
         service = agent.evidence_service
         if not getattr(service, "overlay_database", None):
             return envelope({"facts": [], "reason": "overlay_not_configured"}, started)
@@ -443,6 +522,10 @@ def create_app(
         limit: int = Query(default=100, ge=1, le=100),
     ) -> dict[str, Any]:
         started = perf_counter()
+        try:
+            as_of = _validated_as_of(as_of)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="as_of_date_invalid") from None
         service = agent.evidence_service
         if not getattr(service, "overlay_database", None):
             return envelope({"facts": [], "reason": "overlay_not_configured"}, started)
@@ -461,7 +544,15 @@ def create_app(
 
     def answer(request: QueryRequest) -> dict[str, Any]:
         started = perf_counter()
-        return envelope(agent.answer(request.question, company=request.company, as_of=request.as_of, limit=request.limit), started)
+        return envelope(
+            verified_answer(
+                request.question,
+                company=request.company,
+                as_of=request.as_of,
+                limit=request.limit,
+            ),
+            started,
+        )
 
     answer.__annotations__["request"] = QueryRequest
     app.post("/v1/answer")(answer)

@@ -8,7 +8,11 @@
 
 ## 현재 개발 상태와 인수인계
 
-> **2026-08-25 기준:** 재무계정 카탈로그, chunk-v1, BGE-M3/FAISS pilot 코드, Sparse/Dense/Hybrid retrieval, 5개 Tool Registry, Evidence Gate, HCX Function Calling V1.1, FastAPI runtime 연결과 팀용 Web까지 구현했습니다. 실제 NCP HCX smoke에서 `answered`, `answer_allowed=true`, citation과 DART `rcept_no` 보존을 확인했습니다. 현재 운영 검색은 안전한 Sparse/Structured 경로이며, 전체 corpus Dense embedding과 운영 runtime 연결은 아직 남아 있습니다.
+> **Judge Stress V2 인수인계:** Task 1~8의 로컬 구현과 회귀가 완료되었습니다. Task 8은 원시 case 결과를 재검산하는 통합 release gate와 동일-image 8001→8000 배포/rollback 절차를 구현했지만, 현재 판정은 의도적으로 `BLOCKED_HARD_GATE`입니다. private holdout·실제 staging/provider·신뢰 앵커가 없고 Sparse Recall@20이 `0.487179... < 0.95`이므로 운영 승격은 실행하지 않았습니다. 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)를 읽고 차단 항목을 해소한 뒤 같은 gate를 다시 실행하세요.
+
+> **2026-09-03 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, bounded analysis, 주장 단위 검증, HCX Function Calling V1.1, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결이 구현되어 있습니다. Judge Stress V2의 tracked 코드는 개발 480건만 생성하고, 전체 600건 검증에는 별도 git-ignored private holdout 120건을 요구합니다. 로컬 contract harness는 앱·provider를 호출하지 않으므로 해당 480건 통과를 앱 품질로 해석하면 안 됩니다. 통합 release gate는 누락·stale·비유한 지표, 원시 결과 불일치, identity 불일치와 변조된 PASS 보고서를 fail-closed로 거부합니다.
+
+> **2026-09-03 정형 응답 QA 보완:** HCX credential이 없거나 provider가 일시 중단돼도 결정론적으로 라우팅할 수 있는 재무 수치·기업 비교·기간 증감 질문은 read-only SQLite의 검증된 fact와 citation으로 답합니다. HCX는 이 경로의 도구 선택·계산에 관여하지 않으며, 서버가 만든 답변도 주장 단위 숫자·계산·evidence 검증을 모두 통과해야 노출됩니다. 실제 DB 8종 QA에서 삼성전자 최신값, 에스엠 alias, 다중 지표, 다중 기업, 기간 차이/증가율과 세 가지 안전 거절을 확인했습니다. 이는 private holdout/provider/Dense release gate를 대체하지 않으며, 8001은 외부 health timeout 상태라 배포하지 않았습니다.
 
 ### 현재 한눈에 보기
 
@@ -17,41 +21,90 @@
 → POST /v1/hcx/function-answer
 → HCX가 등록된 Tool 선택
 → ToolRegistry가 argument 검증 후 Tool 실행
-→ EvidenceService / Sparse retrieval / read-only SQLite 조회
+→ EvidenceService / Sparse + 선택적 Dense retrieval / read-only SQLite 조회
 → Evidence 충분성과 실제 rcept_no 검증
 → answer_allowed=true인 경우에만 HCX 최종 답변 생성
 → backend가 검증된 citation과 접수번호를 Web에 반환
 ```
 
-| 영역 | 2026-08-25 상태 | 다음 작업 |
+| 영역 | 2026-09-02 상태 | 다음 작업 |
 |---|---|---|
-| 작업 브랜치 | `agent/financial-account-catalog-v1` | 이 브랜치에서 계속 작업 |
-| 최신 공유 커밋 | `84cbb22` | HCX V1.1·Web·문서 기준점으로 유지 |
+| 작업 브랜치 | `agent/judge-stress-v2` | Task별 독립 commit 유지 |
+| Task 8 기준 커밋 | 커밋 전 기준 `0e4e5b3` | 이 README와 같은 브랜치의 최신 커밋이 최종 기준 |
 | 재무계정 카탈로그 | 구현·테스트 완료 | 신규 계정 추가 시 중앙 카탈로그만 확장 |
 | Embedding Chunk v1 | XML/HTML/PDF, streaming, checkpoint/resume 구현 완료 | 전체 corpus 산출물의 manifest와 count 확인 |
-| Sparse 검색 | 운영 기본 경로, 기존 품질·metadata 정책 유지 | Dense 도입 후에도 fallback으로 유지 |
-| BGE-M3/FAISS | 실제 모델 builder와 10/100개 smoke 계약 구현 | 전체 corpus vector artifact 생성·검증 |
-| Hybrid retrieval | RRF, 중복 제거, filter, Sparse fallback 구현 | 전체 Dense 품질 gate 통과 후 runtime 주입 |
+| Sparse 검색 | 운영 안전 경로, query-time fallback 회귀 통과 | Dense 장애·재시작 평가에서 계속 hard gate로 확인 |
+| BGE-M3/FAISS | full-corpus sidecar와 identity 계약 구현; Compose vector count `2,571,506`은 선언값 | 새 image/runtime manifest와 실제 artifact identity 대조 |
+| Hybrid retrieval | remote Dense adapter, RRF, 중복 제거, filter, query-time Sparse fallback 구현 | cold start/restart fallback과 Dense 품질 gate 측정 |
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
-| HCX Function Calling | V1.1 실제 smoke 성공 | 운영 5종 질문 반복 smoke와 장애율 측정 |
+| HCX Function Calling | V1.1 및 providerless 검증 정형 fallback 구현 | 운영 provider 문장화와 fallback을 각각 반복 smoke |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
-| 테스트 | Python `486 passed, 2 skipped`; Web JS `12 passed` | Dense artifact 준비 후 skip된 통합 테스트 실행 |
+| 테스트 | 최신 전체 Python `877 passed, 2 skipped, 240 subtests`; Web JS `13 passed` | private/provider 600건과 실제 staging identity 평가 |
+| Release gate | `BLOCKED_HARD_GATE` (34개 사유) | 차단 사유를 해소한 동일 입력으로만 재평가; 임계값 완화 금지 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
 ### 현재 품질 경계
 
-- 독립 free-form 기준선의 Sparse Recall@20은 `0.487179...`이며 목표 `0.95`보다 낮습니다.
-- residual text가 있어 Dense pilot 실행 자격은 있지만, 전체 Dense gain과 latency를 아직 측정하지 않았습니다.
-- 현재 Dense 상태는 `smoke_only`이고 Function Calling runtime에는 `HybridRetriever(sparse, None)`으로 주입됩니다.
-- 따라서 지금 서비스가 전체 corpus 의미 검색 성능을 확보했다고 주장하면 안 됩니다.
+- 기존 독립 free-form 평가의 Sparse Recall@20 `0.487179...`는 과거 기준선이며 이번 Task 1에서 재측정하지 않았습니다.
+- Compose/NCP 관측에는 full-corpus Dense가 연결되어 있지만, 새 identity contract가 포함된 image는 아직 build/deploy되지 않았습니다.
+- Dense 채택 조건인 Sparse 대비 Recall@20 `+5%p`, wrong issuer/version `0`, p95 `2초` 이하는 모두 `UNVERIFIED`입니다. 따라서 전체 corpus 의미 검색 성능을 확보했다고 주장하지 않습니다.
+- missing/invalid/empty Dense 결과와 sidecar 통신 실패는 로컬 회귀에서 Sparse로 fallback합니다. 다만 Compose의 agent cold start는 현재 Dense `service_healthy`에 의존하므로 cold-start fallback은 `UNVERIFIED`입니다.
+- 배포는 두 단계입니다. pre-stage는 정확한 Git commit archive와 별도 hash-trusted retrieval 보고서로 후보 이미지를 한 번 build해 8001에만 올립니다. 실제 `/health.identity`, read-only mount와 600-case/provider 평가를 거쳐 최종 release gate가 PASS한 경우에만 별도 스크립트가 같은 image를 8000에 승격합니다. 현재 보고서는 BLOCKED이므로 어느 배포 단계도 실행되지 않았습니다.
+- `[agent]` extra와 기본 `Dockerfile`에는 NumPy를 선언하지 않고, `Dockerfile.dense`가 설치하는 `[dense]` extra에만 `numpy==2.5.2`를 고정했습니다. Docker engine을 사용할 수 없어 실제 image package inventory는 `BLOCKED_ENVIRONMENT`입니다.
+- Dense startup은 FAISS/metadata SHA-256, 전 vector의 L2 norm, 실제 FAISS metric/type, 그리고 mounted model 전체 파일 SHA-256을 먼저 검증합니다. 통과한 Python/NumPy/FAISS/model revision/vector count·dimension/index identity만 `/runtime/dense_runtime_manifest.json`과 sidecar `/health`에 동일하게 기록합니다. 기존 health 필드는 유지됩니다.
+- 모델 identity는 live/read-only mount 안에서 임의 생성하지 않습니다. staging 모델 복사본에서 `$env:PYTHONPATH='src'; python scripts/build_dense_model_identity.py --model-path <staging-model-dir> --output <staging-model-dir>/model_identity.json`으로 생성하고 검토한 뒤, 그 디렉터리 전체를 read-only로 mount합니다.
+- 이 builder의 신뢰 루트는 로컬 Hugging Face cache가 돌려준 정확한 commit snapshot입니다. 로컬 cache 자체의 공급망 진위까지 증명하려면 별도 서명·upstream hash 정책이 필요하며 현재 release gate의 후속 항목으로 남았습니다.
 - 원본 base DB, overlay, search SQLite는 계속 read-only로 유지합니다.
 - HCX credential, `.env`, SQLite, chunk JSONL, FAISS index와 모델 파일은 Git에 올리지 않습니다.
+
+### Judge Stress V2 600건 suite
+
+Task 2는 기존 300건 stress와 856건 financial release regression을 수정하지 않고 별도 600건 계약을 만들었습니다. 구성은 structured 120, alias/period/correction 90, free-form 120, multi-evidence judgment 90, policy/adversarial 90, API/concurrency 60, fault 30이며 development 480과 hidden holdout 120으로 나뉩니다. tracked 생성기는 audited source에서 development 480만 재현합니다. 실제 holdout 질문·oracle·선정값·paraphrase/template family는 git-ignored private evaluator 입력으로만 존재하며, 입력이 없으면 builder는 개발 파일을 만든 뒤 `BLOCKED_PRIVATE_HOLDOUT`으로 종료합니다.
+
+tracked [manifest](data/derived/judge_stress_v2_manifest.json), [JSON summary](data/derived/judge_stress_v2_summary.json), [standalone HTML summary](data/derived/judge_stress_v2_summary.html)에는 case/group ID, SHA-256, 분류별 수량과 재현 메타데이터만 있습니다. underlying audited source facts는 추적되지만 exact hidden 질문·oracle·private selection은 추적되지 않습니다. raw development도 plan상 tracked 산출물이 아니며 holdout과 함께 `eval/judge_stress_v2/` 아래에서만 다룹니다. 실제 split은 issuer, 독립 document group, 독립 question-template family, source group, exact question hash가 모두 겹치지 않아야 합니다. 애플리케이션 runtime은 evaluator module이나 raw artifact를 import하지 않습니다. Task 7의 provider-free 실행은 `ContractJudgeRuntime`이라는 contract harness로 development root `480/480`을 검사했을 뿐 실제 앱/provider 정확도 평가는 아닙니다. summary는 `runtime_release_eligible=false`, `status=PARTIAL`, `release_state=BLOCKED`이고 `non_release_runtime`, `BLOCKED_PRIVATE_HOLDOUT`, `BLOCKED_PROVIDER`를 hard-gate 사유로 보존합니다.
+
+Task 7 probe 계약은 한국어/영어 재표현, 유일 오타, JSON/순서 변경, 직접·간접·Base64·URL·zero-width 주입, prompt/key 추출, SQL/XSS, 존재하지 않는 사실과 issuer/version/unit/scope 오염, provider/Dense 장애와 restart identity를 다룹니다. hidden provider 대상은 새 root 120개가 아니라 기존 holdout의 free-form `24`개와 multi-evidence `18`개, 총 root `42`개에서 파생되는 versioned probe observation `120`개입니다. private 원문이 없으면 이 120개를 합성하거나 실행하지 않습니다. 결과와 HTML에는 질문·답변·provider body·prompt·credential을 저장하지 않습니다.
+
+Reporter는 manifest 선언을 신뢰하지 않고 매번 600개 unique row, development/holdout `480/120`, 전체 및 split별 exact category allocation, row split/category, unique case ID와 canonical `suite_sha256`을 다시 검증합니다. Privacy 범위는 exact authored private 질문과 private rubric ID가 개발 코드/추적 산출물에서 조회·재구성되지 않는다는 뜻입니다. 공개 issuer/fact provenance나 공개 DB 사실 답변까지 암호학적으로 숨긴다는 주장은 하지 않으며, 유한한 공개 corpus의 hashed group ID는 대조 가능할 수 있습니다. pre-paraphrase 질문이나 공개 fact를 재구성하는 것은 evaluator가 보관하는 exact private holdout 원문과 동일하지 않습니다.
+
+### Task 3 입력·routing 계약
+
+공개 질문 필드는 `/query`, GET `/answer`, query/evidence/answer alias, HCX Function Calling, 공개 eval API에서 정확히 2,000자까지 허용하고 2,001자는 validation error로 거부합니다. 내부 Dense sidecar의 별도 제한은 변경하지 않았습니다. 질문은 공통 NFKC·공백·제로폭 정규화를 거치며, 회사명은 고정 `financial_company_universe.json`과 명시적 `company_aliases.json`에 있는 이름·영문명·종목코드만 대소문자 구분 없이 사용합니다. 임의 alias는 추론하지 않고, 한 글자 교정도 후보가 하나일 때만 적용합니다.
+
+여러 회사·연도·structured 재무계정은 company × period × metric 요구사항으로 분리되어 모두 충족되어야 답변합니다. 존재하지 않는 날짜, 연결/별도 충돌, 의미를 바꾸는 중복 비교 기간은 provider나 Tool 호출 전에 결정론적으로 거부합니다. URL/percent, Base64, Unicode·공백 변형과 한·영·중·일 등 등록된 다국어 prompt-injection 표지는 최대 공개 질문 길이 안에서 탐지만 하며, 복호화 문자열은 Tool 인자·provider prompt·공개 응답에 전달하지 않습니다. 기존 투자 추천 거부 우선순위와 공개 Tool 5개는 유지합니다. Python 전체와 Web `12/12`는 로컬 통과했지만 Docker/NCP/live/provider 또는 600건 실제 실행 결과는 아닙니다.
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path -LiteralPath 'src').Path
+# 일반 개발 build: development.jsonl 480건 생성 후 private 입력 부재를 명시적으로 차단
+python scripts/build_judge_stress_v2.py
+
+# evaluator 보유 환경에서만 전체 600건 검증/manifest 재생성
+python scripts/build_judge_stress_v2.py `
+  --private-holdout <git-ignored-private-holdout.jsonl>
+
+# evaluator가 case ID별 결과 metadata를 만든 뒤 JSON/HTML 재생성
+python scripts/evaluate_judge_stress_v2.py `
+  --manifest data/derived/judge_stress_v2_manifest.json `
+  --results eval/judge_stress_v2/results.jsonl `
+  --json-summary data/derived/judge_stress_v2_summary.json `
+  --html-summary data/derived/judge_stress_v2_summary.html
+
+# 로컬에서 가능한 development 480개 계약·공격·장애·동시성 검사
+# 실제 provider 품질 PASS가 아니며 private/provider 부재를 BLOCKED로 남깁니다.
+python scripts/run_judge_stress_v2.py `
+  --repository-root . `
+  --manifest data/derived/judge_stress_v2_manifest.json `
+  --results eval/judge_stress_v2/results.jsonl `
+  --failures eval/judge_stress_v2/failures.jsonl `
+  --json-summary data/derived/judge_stress_v2_summary.json `
+  --html-summary data/derived/judge_stress_v2_summary.html
+```
 
 ### 다음 작업자가 시작하는 순서
 
 ```powershell
 git fetch origin
-git switch agent/financial-account-catalog-v1
+git switch agent/judge-stress-v2
 git pull --ff-only
 $env:PYTHONPATH = 'src'
 .\.venv\Scripts\python.exe -m pytest -q
@@ -180,8 +233,18 @@ read-only SafeSearch를 재사용해 5개 Tool Registry를 조립합니다. 기�
 실제 local credential로 5개 Function schema, HCX Tool Call, Registry argument schema 호환 smoke는
 통과했습니다. NCP의 Sparse/Structured 실제 smoke에서도 `answered`, `answer_allowed=true`, 구조화된
 `citations[].rcept_no` 보존을 확인했습니다.
-Dense도 여전히 100개 `smoke_only`이고
-전체 embedding artifact는 준비되지 않았습니다. 상세 계약은
+
+Judge Stress V2 Task 6부터 HCX 최종 생성은 claim 단위의 추가 계약을 사용합니다. 기존 최상위
+응답 필드는 그대로 유지하면서 `metadata.claim_support`, `metadata.limitations`,
+`metadata.verification_trace`를 추가합니다. 각 claim의 citation·evidence slot·DB fact·Decimal 계산
+참조와 본문 숫자가 모두 일치할 때만 HCX 문장을 반환합니다. 미등록 citation, 다른 slot의 근거,
+누락된 계산 피연산자, 알 수 없는 숫자, `NaN`/`Infinity`, 허용 범위 밖 결론이 하나라도 있으면 해당
+HCX 문장은 폐기되고 검증된 구조화 fact/계산으로 결정론적 답변을 만들거나 답변을 보류합니다.
+검증 추적은 고정된 상태·개수·검사 결과·사유 코드만 공개하며 prompt, 원문 evidence, provider
+content, 숨은 사고과정은 포함하지 않습니다.
+현재 runtime composition은 환경에 Dense URL이 있으면 remote full-corpus sidecar를 사용하고,
+query-time Dense 실패에는 Sparse 결과를 유지합니다. Task 1의 runtime manifest/health identity는 로컬 계약만
+검증됐고 새 Docker image 및 NCP runtime에서는 아직 확인하지 않았습니다. 상세 계약은
 [Tool Registry v1](docs/tool-registry-v1.md)과
 [HCX Function Calling 설계](docs/superpowers/specs/2026-08-23-hcx-function-calling-design.md)를 따릅니다.
 

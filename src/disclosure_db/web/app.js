@@ -8,6 +8,7 @@ import {
   evidenceStatus,
   evidenceStatusLabel,
   loadingLabel,
+  uniqueCitationCards,
 } from "/static/api.js";
 import {
   appendMessage,
@@ -142,7 +143,8 @@ function renderCitation(citation, index) {
 }
 
 function renderCitations(parent, citations) {
-  if (!Array.isArray(citations) || citations.length === 0) {
+  const displayed = uniqueCitationCards(citations);
+  if (displayed.length === 0) {
     return;
   }
   const section = document.createElement("section");
@@ -150,12 +152,12 @@ function renderCitations(parent, citations) {
   const heading = document.createElement("div");
   heading.className = "citation-heading";
   addText(heading, "h4", "", "근거 공시");
-  addText(heading, "span", "", `${citations.length}건의 검증된 citation`);
+  addText(heading, "span", "", `${displayed.length}건의 검증된 공시`);
   section.append(heading);
 
   const list = document.createElement("ol");
   list.className = "citation-list";
-  citations.forEach((citation, index) => list.append(renderCitation(citation, index)));
+  displayed.forEach((citation, index) => list.append(renderCitation(citation, index)));
   section.append(list);
   parent.append(section);
 }

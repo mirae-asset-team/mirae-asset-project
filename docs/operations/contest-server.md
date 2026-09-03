@@ -266,6 +266,85 @@ NCP 계정, public IP, ACG, 데이터 볼륨, 외부 네트워크가 확인되�
 provider smoke와 300-case 평가를 통과하기 전까지 최종 제출 상태는 **NO-GO**다. 이 gate를
 낮추거나 deterministic 결과로 대체하지 않는다.
 
+## Fail-closed release deployment
+
+배포는 순환 의존을 막기 위해 두 단계로 실행한다. `scripts/deploy_staging.ps1`은 최종
+`release-gate-summary-v1`을 입력으로 요구하지 않는다. 대신 외부에서 전달한 full commit과
+세 data SHA-256을 trust anchor로 삼아 최신 financial 856건, retrieval Recall@20 95%,
+Judge 480+120 입력을 각각 재검사한다. 이 **pre-stage** 결과는
+`stage_state=READY_FOR_STAGING`, `final_release_passed=false`이며 최종 PASS나 production 승인을
+뜻하지 않는다. 현재 저장소의 stale/Recall 미달 보고서는 이 단계에서 **BLOCKED**되고 Docker
+build, SSH, SCP를 실행하지 않는다.
+
+pre-stage를 통과하면 `ExpectedCommit`의 `git archive`에서 Dockerfile과 모든 tracked
+`src`·`config`·`eval` build input을 임시 context로 추출한다. 현재 working tree를 재귀 복사하지
+않으므로 tracked 수정과 untracked/ignored 파일은 이미지에 들어갈 수 없다. 유일한 별도 입력인
+retrieval 보고서는 운영자가 전달한 `ExpectedRetrievalReportSha256`과 일치해야 하며, build
+context와 배포 묶음에 넣은 뒤에도 같은 hash를 다시 확인한다. private holdout은 Git archive,
+build context, image, 배포 archive 어디에도 복사하지 않는다. agent 이미지는 정확히 한 번 build하고 archive/hash를 만든 다음, 서버에서
+`docker compose ... up --no-build`로 8001에만 기동한다. 이때 DB·overlay·search·attestation과
+Dense data/model mount가 `RW=false`인지, 컨테이너 image ID와 서버 data hash가 trust anchor와
+같은지 검사한다.
+
+그 다음 로컬의 bounded evaluator가 실제 8001에만 요청한다. 요청별 timeout과 응답 크기를
+제한하고, development 480건과 Git-ignored private holdout 120건, concurrency 20, 필수
+security/provider 관측을 수행한다. `staging_evaluation.json`에는 case/hash/metric/counter만
+남기며 원 질문, 답변, provider 응답, credential은 남기지 않는다. 평가 전후 실제 8001
+`/health.identity`는 `commit`, `image_id`, `base_sha256`, `overlay_sha256`,
+`search_index_sha256` 다섯 필드만 허용하며 외부 trust anchor와 정확히 일치해야 한다. 필드가
+없거나 더 있거나 값이 다르면 즉시 실패한다. evaluator가 local trust 값을 runtime identity로
+덮어쓰지 않으며, 평가가 끝난 뒤 서버 내부 localhost `/health` identity hash와 컨테이너 image,
+세 data hash를 다시 묶어 검사해 endpoint 또는 자산이 평가 도중 교체되지 않았음을 확인한다.
+현재 API의 `/health`가 이 identity 계약을 제공하지 않으면 staging은 의도적으로 fail-closed되며
+production 승격 근거를 만들 수 없다.
+
+마지막으로 `scripts/evaluate_release_candidate.py`가 external trust anchor, financial,
+retrieval, 방금 생성한 staging 결과로 최종 gate를 재계산한다. 여기서 생성된
+`release-gate-summary-v1`이 `hard_gate_passed=true`, `release_state=PASS`, 실제 빈
+`hard_gate_reasons=[]`일 때만 별도의 `scripts/deploy_release.ps1` 입력으로 사용할 수 있다.
+staging 스크립트 자체는 8000을 변경하지 않으며 출력의 `production_promoted=false`도 이를
+명시한다.
+
+PASS 표시 자체는 신뢰하지 않는다. `hard_gate_reasons`는 JSON `null`이 아닌 실제 빈 배열이어야
+하며, 27개 필수 metric을 각각 숫자 타입인지 확인한 뒤 계약의 exact/minimum/maximum 기준을
+스크립트가 다시 검사한다. `metrics={}`, 필드 누락, 숫자 모양 문자열, `NaN`/무한대 및 임계치
+위반은 모두 외부 명령 전에 거부한다. `evaluated_at_utc`와 네 source timestamp는 UTC offset이
+있는 ISO-8601이어야 하며 24시간 freshness와 5분 future skew를 만족해야 한다. Windows
+PowerShell 5.1의 문자열 역직렬화와 PowerShell 7의 `DateTime` 역직렬화를 모두 허용하되 같은
+시간·freshness 규칙을 적용한다.
+
+최종 승인 보고서의 `identity`에는 full Git commit, staging에서 실제 build·inspect한 Docker
+`sha256:` image ID와 아래 3개 SHA-256이 있어야 한다. 명령행 trust anchor와 한 항목이라도
+다르면 production을 변경하지 않는다.
+
+| Identity field | 실제 검증 대상 |
+|---|---|
+| `base_sha256` | `/srv/mirae/data/base/disclosure.sqlite` |
+| `overlay_sha256` | `/srv/mirae/data/agent/agent_overlay.sqlite` |
+| `search_index_sha256` | `/srv/mirae/data/agent/agent_search.sqlite` |
+
+배포 묶음에는 image archive, release compose, `pre_stage_attestation.json`과 Dockerfile이
+요구하는 `data/derived/freeform_retrieval_summary.json`만 포함한다. private holdout과 최종 gate는
+포함하지 않는다. 최종 gate는 8001 평가 후 로컬 artifact directory에만 생성한다.
+
+Production 승격은 8001에서 검사된 것과 **동일한 image ID**가 실행 중일 때만 시작한다.
+기존 8000 image에는 UTC·image ID가 포함된 고유 rollback tag를 붙이고, 전환 전에 rollback
+archive와 SHA-256을 생성해 `0444`로 만든다. 이후에도 `--no-build`로 정확히 같은 후보 image를
+8000에 지정한다. image identity, mount 또는 `/health`·공개 루트 smoke가 실패하면
+`deploy_release.ps1`의 catch 경로가 `Invoke-Rollback`을 호출하여 이전 image를 다시 기동하고
+rollback smoke까지 확인한다.
+
+두 스크립트는 credential, `.env`, PEM 내용을 읽거나 수정하지 않는다. SSH 인증 수단과
+provider secret은 실행 환경이 별도로 제공하며 Git·배포 archive·출력에 포함하지 않는다.
+실제 호출은 PASS 보고서와 세 data identity, full commit, image ID를 확보한 운영자가
+명시적으로 실행할 때만 허용한다.
+
+`RemoteDirectory`와 `RollbackDirectory`는 canonical absolute Unix path만 허용한다. `.`·`..`
+component, 중복 `/`, trailing `/`가 있으면 경로 순회 가능성이 있으므로 배포를 시작하지 않는다.
+rollback tag/image가 없거나 rollback 컨테이너가 없거나 활성 image ID가 rollback image ID와
+다르거나 `/health.ready` 및 공개 루트 smoke 중 하나라도 실패하면 rollback도 실패로 처리한다.
+rollback 검증 실패를 성공으로 바꾸거나 원래 promotion 오류를 숨기지 않는다.
+
 ## Diagnosis and rollback
 
 - `/health.ready=false`: base identity, attestation, overlay match, search-index revision을

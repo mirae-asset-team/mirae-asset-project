@@ -7,6 +7,7 @@ import math
 import os
 import sqlite3
 import time
+import unicodedata
 from contextlib import closing
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -34,10 +35,30 @@ from .reranker import ClovaReranker
 from .search_index import rrf_fuse
 
 
-_PROMPT_INJECTION_MARKERS = (
-    "ignore previous", "ignore all previous", "system prompt", "developer message",
-    "이전 지시를 무시", "지시를 무시", "시스템 프롬프트",
+_INSTRUCTION_LIKE_EVIDENCE_MARKERS = (
+    "ignore previous", "ignore all previous", "ignore all instructions",
+    "disregard previous", "system prompt", "system message", "developer message",
+    "developer instructions", "follow these instructions", "you are chatgpt",
+    "<system>", "[system]", "이전 지시를 무시", "지시를 무시",
+    "시스템 프롬프트", "개발자 메시지", "개발자 지침",
 )
+
+
+def evidence_text_is_admitted(text: object) -> bool:
+    """Reject instruction-like corpus text before it reaches any public model context."""
+
+    normalized = unicodedata.normalize("NFKC", str(text or ""))
+    normalized = "".join(
+        character
+        for character in normalized
+        if unicodedata.category(character) not in {"Cc", "Cf"}
+    )
+    normalized = " ".join(normalized.split()).casefold()
+    compact = "".join(normalized.split())
+    return not any(
+        marker in normalized or "".join(marker.split()) in compact
+        for marker in _INSTRUCTION_LIKE_EVIDENCE_MARKERS
+    )
 
 
 def _readonly_connection(database: Path) -> sqlite3.Connection:
@@ -70,7 +91,11 @@ class EvidenceService:
         self.attestation = attestation
         self.search_database = Path(search_database) if search_database else None
         self.reranker = reranker
-        self.dense_client = dense_client if dense_client is not None else DenseSearchClient.from_environment()
+        self.dense_client = dense_client if dense_client is not None else DenseSearchClient.from_environment(
+            base_sha256=getattr(attestation, "sha256", None),
+            base_size_bytes=getattr(attestation, "size_bytes", None),
+            corpus_revision=corpus_revision,
+        )
         self._dense_filing_cache: dict[tuple[object, ...], tuple[str, ...]] = {}
         if (self.overlay_database is not None or self.search_database is not None) and attestation is None:
             raise ValueError("attestation is required when runtime overlay/search is configured")
@@ -138,13 +163,15 @@ class EvidenceService:
         *,
         company: str | None,
         filing_id: str | None,
+        as_of: str | None,
         filed_at: str | None,
         start_date: str | None,
         end_date: str | None,
+        correction_policy: str,
     ) -> list[str]:
-        if not any((company, filing_id, filed_at, start_date, end_date)):
-            return []
-        cache_key = (company, filing_id, filed_at, start_date, end_date)
+        if correction_policy not in {"current", "original", "corrected", "both"}:
+            raise ValueError("correction_policy_invalid")
+        cache_key = (company, filing_id, as_of, filed_at, start_date, end_date, correction_policy)
         cached = self._dense_filing_cache.get(cache_key)
         if cached is not None:
             return list(cached)
@@ -161,25 +188,47 @@ class EvidenceService:
                 self._dense_filing_cache[cache_key] = ()
                 return []
             if company:
-                clauses.append("(" + " OR ".join(f"{name}=?" for name in company_fields) + ")")
+                clauses.append("(" + " OR ".join(f"f.{name}=?" for name in company_fields) + ")")
                 params.extend([company] * len(company_fields))
             if filing_id:
-                clauses.append("filing_id=?")
+                clauses.append("f.filing_id=?")
                 params.append(filing_id)
             if filed_at:
-                clauses.append("filed_at=?")
+                clauses.append("f.filed_at=?")
                 params.append(filed_at)
             if start_date:
-                clauses.append("filed_at>=?")
+                clauses.append("f.filed_at>=?")
                 params.append(start_date)
             if end_date:
-                clauses.append("filed_at<=?")
+                clauses.append("f.filed_at<=?")
                 params.append(end_date)
+            if correction_policy == "original":
+                clauses.append("v.lineage_status='root'")
+                if as_of is not None:
+                    clauses.append("v.effective_from<=? AND (v.effective_to IS NULL OR ?<v.effective_to)")
+                    params.extend((as_of, as_of))
+            elif correction_policy == "both":
+                clauses.append("v.lineage_status IN ('root','resolved')")
+                if as_of is not None:
+                    clauses.append("v.effective_from<=?")
+                    params.append(as_of)
+            else:
+                clauses.append("v.lineage_status IN ('root','resolved')")
+                if as_of is None:
+                    clauses.append("v.is_current=1")
+                else:
+                    clauses.append("v.effective_from<=? AND (v.effective_to IS NULL OR ?<v.effective_to)")
+                    params.extend((as_of, as_of))
+                if correction_policy == "corrected":
+                    clauses.append("f.is_correction=1")
             rows = connection.execute(
-                f"SELECT filing_id FROM filing WHERE {' AND '.join(clauses)} ORDER BY filing_id",
+                f"""SELECT f.filing_id FROM filing f
+                       JOIN filing_version v ON v.filing_id=f.filing_id
+                      WHERE {' AND '.join(clauses)}
+                      ORDER BY f.filing_id LIMIT 20001""",
                 params,
             ).fetchall()
-        filings = tuple(dict.fromkeys(str(row[0]) for row in rows))
+        filings = tuple(dict.fromkeys(str(row[0]) for row in rows)) if len(rows) <= 20_000 else ()
         self._dense_filing_cache[cache_key] = filings
         return list(filings)
 
@@ -204,23 +253,33 @@ class EvidenceService:
             filing_ids = self._dense_filings(
                 company=company,
                 filing_id=filing_id,
+                as_of=as_of,
                 filed_at=filed_at,
                 start_date=start_date,
                 end_date=end_date,
+                correction_policy=correction_policy,
             )
-            if any((company, filing_id, filed_at, start_date, end_date)) and not filing_ids:
+            if not filing_ids:
                 diagnostics["dense_reason_code"] = "dense_filtered_filings_unavailable"
                 return [], diagnostics
             hits = self.dense_client.search(question, limit=limit, filing_ids=filing_ids)
             allowed_filings = set(filing_ids)
-            if allowed_filings:
-                hits = [hit for hit in hits if hit.filing_id in allowed_filings]
+            hits = [hit for hit in hits if hit.filing_id in allowed_filings]
             ordered_ids = flatten_evidence_ids(hits)
             hydrated = self._hydrate_ids(
                 ordered_ids,
                 as_of=as_of,
                 correction_policy=correction_policy,
             )
+            hydrated = [ref for ref in hydrated if ref.filing_id in allowed_filings]
+            declared_filings_by_evidence: dict[str, set[str]] = {}
+            for hit in hits:
+                for evidence_id in hit.evidence_ids:
+                    declared_filings_by_evidence.setdefault(evidence_id, set()).add(hit.filing_id)
+            hydrated = [
+                ref for ref in hydrated
+                if declared_filings_by_evidence.get(ref.evidence_id) == {ref.filing_id}
+            ]
             if filed_at is not None:
                 hydrated = [ref for ref in hydrated if ref.filed_at == filed_at]
             by_id = {ref.evidence_id: ref for ref in hydrated}
@@ -232,7 +291,7 @@ class EvidenceService:
             safe_ordered = [
                 ref
                 for ref in ordered
-                if not any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS)
+                if evidence_text_is_admitted(ref.text)
             ]
             for ref in safe_ordered:
                 ref.score = float(score_by_id.get(ref.evidence_id, 0.0))
@@ -317,6 +376,8 @@ class EvidenceService:
                     company=slot.issuer or plan.base_plan.company,
                     as_of=version_as_of,
                     filed_at=slot.filing_date,
+                    start_date=slot.period_start,
+                    end_date=slot.period_end,
                     limit=MAX_CANDIDATES_PER_VARIANT,
                     correction_policy=plan.base_plan.correction_policy,
                 )
@@ -344,7 +405,7 @@ class EvidenceService:
                 for ref in refs:
                     ref.locator["analysis_issuer"] = slot.issuer or plan.base_plan.company
                     ref.locator["analysis_version_admitted"] = True
-                    if any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS):
+                    if not evidence_text_is_admitted(ref.text):
                         diagnostics["excluded_prompt_injection_count"] = int(diagnostics["excluded_prompt_injection_count"]) + 1
                         continue
                     safe_refs.append(ref)
@@ -354,6 +415,8 @@ class EvidenceService:
                 company=slot.issuer or plan.base_plan.company,
                 as_of=version_as_of,
                 filed_at=slot.filing_date,
+                start_date=slot.period_start,
+                end_date=slot.period_end,
                 correction_policy=plan.base_plan.correction_policy,
             )
             for ref in dense_refs:
@@ -502,7 +565,7 @@ class EvidenceService:
                 refs, diagnostics = self._search_text_slot(plan, slot, variants)
             else:
                 refs, financial_facts, event_facts, diagnostics = self._search_structured_slot(plan, slot, variants)
-            prompt_excluded = sum(1 for ref in refs if any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS))
+            prompt_excluded = sum(1 for ref in refs if not evidence_text_is_admitted(ref.text))
             wrong_issuer = sum(1 for ref in refs if not self._matches_slot_issuer(ref, slot))
             wrong_version = sum(
                 1 for ref in refs
@@ -512,7 +575,7 @@ class EvidenceService:
             wrong_report = sum(1 for ref in refs if not self._matches_slot_report(ref, slot))
             admitted = [
                 ref for ref in refs
-                if not any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS)
+                if evidence_text_is_admitted(ref.text)
                 and self._matches_slot_issuer(ref, slot)
                 and ref.lineage_status in {"root", "resolved"}
                 and self._matches_slot_report(ref, slot)
@@ -832,13 +895,15 @@ class EvidenceService:
                             plan.reason_codes.append("empty_search_query")
                         else:
                             sparse_refs = self._fragment_refs(rows)
-                            dense_refs, dense_diagnostics = self._search_dense(
-                                plan.question,
-                                company=plan.company,
-                                as_of=version_as_of,
-                                filed_at=filing_date,
-                                correction_policy=plan.correction_policy,
-                            )
+                            dense_refs: list[EvidenceRef] = []
+                            if not structured_domain:
+                                dense_refs, dense_diagnostics = self._search_dense(
+                                    plan.question,
+                                    company=plan.company,
+                                    as_of=version_as_of,
+                                    filed_at=filing_date,
+                                    correction_policy=plan.correction_policy,
+                                )
                             refs.extend(
                                 self._fuse_refs([sparse_refs, dense_refs], limit=30)
                                 if dense_refs
@@ -877,7 +942,7 @@ class EvidenceService:
         unique: list[EvidenceRef] = []
         seen: set[str] = set()
         for ref in refs:
-            if ref.evidence_id not in seen and ref.lineage_status in {"root", "resolved"} and not any(marker in ref.text.casefold() for marker in _PROMPT_INJECTION_MARKERS):
+            if ref.evidence_id not in seen and ref.lineage_status in {"root", "resolved"} and evidence_text_is_admitted(ref.text):
                 seen.add(ref.evidence_id)
                 unique.append(ref)
         final_limit = max(0, min(limit, 8))
@@ -1065,6 +1130,7 @@ class EvidenceService:
             fact = dict(raw_fact)
             declared_ids = [str(item) for item in fact.get("evidence_ids", [])]  # type: ignore[union-attr]
             hydrated = self._hydrate_ids(declared_ids, as_of=as_of, correction_policy=correction_policy)
+            hydrated = [ref for ref in hydrated if evidence_text_is_admitted(ref.text)]
             if not hydrated:
                 continue
             hydrated_ids = {ref.evidence_id for ref in hydrated}
@@ -1098,13 +1164,16 @@ class EvidenceService:
         for row in rows:
             if str(row.get("detected_format") or "") == "pdf" or int(row.get("image_reference_count") or 0) > 0:
                 continue
+            text = str(row.get("text_normalized") or "")
+            if not evidence_text_is_admitted(text):
+                continue
             try:
                 locator = json.loads(str(row.get("locator_json") or "{}"))
             except json.JSONDecodeError:
                 locator = {}
             refs.append(EvidenceRef(
                 evidence_id=str(row["evidence_id"]), filing_id=str(row["filing_id"]),
-                source_id=str(row.get("source_id") or ""), text=str(row.get("text_normalized") or ""),
+                source_id=str(row.get("source_id") or ""), text=text,
                 locator=locator, lineage_status=str(row.get("lineage_status") or ""),
                 score=float(row.get("score") or 0.0), source_path=None,
                 filed_at=str(row.get("filed_at") or ""), report_name=str(row.get("report_name_raw") or ""),
@@ -1155,13 +1224,16 @@ class EvidenceService:
             # is blocked consistently with the generic fragment serving path.
             if str(row["detected_format"] or "") == "pdf":
                 continue
+            text = str(row["text_value"])
+            if not evidence_text_is_admitted(text):
+                continue
             try:
                 locator = json.loads(str(row["locator_json"] or "{}"))
             except json.JSONDecodeError:
                 locator = {}
             result.append(EvidenceRef(
                 evidence_id=str(row["evidence_id"]), filing_id=str(row["filing_id"]),
-                source_id=str(row["source_id"]), text=str(row["text_value"]), locator=locator,
+                source_id=str(row["source_id"]), text=text, locator=locator,
                 lineage_status=str(row["lineage_status"]), source_path=str(row["source_path"]),
                 filed_at=str(row["filed_at"]), report_name=str(row["report_name_raw"]),
                 is_current=bool(row["is_current"]),

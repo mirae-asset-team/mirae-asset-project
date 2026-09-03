@@ -11,6 +11,7 @@ from .answer_verifier import verify_answer
 from .calculator import calculate
 from .evidence_service import EvidenceService
 from .generation import DeterministicGenerator, HyperClovaGenerator
+from .input_hardening import QuestionInputError, detect_prompt_injection, preflight_public_question
 from .query_planner import plan_query
 from .reranker import ClovaReranker
 
@@ -80,6 +81,22 @@ class DisclosureAgent:
         return bool(getattr(self.generator, "configured", False))
 
     def answer(self, question: str, *, company: str | None = None, as_of: str | None = None, limit: int = 20) -> VerifiedAnswer:
+        try:
+            question = preflight_public_question(question)
+        except QuestionInputError as exc:
+            bundle = EvidenceBundle(
+                question="",
+                answerable=False,
+                reason_codes=[exc.code],
+            )
+            return verify_answer(bundle, DeterministicGenerator().generate(bundle))
+        if detect_prompt_injection(question):
+            bundle = EvidenceBundle(
+                question="",
+                answerable=False,
+                reason_codes=["prompt_injection_question"],
+            )
+            return verify_answer(bundle, DeterministicGenerator().generate(bundle))
         attestation = getattr(self.evidence_service, "attestation", None)
         if attestation is not None and not verify_fast_identity(self.evidence_service.base_database, attestation):
             bundle = EvidenceBundle(
