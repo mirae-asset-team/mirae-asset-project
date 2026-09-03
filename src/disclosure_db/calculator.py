@@ -8,7 +8,9 @@ from typing import Iterable
 from .agent_contracts import CalculationResult
 
 
-ALLOWED_OPERATIONS = frozenset({"lookup", "difference", "ratio", "growth_rate", "sum"})
+ALLOWED_OPERATIONS = frozenset({
+    "lookup", "difference", "ratio", "percentage_ratio", "growth_rate", "sum",
+})
 
 
 def _decimals(values: Iterable[object]) -> list[Decimal]:
@@ -46,10 +48,16 @@ def calculate(
         if len(values) != 2:
             raise ValueError("difference needs two operands")
         value = values[1] - values[0]
-    elif operation in {"ratio", "growth_rate"}:
+    elif operation in {"ratio", "percentage_ratio", "growth_rate"}:
+        # Operands are always (baseline, subject): denominator first.
         if len(values) != 2 or values[0] == 0:
             raise ValueError(f"{operation} needs two operands and a non-zero baseline")
-        value = ((values[1] - values[0]) / values[0] * Decimal(100)) if operation == "growth_rate" else values[1] / values[0]
+        if operation == "growth_rate":
+            value = (values[1] - values[0]) / values[0] * Decimal(100)
+        elif operation == "percentage_ratio":
+            value = values[1] / values[0] * Decimal(100)
+        else:
+            value = values[1] / values[0]
     else:  # pragma: no cover - protected by allowlist
         raise ValueError(operation)
     return CalculationResult(operation=operation, value=value, unit=unit, evidence_ids=list(evidence_ids), operands=values)

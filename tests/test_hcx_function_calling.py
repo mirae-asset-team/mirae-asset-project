@@ -4,6 +4,7 @@ import io
 import json
 import unittest
 import urllib.error
+from decimal import Decimal
 
 from disclosure_db.disclosure_tools import build_tool_registry
 from disclosure_db.hcx_function_calling import (
@@ -271,7 +272,78 @@ class PeriodFinancialRegistry:
         return response
 
 
+class AccountFinancialRegistry(PeriodFinancialRegistry):
+    """Serves one validated fact per requested account for ratio questions."""
+
+    def dispatch(self, name: str, arguments: object) -> dict[str, object]:
+        request = dict(arguments)  # type: ignore[arg-type]
+        company = str(request["company"])
+        account = str(request.get("account") or "")
+        year = str(request.get("end_date") or "")[:4]
+        value = self.values.get((company, account))
+        if value is None:
+            return super().dispatch(name, {**request, "company": "__missing__"})
+        self.calls.append((name, request))
+        response = _financial_response([(year, value)])
+        evidence_id = f"ev-{account}"
+        receipt = f"{year}0318000001"
+        fact = response["data"]["facts"][0]
+        fact.update({
+            "company_identifiers": {"company": company},
+            "account_name": account,
+            "normalized_value": value,
+            "display_value": f"{int(value):,}원",
+            "evidence_ids": [evidence_id],
+        })
+        item = response["evidence_bundle"]["items"][0]
+        item.update({
+            "evidence_id": evidence_id, "evidence_ids": [evidence_id],
+            "filing_id": receipt, "rcept_no": receipt,
+        })
+        response["evidence_bundle"].update({
+            "covered_scope": {"company": [company], "account": [account]},
+            "evidence_ids": [evidence_id], "filing_ids": [receipt],
+        })
+        return response
+
+
 class HcxFunctionCallingTests(unittest.TestCase):
+    def test_two_account_ratio_is_calculated_from_validated_facts(self) -> None:
+        """부채비율 등 다계정 비율은 provider 도구선택 없이 계산돼야 한다."""
+        registry = AccountFinancialRegistry({
+            ("삼성전자", "부채총계"): "40",
+            ("삼성전자", "자본총계"): "160",
+        })
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자의 2025년 부채비율은 얼마인가요?")
+
+        self.assertFalse(result.metadata["tool_selection_called"])
+        self.assertEqual(result.metadata["workflow"], "financial_comparison")
+        calculations = result.tool_response["data"]["calculations"]
+        self.assertEqual([item["operation"] for item in calculations], ["percentage_ratio"])
+        # 부채총계 40 / 자본총계 160 = 25%
+        self.assertEqual(Decimal(str(calculations[0]["value"])), Decimal("25"))
+        self.assertEqual(calculations[0]["unit"], "%")
+        self.assertEqual(
+            sorted(calculations[0]["evidence_ids"]), ["ev-부채총계", "ev-자본총계"],
+        )
+
+    def test_ratio_blocks_when_one_operand_is_missing(self) -> None:
+        registry = AccountFinancialRegistry({("삼성전자", "자본총계"): "160"})
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자의 2025년 부채비율은 얼마인가요?")
+
+        self.assertNotEqual(result.status, "answered")
+        self.assertFalse(result.answer_allowed)
+
     def _registry(self, rows: list[dict[str, object]] | None = None):
         hybrid = StaticHybrid(list(rows or []))
         return build_tool_registry(hybrid_retriever=hybrid), hybrid  # type: ignore[arg-type]

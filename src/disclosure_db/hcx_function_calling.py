@@ -893,12 +893,43 @@ class HcxFunctionCallingService:
                         "to_period": current_requirement.get("period"),
                     },
                 ))
+        # A catalog-declared ratio (부채비율, 영업이익률 …) reaches here with its
+        # two source accounts already fetched, in (denominator, numerator)
+        # order. Computing it from validated facts keeps the answer grounded in
+        # the same evidence as the operands.
+        derived_operation = str(route.context.get("derived_operation") or "")
+        if derived_operation == "percentage_ratio" and len(selected) == 2:
+            (_, denominator_fact, denominator_value), (_, numerator_fact, numerator_value) = selected
+            evidence_ids = [
+                str(item)
+                for fact in (denominator_fact, numerator_fact)
+                for item in fact.get("evidence_ids", [])
+                if item
+            ]
+            try:
+                ratio = calculate(
+                    "percentage_ratio", [denominator_value, numerator_value],
+                    unit="%", evidence_ids=evidence_ids,
+                )
+            except (TypeError, ValueError):
+                # A zero or non-finite denominator is not an answerable ratio.
+                calculation_failed = True
+            else:
+                calculations.append({
+                    **self._calculation_payload(ratio),
+                    "company": companies[0] if companies else None,
+                    "metric": route.context.get("metric"),
+                    "metric_id": route.context.get("metric_id"),
+                    "period": route.context.get("period"),
+                })
+
         complete = (
             len(requirements) >= 2
             and len(selected) == len(requirements)
             and not calculation_failed
             and (
-                not single_metric
+                derived_operation == "percentage_ratio"
+                or not single_metric
                 or len(companies) != 1
                 or len(periods) < 2
                 or len(calculations) == 2 * (len(periods) - 1)

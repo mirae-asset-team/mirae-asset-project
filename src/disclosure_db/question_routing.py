@@ -25,6 +25,21 @@ _EVENT_DISCLOSURE_MARKERS = (
     "감자 결정", "주식교환", "투자판단", "소송",
 )
 _UNAVAILABLE_MARKERS = ("시가총액", "목표주가", "미래 주가", "주가 예측", "예상 주가")
+# Solicitation phrasings ask for a trading decision rather than a disclosure
+# fact. Routing them through the provider cost ~9s and still ended in a
+# refusal, so the refusal is made deterministic and immediate.
+_ADVICE_MARKERS = (
+    "사도 될까", "사도 되나", "사도 돼", "매수해도", "매도해도", "팔아도 될까",
+    "投資", "투자해도", "사는 게 좋을", "사는게 좋을", "살까요", "팔까요",
+    "말려야", "추천해", "추천할", "유망한가", "괜찮은 종목", "들어가도",
+)
+# Document-shaped questions that name no financial account. These carry a
+# company and a disclosure topic, so the search tool is the grounded route.
+_DOCUMENT_TOPIC_MARKERS = (
+    "배당", "연구개발", "위험요인", "리스크", "사업 내용", "사업내용", "주요 사업",
+    "경영진", "임원", "종업원", "직원 수", "계열회사", "지배구조", "주주",
+    "설비투자", "생산능력", "매출 구성", "제품", "시장 점유", "소송", "특허",
+)
 _COMPARISON_MARKERS = ("비교", "중", "더 높은", "더 낮은", "큰 곳", "작은 곳", "어디")
 _PERIOD_COMPARISON_MARKERS = (
     "비교", "대비", "보다", "변화", "추이", "증가", "감소", "상승", "하락", "늘", "줄",
@@ -309,6 +324,17 @@ class DeterministicQuestionRouter:
                 **route_context,
             )
 
+        if any(marker in text for marker in _ADVICE_MARKERS):
+            return QuestionRoute(
+                "unavailable",
+                "investment_solicitation_out_of_scope",
+                response_mode="deterministic",
+                message="이 서비스는 DART 공시 근거를 확인해 드리는 곳으로, 매수·매도 판단이나 투자 권유는 하지 않습니다. 공시에 기재된 재무수치나 공시 내용은 알려드릴 수 있습니다.",
+                metric_kind="UNAVAILABLE",
+                context={"available_range": "DART 공시, 구조화 재무수치, 공시 검색·요약·정정 관계"},
+                **route_context,
+            )
+
         if plan.question_type == "out_of_scope" or any(marker in text for marker in _UNAVAILABLE_MARKERS):
             return QuestionRoute(
                 "unavailable",
@@ -475,6 +501,65 @@ class DeterministicQuestionRouter:
         if (
             plan.company
             and plan.account_status == "resolved"
+            and plan.account_support_level == "derived"
+            and plan.operation == "percentage_ratio"
+            and len(plan.required_account_ids) == 2
+        ):
+            # A two-account ratio (부채비율, 영업이익률 …) has both operands in
+            # the catalog formula, so it is answerable from two structured
+            # facts. Leaving it unrouted sent every one of these to provider
+            # tool selection, which picked a single-account tool and answered
+            # none of them.
+            derived = self.account_catalog.by_id.get(str(plan.account_id or ""))
+            formula = dict(derived.formula or {}) if derived is not None else {}
+            numerator = str(formula.get("numerator") or "")
+            denominator = str(formula.get("denominator") or "")
+            sources = [
+                self.account_catalog.by_id.get(denominator),
+                self.account_catalog.by_id.get(numerator),
+            ]
+            if all(item is not None and item.support_level == "structured" for item in sources):
+                period = periods[0] if periods else None
+                requirements = [
+                    {"company": str(plan.company), "period": period, "account": item.label_ko}
+                    for item in sources
+                ]
+                arguments = {
+                    "company": str(plan.company),
+                    "account": requirements[0]["account"],
+                    "correction_policy": plan.correction_policy,
+                    "top_k": 1,
+                }
+                if period:
+                    arguments["start_date"] = f"{period}-01-01"
+                    arguments["end_date"] = f"{period}-12-31"
+                if plan.scope:
+                    arguments["scope"] = plan.scope
+                return QuestionRoute(
+                    "tool",
+                    "structured_financial_derived_ratio",
+                    "get_financial_facts",
+                    arguments,
+                    workflow="financial_comparison",
+                    metric_kind="DERIVED",
+                    context={
+                        "companies": [str(plan.company)],
+                        "period": period,
+                        "periods": [period] if period else [],
+                        "metric": derived.label_ko if derived is not None else None,
+                        "metric_id": str(plan.account_id or ""),
+                        "intent": "financial_derived_ratio",
+                        "requirements": requirements,
+                        "derived_operation": "percentage_ratio",
+                        "derived_operands": [denominator, numerator],
+                        "required_evidence": "validated_structured_fact_per_account",
+                    },
+                    **route_context,
+                )
+
+        if (
+            plan.company
+            and plan.account_status == "resolved"
             and plan.account_support_level in {"structured", "derived"}
             and plan.operation in {"growth_rate", "difference", "ratio", "sum"}
             and (plan.account_terms or plan.required_account_ids)
@@ -628,6 +713,24 @@ class DeterministicQuestionRouter:
             return QuestionRoute(
                 "tool",
                 "explicit_disclosure_search",
+                "search_disclosures",
+                {**common_search, "top_k": 10},
+                metric_kind="SEARCH",
+                **route_context,
+            )
+
+        if (
+            plan.company
+            and plan.question_type == "text"
+            and plan.account_status in {"unknown", "unsupported"}
+            and any(marker in text for marker in _DOCUMENT_TOPIC_MARKERS)
+        ):
+            # Named company plus a disclosure topic but no financial account:
+            # the evidence lives in report text, so search it directly instead
+            # of asking the provider which tool to use.
+            return QuestionRoute(
+                "tool",
+                "disclosure_topic_search",
                 "search_disclosures",
                 {**common_search, "top_k": 10},
                 metric_kind="SEARCH",

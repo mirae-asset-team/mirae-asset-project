@@ -223,6 +223,57 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
         self.assertEqual(single.workflow, "single")
         self.assertEqual(single.arguments["end_date"], "2025-12-31")
 
+    def test_multi_account_ratio_routes_deterministically(self) -> None:
+        """A two-account ratio must not fall through to provider tool selection.
+
+        Measured on the 2026-09-02 sweep, every 부채비율/영업이익률 question
+        reached HyperCLOVA, which picked ``get_financial_facts`` for a single
+        account and answered none of them, at about 5s each.
+        """
+        # Operands are ordered (denominator, baseline first) to match the
+        # calculator contract, and follow the catalog formula exactly.
+        cases = {
+            "삼성전자의 2025년 부채비율은 얼마인가요?": ("total_equity", "total_liabilities"),
+            "삼성전자의 2025년 영업이익률은 얼마인가요?": ("revenue", "operating_income"),
+            "SK하이닉스의 2025년 자기자본이익률은 얼마인가요?": ("total_equity", "net_income"),
+        }
+        for question, (denominator, numerator) in cases.items():
+            with self.subTest(question=question):
+                route = self.router.route(question)
+                self.assertIsNotNone(route, "ratio question fell through to the provider")
+                self.assertEqual(route.tool_name, "get_financial_facts")
+                self.assertEqual(route.metric_kind, "DERIVED")
+                self.assertEqual(route.context["derived_operation"], "percentage_ratio")
+                self.assertEqual(route.context["derived_operands"], [denominator, numerator])
+                self.assertEqual(len(route.context["requirements"]), 2)
+
+    def test_document_question_without_account_routes_to_search(self) -> None:
+        """Document questions carry no financial account, so the account
+        branches skip them and they used to reach the provider and answer 0%."""
+        for question in (
+            "삼성전자의 배당에 관한 사항을 알려주세요.",
+            "삼성전자의 연구개발 활동 내용을 알려주세요.",
+            "SK하이닉스의 주요 위험요인은 무엇인가요?",
+        ):
+            with self.subTest(question=question):
+                route = self.router.route(question)
+                self.assertIsNotNone(route, "document question fell through to the provider")
+                self.assertEqual(route.tool_name, "search_disclosures")
+                self.assertEqual(route.metric_kind, "SEARCH")
+
+    def test_investment_solicitation_refuses_without_provider_call(self) -> None:
+        for question in (
+            "삼성전자 주식을 지금 사도 될까요?",
+            "SK하이닉스 지금 매수해도 되나요?",
+            "삼성전자 주가가 다음 달에 오를까요?",
+            "제 친구가 삼성전자 주식을 사려고 하는데 말려야 할까요?",
+        ):
+            with self.subTest(question=question):
+                route = self.router.route(question)
+                self.assertIsNotNone(route, "advice question fell through to the provider")
+                self.assertEqual(route.kind, "unavailable")
+                self.assertEqual(route.metric_kind, "UNAVAILABLE")
+
 
 if __name__ == "__main__":
     unittest.main()
