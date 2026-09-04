@@ -80,9 +80,6 @@ services:
       EVAL_RESULTS_DIR: /app/eval/qa_results
       RELEASE_COMMIT: ${DISCLOSURE_EXPECTED_COMMIT:?DISCLOSURE_EXPECTED_COMMIT is required}
     volumes: *agent-volumes
-    depends_on:
-      dense-retriever:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); assert data['ready'] and data['eval_enabled']"]
       interval: 30s
@@ -101,9 +98,6 @@ services:
       DISCLOSURE_PUBLIC_GLOBAL_CONCURRENCY: ${DISCLOSURE_PUBLIC_GLOBAL_CONCURRENCY:-8}
       RELEASE_COMMIT: ${DISCLOSURE_EXPECTED_COMMIT:?DISCLOSURE_EXPECTED_COMMIT is required}
     volumes: *agent-volumes
-    depends_on:
-      dense-retriever:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/health'))['ready']"]
       interval: 30s
