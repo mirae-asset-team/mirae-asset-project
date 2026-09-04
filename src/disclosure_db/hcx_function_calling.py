@@ -1317,6 +1317,40 @@ class HcxFunctionCallingService:
             return None
         return value if value.is_finite() else None
 
+    @classmethod
+    def _calculation_grain_key(cls, fact: Mapping[str, object]) -> tuple[str, ...] | None:
+        period = fact.get("period")
+        identifiers = fact.get("company_identifiers")
+        if not isinstance(period, Mapping) or not isinstance(identifiers, Mapping):
+            return None
+        company = next((
+            str(identifiers.get(name) or "").strip()
+            for name in ("issuer_corp_code", "stock_code", "listed_name", "issuer_name", "company")
+            if str(identifiers.get(name) or "").strip()
+        ), "")
+        filing_id = str(fact.get("filing_id") or fact.get("rcept_no") or "").strip()
+        scope = str(fact.get("scope") or "").strip()
+        period_type = str(period.get("period_type") or "").strip()
+        if period_type == "instant":
+            period_key = str(period.get("instant_date") or "").strip()
+        elif period_type == "duration":
+            period_key = "|".join((
+                str(period.get("period_start") or "").strip(),
+                str(period.get("period_end") or "").strip(),
+            ))
+        else:
+            return None
+        if not all((company, filing_id, scope, period_key)):
+            return None
+        return company, filing_id, scope, period_type, period_key
+
+    @classmethod
+    def _facts_share_calculation_grain(
+        cls, selected: list[tuple[dict[str, object], dict[str, object], Decimal]],
+    ) -> bool:
+        keys = [cls._calculation_grain_key(fact) for _, fact, _ in selected]
+        return bool(keys) and all(key is not None for key in keys) and len(set(keys)) == 1
+
     def _financial_comparison_response(
         self, route: QuestionRoute, primary: Mapping[str, object],
     ) -> dict[str, object]:
@@ -1394,6 +1428,7 @@ class HcxFunctionCallingService:
             all_facts.append(fact)
         calculations: list[dict[str, object]] = []
         calculation_failed = False
+        calculation_grain_mismatch = False
         derived_operation = str(route.context.get("derived_operation") or "")
         accounting_identity: dict[str, object] | None = None
         if len(metrics) == 1 and len(companies) == 1 and len(periods) >= 2:
@@ -1437,7 +1472,18 @@ class HcxFunctionCallingService:
         # two source accounts already fetched, in (denominator, numerator)
         # order. Computing it from validated facts keeps the answer grounded in
         # the same evidence as the operands.
-        if derived_operation == "percentage_ratio" and len(selected) == 2:
+        if (
+            derived_operation in {"percentage_ratio", "accounting_identity"}
+            and selected
+            and not self._facts_share_calculation_grain(selected)
+        ):
+            calculation_failed = True
+            calculation_grain_mismatch = True
+        if (
+            derived_operation == "percentage_ratio"
+            and len(selected) == 2
+            and not calculation_grain_mismatch
+        ):
             (_, denominator_fact, denominator_value), (_, numerator_fact, numerator_value) = selected
             evidence_ids = [
                 str(item)
@@ -1461,7 +1507,11 @@ class HcxFunctionCallingService:
                     "metric_id": route.context.get("metric_id"),
                     "period": route.context.get("period"),
                 })
-        if derived_operation == "accounting_identity" and len(selected) == 3:
+        if (
+            derived_operation == "accounting_identity"
+            and len(selected) == 3
+            and not calculation_grain_mismatch
+        ):
             metric_labels = [
                 str(item) for item in route.context.get("metrics", []) if item
             ]
@@ -1582,7 +1632,16 @@ class HcxFunctionCallingService:
             checker_tool="get_financial_facts",
             checker_data={"facts": all_facts, "requirement_coverage": requirement_coverage},
             required_response_indexes=tuple(range(len(responses))),
-            extra_reasons=("all_financial_comparison_requirements_covered",) if complete else ("financial_comparison_requirement_missing",),
+            extra_reasons=(
+                ("all_financial_comparison_requirements_covered",)
+                if complete
+                else (
+                    "financial_calculation_grain_mismatch",
+                    "financial_comparison_requirement_missing",
+                )
+                if calculation_grain_mismatch
+                else ("financial_comparison_requirement_missing",)
+            ),
             force_answer_allowed=complete,
         )
 

@@ -230,6 +230,33 @@ class FinancialAccountCatalog:
                 yield found, end
             offset = found + 1
 
+    def _english_matches(self, text: str) -> list[_Match]:
+        """Match registered English labels on word boundaries before compaction."""
+        result: list[_Match] = []
+        seen: set[tuple[int, int, str]] = set()
+        for account in self.accounts:
+            for raw_surface in (account.label_en, *account.aliases):
+                if not raw_surface or not raw_surface.isascii() or not any(
+                    character.isalpha() for character in raw_surface
+                ):
+                    continue
+                words = re.findall(r"[a-z0-9]+", raw_surface.casefold())
+                if not words:
+                    continue
+                pattern = re.compile(
+                    r"(?<![a-z0-9])" + r"[\s\W_]+".join(map(re.escape, words)) + r"(?![a-z0-9])",
+                    re.IGNORECASE,
+                )
+                for found in pattern.finditer(text):
+                    key = (found.start(), found.end(), account.canonical_id)
+                    if key not in seen:
+                        result.append(_Match(
+                            found.start(), found.end(), "exact_alias", raw_surface,
+                            account.canonical_id,
+                        ))
+                        seen.add(key)
+        return result
+
     def _matches(self, text: str) -> list[_Match]:
         result: list[_Match] = []
         seen: set[tuple[int, int, str, str | None]] = set()
@@ -294,8 +321,9 @@ class FinancialAccountCatalog:
             if any(folded == unicodedata.normalize("NFKC", concept).strip().casefold() for concept in account.xbrl_concepts):
                 return self._resolved(account, "exact_xbrl_concept", raw)
 
+        english_matches = self._non_shadowed(self._english_matches(folded))
         compact = normalize_account_text(raw)
-        matches = self._non_shadowed(self._matches(compact))
+        matches = english_matches or self._non_shadowed(self._matches(compact))
         if not matches:
             legacy_target = self.legacy_ids.get(raw)
             if legacy_target is not None:

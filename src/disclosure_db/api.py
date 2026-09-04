@@ -307,8 +307,6 @@ def create_app(
         env_qa_db = os.environ.get("DISCLOSURE_QA_DB")
         if env_qa_db:
             configured_qa_db = Path(env_qa_db)
-        elif Path("/runtime").is_dir():
-            configured_qa_db = Path("/runtime/qa_lab.sqlite")
     corpus_database = getattr(getattr(agent, "evidence_service", None), "base_database", None)
     qa_store = (
         QaLabStore(

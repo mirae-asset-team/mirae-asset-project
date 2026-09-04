@@ -228,6 +228,8 @@ def _financial_response(values: list[tuple[str, str]], account: str = "매출액
         filing_ids.append(receipt)
         facts.append({
             "financial_fact_id": f"ff-{year}-{index}",
+            "filing_id": receipt,
+            "rcept_no": receipt,
             "account_id": "revenue" if account == "매출액" else "operating_profit",
             "account_name": account,
             "value_numeric": value,
@@ -340,6 +342,37 @@ class AccountFinancialRegistry(PeriodFinancialRegistry):
         return response
 
 
+class MixedGrainAccountRegistry(AccountFinancialRegistry):
+    """Returns individually valid facts that cannot safely share one calculation."""
+
+    def __init__(self, *, periods: dict[str, str], scopes: dict[str, str]) -> None:
+        super().__init__({
+            ("삼성전자", "부채총계"): "40",
+            ("삼성전자", "자본총계"): "160",
+        })
+        self.periods = periods
+        self.scopes = scopes
+
+    def dispatch(self, name: str, arguments: object) -> dict[str, object]:
+        response = super().dispatch(name, arguments)
+        request = dict(arguments)  # type: ignore[arg-type]
+        account = str(request.get("account") or "")
+        facts = response.get("data", {}).get("facts", [])  # type: ignore[union-attr]
+        if facts:
+            fact = facts[0]
+            year = self.periods[account]
+            fact["period"] = {
+                "period_type": "instant",
+                "period_start": None,
+                "period_end": None,
+                "instant_date": f"{year}-12-31",
+            }
+            fact["scope"] = self.scopes[account]
+            fact["filing_id"] = f"filing-{year}-{self.scopes[account]}"
+            fact["rcept_no"] = fact["filing_id"]
+        return response
+
+
 class HcxFunctionCallingTests(unittest.TestCase):
     def test_two_account_ratio_is_calculated_from_validated_facts(self) -> None:
         """부채비율 등 다계정 비율은 provider 도구선택 없이 계산돼야 한다."""
@@ -375,6 +408,44 @@ class HcxFunctionCallingTests(unittest.TestCase):
         result = service.answer("삼성전자의 2025년 부채비율은 얼마인가요?")
 
         self.assertNotEqual(result.status, "answered")
+        self.assertFalse(result.answer_allowed)
+
+    def test_ratio_blocks_facts_from_different_periods_and_scopes(self) -> None:
+        service = HcxFunctionCallingService(
+            MixedGrainAccountRegistry(
+                periods={"부채총계": "2025", "자본총계": "2024"},
+                scopes={"부채총계": "separate", "자본총계": "consolidated"},
+            ),
+            FakeHcxClient(self._search_call()),
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자의 부채비율은 얼마인가요?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual(
+            result.tool_response["data"]["comparison"]["status"],
+            "incomplete",
+        )
+        self.assertIn(
+            "financial_calculation_grain_mismatch",
+            result.tool_response["metadata"]["sufficiency_check"]["reasons"],
+        )
+
+    def test_ratio_blocks_mixed_scope_even_when_period_matches(self) -> None:
+        service = HcxFunctionCallingService(
+            MixedGrainAccountRegistry(
+                periods={"부채총계": "2025", "자본총계": "2025"},
+                scopes={"부채총계": "separate", "자본총계": "consolidated"},
+            ),
+            FakeHcxClient(self._search_call()),
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자의 2025년 부채비율은 얼마인가요?")
+
+        self.assertEqual(result.status, "abstained")
         self.assertFalse(result.answer_allowed)
 
     def _registry(self, rows: list[dict[str, object]] | None = None):

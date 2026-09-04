@@ -74,12 +74,16 @@ class DeploymentArtifactTests(unittest.TestCase):
     def test_public_limit_defaults_are_explicit_in_compose_and_example_env(self):
         compose = Path("compose.yaml").read_text(encoding="utf-8")
         example = Path(".env.example").read_text(encoding="utf-8")
+        production = compose.split("  disclosure-agent:\n", 1)[1].split(
+            "  disclosure-agent-staging:\n", 1
+        )[0]
         expected = {
             "DISCLOSURE_PUBLIC_RATE_PER_MINUTE": "120",
             "DISCLOSURE_PUBLIC_PER_IP_CONCURRENCY": "4",
             "DISCLOSURE_PUBLIC_GLOBAL_CONCURRENCY": "8",
         }
-        self.assertIn("DISCLOSURE_QA_DB: /runtime/qa_lab.sqlite", compose)
+        self.assertNotIn("DISCLOSURE_QA_DB", production)
+        self.assertNotIn('Path("/runtime").is_dir()', Path("src/disclosure_db/api.py").read_text(encoding="utf-8"))
         self.assertIn("DISCLOSURE_QA_DB=/runtime/qa_lab.sqlite", example)
         self.assertNotIn("DISCLOSURE_QA_TOKEN", compose)
         self.assertNotIn("DISCLOSURE_QA_TOKEN", example)

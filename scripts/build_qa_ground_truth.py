@@ -91,6 +91,7 @@ def harvest(connection: sqlite3.Connection, run_ids: list[str]) -> dict:
             )
             grains[key].append({
                 "qid": qid,
+                "issuer_corp_code": str(identifiers.get("issuer_corp_code") or ""),
                 "company": str(identifiers.get("listed_name") or company),
                 "stock_code": str(identifiers.get("stock_code") or ""),
                 "value": value,
@@ -116,6 +117,44 @@ def corpus_confirms(corpus: sqlite3.Connection, observation: dict) -> tuple[bool
     evidence_ids = observation["evidence_ids"]
     if not evidence_ids:
         return False, "no_resolvable_evidence"
+    placeholders = ",".join("?" for _ in evidence_ids)
+    try:
+        semantic_rows = corpus.execute(
+            f"""SELECT ff.filing_id,f.issuer_corp_code,ff.account_id,ff.scope,
+                       ff.period_type,ff.period_start,ff.period_end,ff.instant_date,
+                       ff.value_numeric,ff.scale
+                  FROM financial_fact ff
+                  JOIN financial_fact_evidence ffe
+                    ON ffe.financial_fact_id=ff.financial_fact_id
+                  JOIN filing f ON f.filing_id=ff.filing_id
+                 WHERE ffe.evidence_id IN ({placeholders})
+                   AND ff.validation_status='validated'""",
+            evidence_ids,
+        ).fetchall()
+    except sqlite3.Error:
+        return False, "validated_financial_semantics_unavailable"
+    expected_value = observation["value"]
+    semantic_match = False
+    for row in semantic_rows:
+        (filing_id, corp_code, account_id, scope, period_type, period_start,
+         period_end, instant_date, value_numeric, scale) = row
+        actual_period_end = instant_date if period_type == "instant" else period_end
+        try:
+            actual_value = Decimal(str(value_numeric)) * Decimal(str(scale))
+        except ArithmeticError:
+            continue
+        if (
+            str(filing_id) == str(observation.get("filing_id") or "")
+            and str(corp_code) == str(observation.get("issuer_corp_code") or "")
+            and str(account_id) == str(observation.get("account_id") or "")
+            and str(scope) == str(observation.get("scope") or "")
+            and str(actual_period_end or "") == str(observation.get("period_end") or "")
+            and actual_value == expected_value
+        ):
+            semantic_match = True
+            break
+    if not semantic_match:
+        return False, "validated_financial_semantics_mismatch"
     cells: list[Decimal] = []
     for evidence_id in evidence_ids:
         row = corpus.execute(

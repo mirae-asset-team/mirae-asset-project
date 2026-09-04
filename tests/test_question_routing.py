@@ -108,6 +108,16 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
         self.assertEqual(route.normalized_question, "삼성전자 2025년 매출액은?")
         self.assertIn("alias:samsung electronics->삼성전자", route.corrections)
 
+    def test_natural_english_financial_question_routes_deterministically(self) -> None:
+        route = self.router.route("What was Samsung Electronics revenue in 2025?")
+
+        self.assertIsNotNone(route)
+        self.assertEqual(route.tool_name, "get_financial_facts")
+        self.assertEqual(route.arguments["company"], "삼성전자")
+        self.assertEqual(str(route.arguments["account"]).casefold(), "revenue")
+        self.assertEqual(route.arguments["start_date"], "2025-01-01")
+        self.assertEqual(route.arguments["end_date"], "2025-12-31")
+
     def test_manifest_aliases_are_case_insensitive_and_stock_codes_are_supported(self) -> None:
         cases = {
             "sm엔터테인먼트 2025년 매출액은?": "에스엠",

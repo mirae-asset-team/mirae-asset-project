@@ -88,6 +88,14 @@ class FinancialAccountResolutionTests(unittest.TestCase):
             "revenue",
         )
         self.assertEqual(resolve_financial_account("Operating Income은?").canonical_id, "operating_income")
+        self.assertEqual(
+            resolve_financial_account("What was Samsung Electronics revenue in 2025?").canonical_id,
+            "revenue",
+        )
+        self.assertEqual(
+            resolve_financial_account("What was Samsung Electronics operating income in 2025?").canonical_id,
+            "operating_income",
+        )
 
     def test_colloquial_tails_do_not_hide_the_account(self) -> None:
         self.assertEqual(resolve_financial_account("매출액 좀 알려줄래").canonical_id, "revenue")

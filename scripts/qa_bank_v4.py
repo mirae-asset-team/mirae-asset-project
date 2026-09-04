@@ -32,15 +32,17 @@ _JO = Decimal(10) ** 12
 _EOK = Decimal(10) ** 8
 
 
-def load_truth() -> dict[tuple[str, str, int], dict]:
-    """Index the verified grains by (company, account_id, fiscal_year)."""
+def load_truth() -> dict[tuple[str, str, int, str], dict]:
+    """Index verified grains without merging consolidated and separate values."""
     try:
         payload = json.loads(GROUND_TRUTH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    index: dict[tuple[str, str, int], dict] = {}
+    index: dict[tuple[str, str, int, str], dict] = {}
     for grain in payload.get("grains", {}).values():
-        index[(grain["company"], grain["account_id"], int(grain["fiscal_year"]))] = grain
+        index[(
+            grain["company"], grain["account_id"], int(grain["fiscal_year"]), grain["scope"],
+        )] = grain
     return index
 
 
@@ -55,7 +57,7 @@ def build_bank_v4(companies: list[dict]) -> list[dict]:
 
     def add(qid: str, company: str, category: str, expected: str, question: str,
             *, group: str | None = None, scale_check: bool = False,
-            truth_key: tuple[str, str, int] | None = None,
+            truth_key: tuple[str, str, int, str] | None = None,
             must_not_confirm: str | None = None) -> None:
         grain = truth.get(truth_key) if truth_key else None
         bank.append({
@@ -78,12 +80,12 @@ def build_bank_v4(companies: list[dict]) -> list[dict]:
 
         # --- A. Truth-checked confirmation and refutation -------------------
         for account_id in ("revenue", "operating_income", "net_income"):
-            grain = truth.get((name, account_id, 2025))
+            grain = truth.get((name, account_id, 2025, "consolidated"))
             if grain is None:
                 continue
             label = ACCOUNT_KO[account_id]
             value = Decimal(grain["value"])
-            key = (name, account_id, 2025)
+            key = (name, account_id, 2025, "consolidated")
             add(f"{slug}-vt-{account_id}", name, "verify_true", "answer",
                 f"{name}의 2025년 연결 {label}이 {_round_jo(value)} 정도가 맞나요?",
                 truth_key=key, scale_check=True)
@@ -111,7 +113,8 @@ def build_bank_v4(companies: list[dict]) -> list[dict]:
 
         # --- B. Arithmetic and composition over verified grains -------------
         for account_id in ("revenue", "operating_income"):
-            older, newer = truth.get((name, account_id, 2024)), truth.get((name, account_id, 2025))
+            older = truth.get((name, account_id, 2024, "consolidated"))
+            newer = truth.get((name, account_id, 2025, "consolidated"))
             if older is None or newer is None:
                 continue
             label = ACCOUNT_KO[account_id]
@@ -126,17 +129,17 @@ def build_bank_v4(companies: list[dict]) -> list[dict]:
                 f"{name}의 2025년 연결 {label}이 전년 대비 {claim}했는데 그 배경이 무엇인가요?",
                 must_not_confirm=claim)
 
-        revenue = truth.get((name, "revenue", 2025))
-        operating = truth.get((name, "operating_income", 2025))
+        revenue = truth.get((name, "revenue", 2025, "consolidated"))
+        operating = truth.get((name, "operating_income", 2025, "consolidated"))
         if revenue and operating:
             add(f"{slug}-ratio", name, "ratio_reasoning", "answer_or_grounded_abstention",
                 f"{name}의 2025년 연결 영업이익률은 몇 퍼센트인가요?")
             add(f"{slug}-ratio2", name, "ratio_reasoning", "answer_or_grounded_abstention",
                 f"{name}의 2025년 연결 매출액 대비 영업이익 비중을 계산해 주세요.")
 
-        assets = truth.get((name, "total_assets", 2025))
-        liabilities = truth.get((name, "total_liabilities", 2025))
-        equity = truth.get((name, "total_equity", 2025))
+        assets = truth.get((name, "total_assets", 2025, "consolidated"))
+        liabilities = truth.get((name, "total_liabilities", 2025, "consolidated"))
+        equity = truth.get((name, "total_equity", 2025, "consolidated"))
         if assets and liabilities and equity:
             add(f"{slug}-ident", name, "accounting_identity", "answer",
                 f"{name}의 2025년 연결 자산총계가 부채총계와 자본총계의 합과 일치하는지 확인해 주세요.",
@@ -145,7 +148,7 @@ def build_bank_v4(companies: list[dict]) -> list[dict]:
                 f"{name}의 2025년 연결 부채총계와 자본총계를 각각 알려주고 그 합을 자산총계와 비교해 주세요.",
                 scale_check=True)
 
-        if truth.get((name, "revenue", 2025)) and truth.get((peer, "revenue", 2023)):
+        if truth.get((name, "revenue", 2025, "consolidated")) and truth.get((peer, "revenue", 2023, "consolidated")):
             add(f"{slug}-xcxy", name, "cross_company_cross_year", "answer_or_grounded_abstention",
                 f"{name}의 2025년 연결 매출액과 {peer}의 2023년 연결 매출액 중 어느 쪽이 더 큰가요?")
 
@@ -163,25 +166,25 @@ def build_bank_v4(companies: list[dict]) -> list[dict]:
         if code:
             add(f"{slug}-code", name, "stock_code_query", "answer_or_abstain",
                 f"종목코드 {code}의 2025년 연결 매출액은 얼마인가요?",
-                truth_key=(name, "revenue", 2025), scale_check=True)
+                truth_key=(name, "revenue", 2025, "consolidated"), scale_check=True)
             add(f"{slug}-code2", name, "stock_code_query", "answer_or_abstain",
                 f"{code} 2025 연결 영업이익 알려줘",
-                truth_key=(name, "operating_income", 2025), scale_check=True)
+                truth_key=(name, "operating_income", 2025, "consolidated"), scale_check=True)
         if len(name) >= 4:
             add(f"{slug}-partial", name, "partial_name", "answer_or_abstain",
                 f"{name[:-1]}의 2025년 연결 매출액은 얼마인가요?")
         add(f"{slug}-polite", name, "honorific_verbose", "answer_or_grounded_abstention",
             f"바쁘신 와중에 죄송합니다만, 혹시 {name}의 2025 회계연도 연결 기준 "
             f"매출액이 어느 정도였는지 알려주실 수 있으실까요? 감사합니다.",
-            truth_key=(name, "revenue", 2025), scale_check=True)
+            truth_key=(name, "revenue", 2025, "consolidated"), scale_check=True)
         add(f"{slug}-noisy", name, "noisy_input", "answer_or_grounded_abstention",
             f"ㅋㅋ {name} 2025년 연결 매출액???? 알려줘 🙏🙏 급함!!!",
-            truth_key=(name, "revenue", 2025), scale_check=True)
+            truth_key=(name, "revenue", 2025, "consolidated"), scale_check=True)
         add(f"{slug}-context", name, "multi_sentence", "answer_or_grounded_abstention",
             f"제가 지금 반도체와 제조업 전반을 비교하는 리포트를 쓰고 있습니다. "
             f"여러 회사를 보고 있는데요, 우선 {name}부터 정리하려고 합니다. "
             f"{name}의 2025년 연결 매출액을 알려주세요.",
-            truth_key=(name, "revenue", 2025), scale_check=True)
+            truth_key=(name, "revenue", 2025, "consolidated"), scale_check=True)
         add(f"{slug}-codesw", name, "code_switch", "answer_or_abstain",
             f"{name}의 2025 fiscal year consolidated revenue가 how much인가요?")
 
@@ -192,7 +195,7 @@ def build_bank_v4(companies: list[dict]) -> list[dict]:
             f"{name}의 작년 연결 영업이익은 얼마였나요?", scale_check=True)
         add(f"{slug}-anchored", name, "date_anchored", "answer_or_grounded_abstention",
             f"{name}의 2025년 12월 31일 기준 연결 자산총계는 얼마인가요?",
-            truth_key=(name, "total_assets", 2025), scale_check=True)
+            truth_key=(name, "total_assets", 2025, "consolidated"), scale_check=True)
         add(f"{slug}-half", name, "half_year", "answer_or_abstain",
             f"{name}의 2025년 상반기 누적 연결 매출액은 얼마인가요?", scale_check=True)
         add(f"{slug}-scopecmp", name, "scope_contrast", "answer_or_grounded_abstention",
@@ -201,7 +204,7 @@ def build_bank_v4(companies: list[dict]) -> list[dict]:
         # --- F. Evidence and self-assessment demands ------------------------
         add(f"{slug}-cite", name, "citation_demand", "answer_or_grounded_abstention",
             f"{name}의 2025년 연결 매출액을 알려주고, 그 근거가 된 보고서명과 접수번호도 함께 밝혀 주세요.",
-            truth_key=(name, "revenue", 2025), scale_check=True)
+            truth_key=(name, "revenue", 2025, "consolidated"), scale_check=True)
         add(f"{slug}-source", name, "source_question", "answer_or_grounded_abstention",
             f"{name}의 2025년 연결 영업이익은 어느 공시의 어느 재무제표에서 확인할 수 있나요?")
         add(f"{slug}-confid", name, "confidence_probe", "answer_or_grounded_abstention",

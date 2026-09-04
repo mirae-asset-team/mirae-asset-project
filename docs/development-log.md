@@ -985,3 +985,20 @@
 - 2차 실패 주도 수정(`62410e8`): 금액 확인 질문은 질문의 표시 정밀도와 검증된 실제값을 비교해 `네/아니요`를 결정론적으로 답한다. 외화 환산은 환율 시점·출처 부재로, 미공개 정보·긴급 매매 지시는 안전 경계에서 즉시 보류한다. 액면/주식분할 질문은 요청 연도와 실제 `report_name`이 모두 맞는 evidence만 남기며, 해당 결정 공시가 없으면 답변 생성을 차단한다.
 - 대량 런 안정화: 과속 프로세스(`pace=1.0`)를 정확한 PID 확인 후 종료하고 같은 탐색 run을 concurrency 1, `pace=2.1`, transient-only retry로 재개했다. 시작 시 일시 오류 272행만 제거했다. 재시작 후 517건 실측에서 transport error/HTTP 429는 0건, 평균 2.699초, p95 6.57초였고 원장 `PRAGMA integrity_check=ok`이다. 백그라운드 PID `51664`가 남은 12,811문항을 계속 처리한다.
 - 검증: 집중 회귀 `85 passed, 47 subtests`, 전체 Python `618 passed, 2 skipped, 71 warnings, 95 subtests`, Web `12/12`, `compileall`, `git diff --check`, staged secret scan을 통과했다. 경고는 기존 FastAPI/Starlette deprecation이다. 로컬 수정의 NCP 실효 검증과 `:8000` 승격은 아직 실행하지 않았다.
+
+## 2026-09-05T00:06:11+09:00 — QA Growth v4 안전 통합과 main 후보 검증
+
+- 입력: 원격 `main` `cee4a5609157c358c8da4814debd1f14e96e95ea`, QA source `9d8c06abfd6edbf0f2533d0d18d35dbb99871eea`를 사용했다. QA source를 직접 merge하면 불필요한 `.github.zip` 이력이 연결되고 Judge 계보가 보이지 않으므로, main 위에 검토 가능한 QA 커밋을 순서대로 이식했다. 문제 커밋 `cbb8004`는 후보의 조상이 아니다.
+- 충돌 판단: Judge input hardening·5 Tool·bounded analysis·claim verification을 보존하고, QA Growth의 별칭·공시유형·파생비율·문서형·단위·전제·금액확인·회계항등식·안전보류를 해당 검증 경로에 연결했다. 금액 확인 응답도 claim verifier를 우회하지 않게 TDD로 수정했고 public `requirements` 구조는 유지했다.
+- TDD: 금액 확인 응답의 `verification_trace`/`claim_support` 부재를 `1 failed`로 재현한 뒤 검증된 결정론 fallback으로 통합해 `1 passed`로 전환했다. 기존 routing 구조를 바꾼 회계항등식 회귀 3건은 내부 `metric_ids` 매핑으로 복구했다.
+- 최종 검증: 전체 Python `930 passed, 2 skipped, 98 warnings, 260 subtests passed` (`456.67s`), Web `13/13`, 팀 QA `1/1`, 배포·저장소 위생 `45 passed, 94 subtests`, `compileall`, `git diff --check`가 통과했다. 실제 `.env`, `.pem`, `.key`, `.zip` 추적 파일은 없다. 팀 QA Next build는 이 호스트의 `npm ci` 장시간 무응답으로 `BLOCKED_ENVIRONMENT`이며 운영 8000 API와 별도 앱이다.
+- 배포 경계: 코드·테스트 통과만으로 private/provider/Dense release gate를 대체하지 않는다. 기존 `BLOCKED_HARD_GATE`와 Recall@20 `0.487179... < 0.95`를 그대로 보존하며, 실제 PASS 없이 8000 승격을 주장하거나 임계값을 낮추지 않는다. credential, `.env`, PEM, D 드라이브 원본·live overlay/index 및 NCP 보안 설정은 변경하지 않았다.
+
+### 2026-09-05T00:27:01+09:00 — 독립 리뷰 차단 결함 수정
+
+- 독립 리뷰가 공개 8000 QA/Gold API 활성화, 다계정 계산의 기간·scope·filing 혼합, QA truth index의 scope 누락, Ground Truth 의미검증 부재를 P1으로 확인했다. 자연스러운 영어 계정 라우팅과 팀 QA 배포 문서 불일치도 P2로 확인했다.
+- TDD RED는 운영 Compose 노출, 두 계산 혼합, truth scope 충돌, 세 가지 의미 불일치를 합쳐 `5 failed, 1 passed`; 영어 문장 라우팅은 `2 failed`였다. 최소 수정 후 각각 `6 passed`, `2 passed`로 전환했고 확대 회귀는 `124 passed, 70 subtests`였다.
+- 운영 `compose.yaml`에서 QA DB를 제거하고 API의 `/runtime` 암묵 활성화를 없앴다. 별도 `compose.team-qa.yaml`만 QA DB를 명시하며 Caddy Basic Auth 뒤에서 사용한다. 공개 질문 서비스의 무로그인 정책은 유지된다.
+- 비율·회계항등식은 기업, exact period, scope, filing ID가 모두 동일한 fact만 계산한다. QA truth key는 `(company, account_id, fiscal_year, scope)`이며 Ground Truth는 validated `financial_fact_evidence`의 기업·계정·기간·scope·filing·scaled value까지 대조한다. 의미 provenance가 없으면 숫자가 같아도 fail-close한다.
+- 자연스러운 영어 계정명은 등록된 ASCII 단어 경계에서만 인식한다. QA 운영문서는 실제 HTTPS/Caddy 구성으로 동기화했고 작성자·검수자 문자열이 인증 신원이 아니라는 한계를 명시했다.
+- 수정 후 전체 Python은 `936 passed, 2 skipped, 98 warnings, 260 subtests passed` (`459.27s`)였고 저장소·배포·Ground Truth 위생 묶음은 `48 passed, 94 subtests passed`였다. hard gate, credential, D 드라이브 및 live 데이터 경계는 변경하지 않았다.
