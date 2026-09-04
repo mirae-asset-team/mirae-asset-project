@@ -373,6 +373,16 @@ class MixedGrainAccountRegistry(AccountFinancialRegistry):
         return response
 
 
+class MixedScopePeriodRegistry(PeriodFinancialRegistry):
+    def dispatch(self, name: str, arguments: object) -> dict[str, object]:
+        response = super().dispatch(name, arguments)
+        facts = response.get("data", {}).get("facts", [])  # type: ignore[union-attr]
+        if facts:
+            year = str(facts[0]["period"]["period_end"])[:4]
+            facts[0]["scope"] = "separate" if year == "2024" else "consolidated"
+        return response
+
+
 class HcxFunctionCallingTests(unittest.TestCase):
     def test_two_account_ratio_is_calculated_from_validated_facts(self) -> None:
         """부채비율 등 다계정 비율은 provider 도구선택 없이 계산돼야 한다."""
@@ -447,6 +457,25 @@ class HcxFunctionCallingTests(unittest.TestCase):
 
         self.assertEqual(result.status, "abstained")
         self.assertFalse(result.answer_allowed)
+
+    def test_cross_year_change_blocks_mixed_consolidation_scope(self) -> None:
+        service = HcxFunctionCallingService(
+            MixedScopePeriodRegistry({
+                ("삼성전자", "2024"): "100",
+                ("삼성전자", "2025"): "200",
+            }),
+            FakeHcxClient(self._search_call()),
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자의 2024년 대비 2025년 매출액 증감률은?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual(
+            result.tool_response["data"]["comparison"]["status"],
+            "incomplete",
+        )
 
     def _registry(self, rows: list[dict[str, object]] | None = None):
         hybrid = StaticHybrid(list(rows or []))

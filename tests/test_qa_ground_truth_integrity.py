@@ -29,9 +29,9 @@ def test_truth_index_keeps_consolidated_and_separate_grains_distinct(
     assert truth[("테스트회사", "revenue", 2025, "separate")]["value"] == "200"
 
 
-def _semantic_corpus() -> sqlite3.Connection:
-    connection = sqlite3.connect(":memory:")
-    connection.executescript("""
+def _semantic_databases() -> tuple[sqlite3.Connection, sqlite3.Connection]:
+    corpus = sqlite3.connect(":memory:")
+    corpus.executescript("""
         CREATE TABLE filing(filing_id TEXT PRIMARY KEY, issuer_corp_code TEXT NOT NULL);
         CREATE TABLE table_cell(
             evidence_id TEXT PRIMARY KEY,
@@ -39,6 +39,11 @@ def _semantic_corpus() -> sqlite3.Connection:
             text_normalized TEXT,
             text_raw TEXT
         );
+        INSERT INTO filing VALUES ('filing-2025', 'corp-1');
+        INSERT INTO table_cell VALUES ('ev-1', 'filing-2025', '100', '100');
+    """)
+    overlay = sqlite3.connect(":memory:")
+    overlay.executescript("""
         CREATE TABLE financial_fact(
             financial_fact_id TEXT PRIMARY KEY,
             filing_id TEXT NOT NULL,
@@ -56,15 +61,13 @@ def _semantic_corpus() -> sqlite3.Connection:
             financial_fact_id TEXT NOT NULL,
             evidence_id TEXT NOT NULL
         );
-        INSERT INTO filing VALUES ('filing-2025', 'corp-1');
-        INSERT INTO table_cell VALUES ('ev-1', 'filing-2025', '100', '100');
         INSERT INTO financial_fact VALUES (
             'ff-1', 'filing-2025', 'revenue', 'consolidated', 'duration',
             '2025-01-01', '2025-12-31', NULL, '100', 1, 'validated'
         );
         INSERT INTO financial_fact_evidence VALUES ('ff-1', 'ev-1');
     """)
-    return connection
+    return corpus, overlay
 
 
 def _observation(**updates: object) -> dict[str, object]:
@@ -73,7 +76,10 @@ def _observation(**updates: object) -> dict[str, object]:
         "filing_id": "filing-2025",
         "account_id": "revenue",
         "scope": "consolidated",
+        "period_type": "duration",
+        "period_start": "2025-01-01",
         "period_end": "2025-12-31",
+        "instant_date": "",
         "value": build_qa_ground_truth.Decimal("100"),
         "scale": 1,
         "evidence_ids": ["ev-1"],
@@ -83,22 +89,25 @@ def _observation(**updates: object) -> dict[str, object]:
 
 
 def test_corpus_confirmation_requires_matching_financial_semantics() -> None:
-    corpus = _semantic_corpus()
+    corpus, overlay = _semantic_databases()
 
     assert build_qa_ground_truth.corpus_confirms(
-        corpus, _observation(account_id="operating_income")
+        corpus, _observation(account_id="operating_income"), overlay
     )[0] is False
     assert build_qa_ground_truth.corpus_confirms(
-        corpus, _observation(period_end="1900-12-31")
+        corpus, _observation(period_end="1900-12-31"), overlay
     )[0] is False
     assert build_qa_ground_truth.corpus_confirms(
-        corpus, _observation(scope="separate")
+        corpus, _observation(scope="separate"), overlay
+    )[0] is False
+    assert build_qa_ground_truth.corpus_confirms(
+        corpus, _observation(period_start="2025-10-01"), overlay
     )[0] is False
 
 
 def test_corpus_confirmation_accepts_exact_validated_financial_grain() -> None:
-    corpus = _semantic_corpus()
+    corpus, overlay = _semantic_databases()
 
-    assert build_qa_ground_truth.corpus_confirms(corpus, _observation()) == (
+    assert build_qa_ground_truth.corpus_confirms(corpus, _observation(), overlay) == (
         True, "corpus_confirmed"
     )

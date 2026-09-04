@@ -31,7 +31,12 @@ _NUMBER = re.compile(r"(?P<paren>\()?\s*(?P<sign>[-△▲▽])?\s*(?P<digits>[0-
 
 def open_corpus() -> sqlite3.Connection:
     """Open the distribution corpus strictly read-only and immutable."""
-    uri = f"file:{CORPUS.as_posix()}?mode=ro&immutable=1"
+    return open_read_only(CORPUS)
+
+
+def open_read_only(path: Path) -> sqlite3.Connection:
+    """Open a corpus or overlay without creating or mutating the file."""
+    uri = f"file:{path.as_posix()}?mode=ro&immutable=1"
     connection = sqlite3.connect(uri, uri=True, check_same_thread=False)
     connection.execute("PRAGMA query_only=ON")
     return connection
@@ -100,7 +105,12 @@ def harvest(connection: sqlite3.Connection, run_ids: list[str]) -> dict:
                 "filing_id": str(fact.get("filing_id") or ""),
                 "rcept_no": str(fact.get("rcept_no") or ""),
                 "account_name": str(fact.get("account_name") or ""),
+                "account_id": str(fact.get("account_id") or ""),
+                "scope": str(fact.get("scope") or ""),
+                "period_type": str(period.get("period_type") or ""),
+                "period_start": str(period.get("period_start") or ""),
                 "period_end": end,
+                "instant_date": str(period.get("instant_date") or ""),
                 "evidence_ids": [
                     eid for eid in (fact.get("evidence_ids") or []) if eid in items
                 ],
@@ -112,21 +122,25 @@ def harvest(connection: sqlite3.Connection, run_ids: list[str]) -> dict:
     return grains
 
 
-def corpus_confirms(corpus: sqlite3.Connection, observation: dict) -> tuple[bool, str]:
+def corpus_confirms(
+    corpus: sqlite3.Connection,
+    observation: dict,
+    semantic_database: sqlite3.Connection | None = None,
+) -> tuple[bool, str]:
     """Re-read the cited cells from the corpus and rebuild the served value."""
     evidence_ids = observation["evidence_ids"]
     if not evidence_ids:
         return False, "no_resolvable_evidence"
     placeholders = ",".join("?" for _ in evidence_ids)
+    semantics = semantic_database or corpus
     try:
-        semantic_rows = corpus.execute(
-            f"""SELECT ff.filing_id,f.issuer_corp_code,ff.account_id,ff.scope,
+        semantic_rows = semantics.execute(
+            f"""SELECT ff.filing_id,ff.account_id,ff.scope,
                        ff.period_type,ff.period_start,ff.period_end,ff.instant_date,
                        ff.value_numeric,ff.scale
                   FROM financial_fact ff
                   JOIN financial_fact_evidence ffe
                     ON ffe.financial_fact_id=ff.financial_fact_id
-                  JOIN filing f ON f.filing_id=ff.filing_id
                  WHERE ffe.evidence_id IN ({placeholders})
                    AND ff.validation_status='validated'""",
             evidence_ids,
@@ -136,19 +150,25 @@ def corpus_confirms(corpus: sqlite3.Connection, observation: dict) -> tuple[bool
     expected_value = observation["value"]
     semantic_match = False
     for row in semantic_rows:
-        (filing_id, corp_code, account_id, scope, period_type, period_start,
+        (filing_id, account_id, scope, period_type, period_start,
          period_end, instant_date, value_numeric, scale) = row
-        actual_period_end = instant_date if period_type == "instant" else period_end
         try:
             actual_value = Decimal(str(value_numeric)) * Decimal(str(scale))
         except ArithmeticError:
             continue
+        filing = corpus.execute(
+            "SELECT issuer_corp_code FROM filing WHERE filing_id=?", (filing_id,)
+        ).fetchone()
+        corp_code = str(filing[0]) if filing is not None else ""
         if (
             str(filing_id) == str(observation.get("filing_id") or "")
             and str(corp_code) == str(observation.get("issuer_corp_code") or "")
             and str(account_id) == str(observation.get("account_id") or "")
             and str(scope) == str(observation.get("scope") or "")
-            and str(actual_period_end or "") == str(observation.get("period_end") or "")
+            and str(period_type or "") == str(observation.get("period_type") or "")
+            and str(period_start or "") == str(observation.get("period_start") or "")
+            and str(period_end or "") == str(observation.get("period_end") or "")
+            and str(instant_date or "") == str(observation.get("instant_date") or "")
             and actual_value == expected_value
         ):
             semantic_match = True
@@ -182,12 +202,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--run-id", action="append", required=True,
                         help="ledger run to harvest; repeat for several runs")
+    parser.add_argument(
+        "--overlay", type=Path, required=True,
+        help="read-only validated financial overlay used for semantic confirmation",
+    )
     parser.add_argument("--output", type=Path, default=OUTPUT)
     args = parser.parse_args()
 
     ledger = sqlite3.connect(LEDGER)
     grains = harvest(ledger, args.run_id)
     corpus = open_corpus()
+    semantic_database = open_read_only(args.overlay)
 
     confirmed: dict[str, dict] = {}
     stats = {"grains": len(grains), "confirmed": 0, "conflicting": 0,
@@ -212,7 +237,7 @@ def main() -> int:
             })
             continue
         witness = observations[0]
-        ok, reason = corpus_confirms(corpus, witness)
+        ok, reason = corpus_confirms(corpus, witness, semantic_database)
         if not ok:
             stats["unconfirmed"] += 1
             rejects.append({
@@ -244,6 +269,7 @@ def main() -> int:
         "schema_version": "qa-ground-truth-v1",
         "source_runs": args.run_id,
         "corpus": CORPUS.name,
+        "semantic_overlay": args.overlay.name,
         "stats": stats,
         "grains": confirmed,
         "rejects": rejects,

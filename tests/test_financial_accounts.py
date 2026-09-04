@@ -128,6 +128,15 @@ class FinancialAccountResolutionTests(unittest.TestCase):
         self.assertEqual(resolution.status, "ambiguous")
         self.assertEqual(set(resolution.candidates), {"revenue", "operating_income"})
 
+    def test_mixed_language_distinct_accounts_are_not_collapsed(self) -> None:
+        first = resolve_financial_account("삼성전자 revenue와 영업이익을 알려줘")
+        second = resolve_financial_account("삼성전자 매출액과 operating income을 알려줘")
+
+        self.assertEqual(first.status, "ambiguous")
+        self.assertEqual(set(first.candidates), {"revenue", "operating_income"})
+        self.assertEqual(second.status, "ambiguous")
+        self.assertEqual(set(second.candidates), {"revenue", "operating_income"})
+
 
 class FinancialAccountRoutingTests(unittest.TestCase):
     def test_query_planner_routes_each_support_level(self) -> None:

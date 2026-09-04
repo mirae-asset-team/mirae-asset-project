@@ -1351,6 +1351,32 @@ class HcxFunctionCallingService:
         keys = [cls._calculation_grain_key(fact) for _, fact, _ in selected]
         return bool(keys) and all(key is not None for key in keys) and len(set(keys)) == 1
 
+    @staticmethod
+    def _comparison_scope_key(fact: Mapping[str, object]) -> tuple[str, ...] | None:
+        period = fact.get("period")
+        identifiers = fact.get("company_identifiers")
+        if not isinstance(period, Mapping) or not isinstance(identifiers, Mapping):
+            return None
+        company = next((
+            str(identifiers.get(name) or "").strip()
+            for name in ("issuer_corp_code", "stock_code", "listed_name", "issuer_name", "company")
+            if str(identifiers.get(name) or "").strip()
+        ), "")
+        key = (
+            company,
+            str(fact.get("account_id") or "").strip(),
+            str(fact.get("scope") or "").strip(),
+            str(period.get("period_type") or "").strip(),
+        )
+        return key if all(key) else None
+
+    @classmethod
+    def _facts_share_comparison_scope(
+        cls, selected: list[tuple[dict[str, object], dict[str, object], Decimal]],
+    ) -> bool:
+        keys = [cls._comparison_scope_key(fact) for _, fact, _ in selected]
+        return bool(keys) and all(key is not None for key in keys) and len(set(keys)) == 1
+
     def _financial_comparison_response(
         self, route: QuestionRoute, primary: Mapping[str, object],
     ) -> dict[str, object]:
@@ -1431,7 +1457,17 @@ class HcxFunctionCallingService:
         calculation_grain_mismatch = False
         derived_operation = str(route.context.get("derived_operation") or "")
         accounting_identity: dict[str, object] | None = None
-        if len(metrics) == 1 and len(companies) == 1 and len(periods) >= 2:
+        is_cross_period_calculation = (
+            len(metrics) == 1 and len(companies) == 1 and len(periods) >= 2
+        )
+        if (
+            is_cross_period_calculation
+            and selected
+            and not self._facts_share_comparison_scope(selected)
+        ):
+            calculation_failed = True
+            calculation_grain_mismatch = True
+        if is_cross_period_calculation and not calculation_grain_mismatch:
             ordered_selected = sorted(selected, key=lambda item: str(item[0].get("period") or ""))
             for (previous_requirement, previous, previous_value), (current_requirement, current, current_value) in zip(
                 ordered_selected, ordered_selected[1:],
@@ -1475,6 +1511,7 @@ class HcxFunctionCallingService:
         if (
             derived_operation in {"percentage_ratio", "accounting_identity"}
             and selected
+            and not calculation_grain_mismatch
             and not self._facts_share_calculation_grain(selected)
         ):
             calculation_failed = True

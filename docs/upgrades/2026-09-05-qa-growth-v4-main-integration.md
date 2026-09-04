@@ -26,12 +26,14 @@
 - 다계정 비율과 회계항등식은 기업, 정확한 기간, 연결/별도, 공시번호가 모두 같은 validated fact만 계산한다. 하나라도 없거나 다르면 `financial_calculation_grain_mismatch`로 보류한다.
 - QA 정답 인덱스 키에 `scope`를 포함해 연결과 별도 값이 서로 덮어쓰지 않게 했다.
 - Ground Truth 확증은 숫자 셀 일치뿐 아니라 `financial_fact_evidence`의 검증 상태, 기업, 계정, 기간, 범위, 공시번호와 scaled value를 모두 독립 대조한다.
+- 재무 의미는 base DB가 아니라 별도 read-only overlay에서 읽고, 기업·공시와 표 셀은 read-only base에서 대조한다. 기간은 종료일뿐 아니라 유형·시작일·종료일·기준일 전체가 일치해야 한다.
+- 연도 간 증감·성장률도 기업·계정·연결/별도·기간 유형이 일치하지 않으면 계산하지 않는다.
 - 자연스러운 영어 문장의 등록된 재무계정명은 ASCII 단어 경계로 인식한다. 등록되지 않은 alias나 유사 계정은 계속 추론하지 않는다.
 - 팀 QA 운영 문서를 실제 Compose의 HTTPS 도메인/Caddy Basic Auth 구성과 일치시켰다. 화면의 검수자 이름은 인증 신원이 아닌 감사 라벨임을 명시했다.
 
 ## 검증 결과
 
-- `PYTHONPATH=src python -m pytest -q`: `936 passed, 2 skipped, 98 warnings, 260 subtests passed`
+- `PYTHONPATH=src python -m pytest -q`: `939 passed, 2 skipped, 98 warnings, 260 subtests passed`
 - `python -m compileall -q src scripts tests`: 통과
 - `node --test tests/web_history.test.mjs tests/web_api.test.mjs`: `13 passed`
 - `team-qa npm test`: `1 passed`
@@ -39,6 +41,7 @@
 - `git diff --check`: 통과
 - tracked secret/archive 이름 검사: 실제 `.env`, `.pem`, `.key`, `.zip` 없음 (`.env.example`만 추적)
 - 팀 QA `next build`: `npm ci`가 이 호스트에서 장시간 무응답이라 의존성 설치를 중단했고 `BLOCKED_ENVIRONMENT`로 남긴다. 팀 QA의 독립 단위 테스트는 통과했으며 운영 8000 API 이미지와는 별도 앱이다.
+- 실제 DB read-only 감사: base `financial_fact=0`, overlay `financial_fact=1,191`; 첫 validated overlay 표본이 base filing·evidence와 함께 `corpus_confirmed`를 통과했다.
 
 ## 배포 판정
 
@@ -50,3 +53,13 @@
 2. git-ignored private holdout과 실제 provider/staging 결과로 600건 raw 결과를 생성한다.
 3. Dense/Sparse identity 및 Recall·wrong issuer/version·latency를 재측정한다.
 4. 통합 release gate가 PASS하면 정확히 같은 image를 8000으로 승격하고 smoke와 rollback readiness를 기록한다.
+
+Ground Truth를 재생성할 때는 base와 overlay를 분리하고 둘 다 read-only로 지정한다.
+
+```powershell
+$env:PYTHONPATH = 'src'
+python scripts/build_qa_ground_truth.py `
+  --run-id <qa-run-id> `
+  --overlay <read-only-agent-overlay.sqlite> `
+  --output runs/ground_truth_v1.json
+```

@@ -1002,3 +1002,11 @@
 - 비율·회계항등식은 기업, exact period, scope, filing ID가 모두 동일한 fact만 계산한다. QA truth key는 `(company, account_id, fiscal_year, scope)`이며 Ground Truth는 validated `financial_fact_evidence`의 기업·계정·기간·scope·filing·scaled value까지 대조한다. 의미 provenance가 없으면 숫자가 같아도 fail-close한다.
 - 자연스러운 영어 계정명은 등록된 ASCII 단어 경계에서만 인식한다. QA 운영문서는 실제 HTTPS/Caddy 구성으로 동기화했고 작성자·검수자 문자열이 인증 신원이 아니라는 한계를 명시했다.
 - 수정 후 전체 Python은 `936 passed, 2 skipped, 98 warnings, 260 subtests passed` (`459.27s`)였고 저장소·배포·Ground Truth 위생 묶음은 `48 passed, 94 subtests passed`였다. hard gate, credential, D 드라이브 및 live 데이터 경계는 변경하지 않았다.
+
+### 2026-09-05T00:49:25+09:00 — 독립 재리뷰 차단 결함 수정
+
+- 재리뷰에서 base DB에 재무 fact가 없고 overlay에 1,191건이 있는 실제 분리 구조, 기간 시작일 미검증, 연도 간 scope 혼합, 한영 혼합 다중지표 축소를 확인했다. 신규 RED는 `5 failed, 1 passed`였다.
+- Ground Truth builder에 필수 `--overlay` 입력을 추가하고 base와 overlay를 모두 `mode=ro&immutable=1`, `query_only=ON`으로 연다. 의미 검증은 overlay의 validated `financial_fact_evidence`, 기업·공시·셀 검증은 base를 사용하며 기간 유형·시작·종료·기준일 전체를 exact match한다.
+- 연도 간 계산에는 기업·계정·scope·period type 일치 gate를 추가했다. 영어 단어 경계 match와 compact 한국어 match를 합쳐 한영 혼합 두 지표를 모두 requirements로 보존했다.
+- 최소 수정 후 신규 focused는 `6 passed`, 관련 확대 회귀는 `127 passed, 70 subtests`였다. 실제 D 드라이브 read-only 감사에서 base `financial_fact=0`, overlay `financial_fact=1,191`을 확인했고 첫 validated 표본이 `corpus_confirmed`로 통과했다.
+- 최종 전체 Python은 `939 passed, 2 skipped, 98 warnings, 260 subtests passed` (`424.44s`)였다. D 드라이브 파일은 수정하지 않았고 credential/NCP 설정과 release hard gate도 변경하지 않았다.

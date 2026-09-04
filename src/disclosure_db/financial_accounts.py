@@ -323,7 +323,8 @@ class FinancialAccountCatalog:
 
         english_matches = self._non_shadowed(self._english_matches(folded))
         compact = normalize_account_text(raw)
-        matches = english_matches or self._non_shadowed(self._matches(compact))
+        compact_matches = self._non_shadowed(self._matches(compact))
+        matches = [*english_matches, *compact_matches]
         if not matches:
             legacy_target = self.legacy_ids.get(raw)
             if legacy_target is not None:

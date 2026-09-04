@@ -284,6 +284,14 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
             {"company": "삼성전자", "period": "2025", "account": "영업이익"},
         ])
 
+    def test_mixed_language_metrics_form_independent_requirements(self) -> None:
+        route = self.router.route("삼성전자 2025년 revenue와 영업이익을 알려줘")
+
+        self.assertIsNotNone(route)
+        self.assertEqual(route.workflow, "financial_comparison")
+        self.assertEqual(route.context["metric_ids"], ["revenue", "operating_income"])
+        self.assertEqual(len(route.context["requirements"]), 2)
+
     def test_multiple_iso_dates_keep_exact_boundaries_in_requirements(self) -> None:
         route = self.router.route(
             "삼성전자 2024-03-31과 2024-06-30 매출액 차이를 비교해줘"

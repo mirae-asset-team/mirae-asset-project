@@ -369,7 +369,7 @@ class DeterministicQuestionRouter:
                 return ()
             positions = [
                 compact.find(normalize_account_text(surface))
-                for surface in (account.label_ko, *account.aliases)
+                for surface in (account.label_ko, account.label_en, *account.aliases)
             ]
             positions = [position for position in positions if position >= 0]
             if not positions:
