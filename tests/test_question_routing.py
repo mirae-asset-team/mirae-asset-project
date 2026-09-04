@@ -355,6 +355,25 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
                 self.assertEqual(route.context["derived_operands"], [denominator, numerator])
                 self.assertEqual(len(route.context["requirements"]), 2)
 
+    def test_multi_company_ratio_keeps_every_company_and_operand(self) -> None:
+        router = DeterministicQuestionRouter(["에스엠", "삼성전자"])
+
+        route = router.route(
+            "SM엔터테인먼트와 삼성전자의 2025년 영업이익률을 비교해줘"
+        )
+
+        self.assertIsNotNone(route)
+        self.assertEqual(route.workflow, "financial_comparison")
+        self.assertEqual(route.context["companies"], ["에스엠", "삼성전자"])
+        self.assertEqual(route.context["derived_operation"], "percentage_ratio")
+        self.assertEqual(route.context["derived_operands"], ["revenue", "operating_income"])
+        self.assertEqual(route.context["requirements"], [
+            {"company": company, "period": "2025", "account": account}
+            for company in ("에스엠", "삼성전자")
+            for account in ("매출액", "영업이익")
+        ])
+        self.assertIn("alias:sm엔터테인먼트->에스엠", route.corrections)
+
     def test_document_question_without_account_routes_to_search(self) -> None:
         """Document questions carry no financial account, so the account
         branches skip them and they used to reach the provider and answer 0%."""

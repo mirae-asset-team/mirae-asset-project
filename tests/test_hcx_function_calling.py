@@ -408,6 +408,56 @@ class HcxFunctionCallingTests(unittest.TestCase):
             sorted(calculations[0]["evidence_ids"]), ["ev-부채총계", "ev-자본총계"],
         )
 
+    def test_multi_company_ratio_calculates_each_company_without_provider(self) -> None:
+        class MultiCompanyAccountRegistry(AccountFinancialRegistry):
+            def dispatch(self, name: str, arguments: object) -> dict[str, object]:
+                request = dict(arguments)  # type: ignore[arg-type]
+                response = super().dispatch(name, request)
+                company = str(request["company"])
+                account = str(request["account"])
+                evidence_id = f"ev-{company}-{account}"
+                fact = response["data"]["facts"][0]
+                fact["evidence_ids"] = [evidence_id]
+                item = response["evidence_bundle"]["items"][0]
+                item.update({"evidence_id": evidence_id, "evidence_ids": [evidence_id]})
+                response["evidence_bundle"]["evidence_ids"] = [evidence_id]
+                return response
+
+        registry = MultiCompanyAccountRegistry({
+            ("에스엠", "매출액"): "100",
+            ("에스엠", "영업이익"): "10",
+            ("삼성전자", "매출액"): "200",
+            ("삼성전자", "영업이익"): "40",
+        })
+        service = HcxFunctionCallingService(
+            registry,
+            HyperClovaFunctionClient(env={}),
+            router=DeterministicQuestionRouter(["에스엠", "삼성전자"]),
+        )
+
+        result = service.answer(
+            "SM엔터테인먼트와 삼성전자의 2025년 영업이익률을 비교해줘"
+        )
+
+        self.assertEqual(result.status, "answered")
+        self.assertFalse(result.metadata["tool_selection_called"])
+        self.assertEqual(
+            [(call[1]["company"], call[1]["account"]) for call in registry.calls],
+            [
+                ("에스엠", "매출액"),
+                ("에스엠", "영업이익"),
+                ("삼성전자", "매출액"),
+                ("삼성전자", "영업이익"),
+            ],
+        )
+        calculations = result.tool_response["data"]["calculations"]
+        self.assertEqual(
+            [(row["company"], Decimal(str(row["value"]))) for row in calculations],
+            [("에스엠", Decimal("10")), ("삼성전자", Decimal("20"))],
+        )
+        self.assertIn("에스엠의 영업이익률은 약 10.00%", result.answer)
+        self.assertIn("삼성전자의 영업이익률은 약 20.00%", result.answer)
+
     def test_ratio_blocks_when_one_operand_is_missing(self) -> None:
         registry = AccountFinancialRegistry({("삼성전자", "자본총계"): "160"})
         client = FakeHcxClient(self._search_call())
