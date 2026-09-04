@@ -752,12 +752,14 @@ class DeterministicQuestionRouter:
             ]
             if all(item is not None and item.support_level == "structured" for item in sources):
                 period = periods[0] if periods else None
+                required_companies = list(companies) if companies else [str(plan.company)]
                 requirements = [
-                    {"company": str(plan.company), "period": period, "account": item.label_ko}
+                    {"company": company, "period": period, "account": item.label_ko}
+                    for company in required_companies
                     for item in sources
                 ]
                 arguments = {
-                    "company": str(plan.company),
+                    "company": requirements[0]["company"],
                     "account": requirements[0]["account"],
                     "correction_policy": plan.correction_policy,
                     "top_k": 1,
@@ -775,7 +777,7 @@ class DeterministicQuestionRouter:
                     workflow="financial_comparison",
                     metric_kind="DERIVED",
                     context={
-                        "companies": [str(plan.company)],
+                        "companies": required_companies,
                         "period": period,
                         "periods": [period] if period else [],
                         "metric": derived.label_ko if derived is not None else None,

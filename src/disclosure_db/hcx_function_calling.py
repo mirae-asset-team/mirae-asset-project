@@ -1509,41 +1509,51 @@ class HcxFunctionCallingService:
         # order. Computing it from validated facts keeps the answer grounded in
         # the same evidence as the operands.
         if (
-            derived_operation in {"percentage_ratio", "accounting_identity"}
+            derived_operation == "accounting_identity"
             and selected
             and not calculation_grain_mismatch
             and not self._facts_share_calculation_grain(selected)
         ):
             calculation_failed = True
             calculation_grain_mismatch = True
-        if (
-            derived_operation == "percentage_ratio"
-            and len(selected) == 2
-            and not calculation_grain_mismatch
-        ):
-            (_, denominator_fact, denominator_value), (_, numerator_fact, numerator_value) = selected
-            evidence_ids = [
-                str(item)
-                for fact in (denominator_fact, numerator_fact)
-                for item in fact.get("evidence_ids", [])
-                if item
-            ]
-            try:
-                ratio = calculate(
-                    "percentage_ratio", [denominator_value, numerator_value],
-                    unit="%", evidence_ids=evidence_ids,
-                )
-            except (TypeError, ValueError):
-                # A zero or non-finite denominator is not an answerable ratio.
-                calculation_failed = True
-            else:
-                calculations.append({
-                    **self._calculation_payload(ratio),
-                    "company": companies[0] if companies else None,
-                    "metric": route.context.get("metric"),
-                    "metric_id": route.context.get("metric_id"),
-                    "period": route.context.get("period"),
-                })
+        if derived_operation == "percentage_ratio" and not calculation_grain_mismatch:
+            ratio_companies = companies or list(dict.fromkeys(
+                str(requirement.get("company") or "")
+                for requirement, _, _ in selected
+                if requirement.get("company")
+            ))
+            for company in ratio_companies:
+                company_facts = [
+                    item for item in selected
+                    if str(item[0].get("company") or "") == company
+                ]
+                if len(company_facts) != 2 or not self._facts_share_calculation_grain(company_facts):
+                    calculation_failed = True
+                    calculation_grain_mismatch = True
+                    continue
+                (_, denominator_fact, denominator_value), (_, numerator_fact, numerator_value) = company_facts
+                evidence_ids = [
+                    str(item)
+                    for fact in (denominator_fact, numerator_fact)
+                    for item in fact.get("evidence_ids", [])
+                    if item
+                ]
+                try:
+                    ratio = calculate(
+                        "percentage_ratio", [denominator_value, numerator_value],
+                        unit="%", evidence_ids=evidence_ids,
+                    )
+                except (TypeError, ValueError):
+                    # A zero or non-finite denominator is not an answerable ratio.
+                    calculation_failed = True
+                else:
+                    calculations.append({
+                        **self._calculation_payload(ratio),
+                        "company": company,
+                        "metric": route.context.get("metric"),
+                        "metric_id": route.context.get("metric_id"),
+                        "period": self._fact_period_key(numerator_fact)[:4] or route.context.get("period"),
+                    })
         if (
             derived_operation == "accounting_identity"
             and len(selected) == 3
@@ -1605,7 +1615,7 @@ class HcxFunctionCallingService:
                     }
 
         if derived_operation == "percentage_ratio":
-            operation_complete = len(calculations) == 1
+            operation_complete = len(calculations) == len(companies or [None])
         elif derived_operation == "accounting_identity":
             operation_complete = accounting_identity is not None
         else:
@@ -1631,7 +1641,7 @@ class HcxFunctionCallingService:
             "values": [
                 {
                     "company": requirement.get("company"),
-                    "period": requirement.get("period"),
+                    "period": requirement.get("period") or self._fact_period_key(fact)[:4] or None,
                     "metric": requirement.get("account"),
                     "display_value": fact.get("display_value"),
                 }
@@ -1641,7 +1651,20 @@ class HcxFunctionCallingService:
             "accounting_identity": accounting_identity,
             "winner": None,
         }
-        if complete and len(metrics) == 1 and len(companies) >= 2 and len(periods) <= 1:
+        if (
+            complete
+            and derived_operation == "percentage_ratio"
+            and len(companies) >= 2
+        ):
+            maximum = max(Decimal(str(item["value"])) for item in calculations)
+            winners = [
+                str(item.get("company"))
+                for item in calculations
+                if Decimal(str(item["value"])) == maximum
+            ]
+            comparison["winner"] = winners[0] if len(winners) == 1 else None
+            comparison["tie"] = len(winners) > 1
+        elif complete and not derived_operation and len(metrics) == 1 and len(companies) >= 2 and len(periods) <= 1:
             maximum = max(value for _, _, value in selected)
             winners = [str(requirement.get("company")) for requirement, _, value in selected if value == maximum]
             comparison["winner"] = winners[0] if len(winners) == 1 else None
@@ -2797,14 +2820,19 @@ class HcxFunctionCallingService:
                 pass
             else:
                 lines.append(f"증가율은 약 {growth_value:.2f}%입니다.")
-        ratio = next((item for item in calculation_rows if item.get("operation") == "percentage_ratio"), None)
-        if ratio is not None and ratio.get("value") is not None:
+        ratios = [
+            item for item in calculation_rows
+            if item.get("operation") == "percentage_ratio" and item.get("value") is not None
+        ]
+        for ratio in ratios:
             try:
                 ratio_value = Decimal(str(ratio["value"]))
             except (InvalidOperation, ValueError):
-                pass
+                continue
             else:
-                lines.append(f"{metric}은 약 {ratio_value:.2f}%입니다.")
+                company = str(ratio.get("company") or "")
+                prefix = f"{company}의 " if company else ""
+                lines.append(f"{prefix}{metric}은 약 {ratio_value:.2f}%입니다.")
         identity = comparison.get("accounting_identity")
         if isinstance(identity, Mapping):
             right_side = format_financial_value(

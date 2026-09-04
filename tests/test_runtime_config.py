@@ -34,12 +34,13 @@ class RuntimeConfigTests(unittest.TestCase):
             config.validate()
 
     def test_compose_agents_can_start_without_dense_health(self):
-        compose_path = Path(__file__).resolve().parents[1] / "compose.yaml"
-        compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
-
-        for service_name in ("disclosure-agent", "disclosure-agent-staging"):
-            dependencies = compose["services"][service_name].get("depends_on", {})
-            self.assertNotIn("dense-retriever", dependencies)
+        repository = Path(__file__).resolve().parents[1]
+        for filename in ("compose.yaml", "compose.release.yaml"):
+            compose = yaml.safe_load((repository / filename).read_text(encoding="utf-8"))
+            for service_name in ("disclosure-agent", "disclosure-agent-staging"):
+                with self.subTest(filename=filename, service=service_name):
+                    dependencies = compose["services"][service_name].get("depends_on", {})
+                    self.assertNotIn("dense-retriever", dependencies)
 
 
 if __name__ == "__main__":
