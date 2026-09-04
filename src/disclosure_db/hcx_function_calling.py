@@ -973,17 +973,24 @@ class HcxFunctionCallingService:
         common: Mapping[str, object],
         warning_codes: Sequence[str],
         limitation_code: str,
+        fallback_override: HcxGeneratedAnswer | None = None,
+        metadata_updates: Mapping[str, object] | None = None,
     ) -> FunctionCallingResult:
         result_common = dict(common)
         result_common["metadata"] = dict(
             common.get("metadata") if isinstance(common.get("metadata"), Mapping) else {}
         )
+        if metadata_updates:
+            result_common["metadata"].update(metadata_updates)  # type: ignore[union-attr]
         admission = build_claim_admission(tool_response)
-        fallback = self._deterministic_claim_fallback(
-            tool_response,
-            admission,
-            tuple(available_citations),
-            route,
+        fallback = (
+            fallback_override
+            or self._deterministic_claim_fallback(
+                tool_response,
+                admission,
+                tuple(available_citations),
+                route,
+            )
         )
         if fallback is None:
             result_common["recommended_action"] = "abstain"
@@ -1455,8 +1462,19 @@ class HcxFunctionCallingService:
                     "period": route.context.get("period"),
                 })
         if derived_operation == "accounting_identity" and len(selected) == 3:
+            metric_labels = [
+                str(item) for item in route.context.get("metrics", []) if item
+            ]
+            metric_ids = [
+                str(item) for item in route.context.get("metric_ids", []) if item
+            ]
+            account_ids_by_label = dict(zip(metric_labels, metric_ids))
             by_account = {
-                str(requirement.get("account_id") or ""): (fact, value)
+                str(
+                    requirement.get("account_id")
+                    or account_ids_by_label.get(str(requirement.get("account") or ""))
+                    or ""
+                ): (fact, value)
                 for requirement, fact, value in selected
             }
             if set(by_account) == {"total_assets", "total_liabilities", "total_equity"}:
@@ -2301,19 +2319,20 @@ class HcxFunctionCallingService:
             )
             if verification is not None:
                 generated, claimed_amount_matches = verification
-                citations = self._selected_citations(
-                    tool_call.name, generated.citation_ids, available_citations,
+                return self._verified_deterministic_fallback_result(
+                    tool_call=tool_call,
+                    tool_response=tool_response,
+                    route=route,
+                    available_citations=available_citations,
+                    common=common,
+                    warning_codes=("deterministic_amount_verification",),
+                    limitation_code="deterministic_amount_verification",
+                    fallback_override=generated,
+                    metadata_updates={
+                        "deterministic_amount_verification_used": True,
+                        "claimed_amount_matches": claimed_amount_matches,
+                    },
                 )
-                if citations:
-                    common["metadata"]["deterministic_amount_verification_used"] = True  # type: ignore[index]
-                    common["metadata"]["claimed_amount_matches"] = claimed_amount_matches  # type: ignore[index]
-                    return self._result(
-                        "answered", self._render_answer(generated.answer, citations),
-                        answer_allowed=True,
-                        citation_ids=[item.evidence_id for item in citations],
-                        citations=[item.to_dict() for item in citations],
-                        **common,
-                    )
 
         if route is not None and route.workflow == "financial_change_reason":
             data = tool_response.get("data")

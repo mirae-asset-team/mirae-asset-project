@@ -562,11 +562,10 @@ class DeterministicQuestionRouter:
                     "company": company,
                     **period,
                     "account": metric,
-                    "account_id": account_id,
                 }
                 for company in required_companies
                 for period in required_periods
-                for account_id, metric in metrics
+                for _, metric in metrics
             ]
             metric_ids = {account_id for account_id, _ in metrics}
             accounting_identity = (

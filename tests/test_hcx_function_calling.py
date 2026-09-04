@@ -1504,6 +1504,8 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertIn("97,146,675,000,000원", result.answer)
         self.assertEqual(client.generation_calls, [])
         self.assertFalse(result.metadata["claimed_amount_matches"])
+        self.assertEqual(result.metadata["verification_trace"]["status"], "fallback")
+        self.assertEqual(len(result.metadata["claim_support"]), 1)
 
     def test_foreign_currency_conversion_abstains_without_external_rate(self) -> None:
         registry = NamedRegistry({})

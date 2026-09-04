@@ -413,7 +413,7 @@ class DeterministicQuestionRouterTests(unittest.TestCase):
         self.assertEqual(route.workflow, "financial_comparison")
         self.assertEqual(route.context["derived_operation"], "accounting_identity")
         self.assertEqual(
-            {item["account_id"] for item in route.context["requirements"]},
+            set(route.context["metric_ids"]),
             {"total_assets", "total_liabilities", "total_equity"},
         )
 
