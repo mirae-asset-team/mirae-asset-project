@@ -12,6 +12,8 @@
 
 > **2026-09-05 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, bounded analysis, 주장 단위 검증, HCX Function Calling V1.2, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결 및 QA Growth v4 보완이 안전 통합되어 있습니다. Judge Stress V2의 tracked 코드는 개발 480건만 생성하고, 전체 600건 검증에는 별도 git-ignored private holdout 120건을 요구합니다. 로컬 contract harness는 앱·provider를 호출하지 않으므로 해당 480건 통과를 앱 품질로 해석하면 안 됩니다. 통합 release gate는 누락·stale·비유한 지표, 원시 결과 불일치, identity 불일치와 변조된 PASS 보고서를 fail-closed로 거부합니다.
 
+> **main 통합:** PR #5가 CI 통과 후 merge commit `076ca73`으로 병합되었습니다. 병합 직후 release gate는 34개 사유로 계속 `BLOCKED_HARD_GATE`여서 새 이미지를 8000에 승격하지 않았고 기존 공개 서비스는 그대로 유지했습니다.
+
 > **2026-09-03 정형 응답 QA 보완:** HCX credential이 없거나 provider가 일시 중단돼도 결정론적으로 라우팅할 수 있는 재무 수치·기업 비교·기간 증감 질문은 read-only SQLite의 검증된 fact와 citation으로 답합니다. HCX는 이 경로의 도구 선택·계산에 관여하지 않으며, 서버가 만든 답변도 주장 단위 숫자·계산·evidence 검증을 모두 통과해야 노출됩니다. 실제 DB 8종 QA에서 삼성전자 최신값, 에스엠 alias, 다중 지표, 다중 기업, 기간 차이/증가율과 세 가지 안전 거절을 확인했습니다. 이는 private holdout/provider/Dense release gate를 대체하지 않으며, 8001은 외부 health timeout 상태라 배포하지 않았습니다.
 
 ### 현재 한눈에 보기

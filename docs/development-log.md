@@ -1011,10 +1011,17 @@
 - 최소 수정 후 신규 focused는 `6 passed`, 관련 확대 회귀는 `127 passed, 70 subtests`였다. 실제 D 드라이브 read-only 감사에서 base `financial_fact=0`, overlay `financial_fact=1,191`을 확인했고 첫 validated 표본이 `corpus_confirmed`로 통과했다.
 - 최종 전체 Python은 `939 passed, 2 skipped, 98 warnings, 260 subtests passed` (`424.44s`)였다. D 드라이브 파일은 수정하지 않았고 credential/NCP 설정과 release hard gate도 변경하지 않았다.
 
-### 2026-09-05T01:18:00+09:00 — 최종 재리뷰 기간·검수자 신원 경계 수정
+### 2026-09-05T01:07:34+09:00 — 최종 재리뷰 기간·검수자 신원 경계 수정
 
 - 최종 재리뷰에서 Ground Truth grouping이 기간 전체 signature를 키에서 버려 같은 연도·scope의 분기 flow와 연간 flow를 합칠 수 있음을 P1으로 확인했다. 또한 QA 화면의 작성자·검수자 이름은 하나의 공유 Basic Auth 뒤에서 사용자가 입력하는 문자열이므로 독립 신원을 기술적으로 증명하지 못한다는 P2를 재확인했다.
 - TDD RED는 분기 duration/비연말 instant가 연간 truth index에 들어가는 문제, 서로 다른 시작일을 가진 fact가 하나의 grain으로 합쳐지는 문제, QA 화면의 신원 한계 미표시를 합쳐 `3 failed, 10 passed`였다.
 - Ground Truth key와 출력에 `period_type`, `period_start`, `period_end`, `instant_date`를 모두 보존한다. v4 연간 질문에는 `YYYY-01-01~YYYY-12-31` duration 또는 `YYYY-12-31` instant만 사용할 수 있고 그 외 fact는 `non_annual_period`로 거절한다.
 - QA 화면은 입력 이름이 인증된 개인 신원이 아니라 감사 라벨이며 실제 2인 검수는 팀 운영자가 확인해야 함을 명시한다. 동일 라벨 자기 승인 차단은 실수 방지 절차 통제로 유지하지만 인증 보장으로 주장하지 않는다.
 - focused Python은 `13 passed`, Web은 `13 passed`였다. 최종 전체 Python은 `941 passed, 2 skipped, 98 warnings, 260 subtests passed` (`344.73s`)였다. base/overlay는 이 수정에서 열지 않았고 credential, NCP 설정, release hard gate도 변경하지 않았다.
+
+### 2026-09-05T01:13:38+09:00 — PR #5 main 병합과 8000 승격 판정
+
+- `integration/qa-growth-v4-main`의 32개 통합 커밋을 PR #5로 제출했다. GitHub Actions `contracts-and-tests`는 `2m37s`에 통과했고, PR은 merge commit `076ca73b2e9bb920debc2558583e9d4254fdac74`로 `main`에 병합됐다. `cf8ab29`가 `main` 조상이고 제외 대상 `cbb8004`와 추적 `.env`/PEM/key/zip은 `main`에 없음을 재검증했다.
+- 병합 뒤 release evaluator를 새 임시 출력 경로로 재실행했다. 종료코드 `1`, `release_state=BLOCKED_HARD_GATE`, `hard_gate_passed=false`, 차단 사유 `34`개가 재현됐다. 주요 원인은 private holdout/실제 Judge·provider·security·latency 결과와 trusted commit/image/data identity 부재, stale financial/retrieval 관측, Sparse Recall@20 `0.487179... < 0.95`다.
+- 공인 8000의 기존 `/`와 `/health`는 HTTP 200이며 `ready=true`, `company_count=76`, provider/function calling configured 상태다. 그러나 응답에 최신 release identity가 없고 동일-image 8001 검증·최종 PASS가 없으므로 새 `main` 이미지를 8000에 승격하지 않았다. 기존 정상 서비스와 rollback 자산은 변경하지 않았다.
+- D 드라이브와 NCP의 base/overlay/search, `.env`, credential, PEM, ACG 및 인증 설정은 읽거나 변경하지 않았다. 승격은 private holdout과 실제 staging 관측으로 34개 사유를 해소하고 같은 gate가 PASS한 뒤에만 재개한다.
