@@ -4,6 +4,8 @@
 
 `agent/judge-stress-v2` 브랜치에서 Task 1~8의 로컬 구현·검증을 완료했다. 실제 600건 앱/provider 평가와 운영 승격은 완료된 것으로 주장하지 않는다. 통합 release gate의 현재 결과는 `BLOCKED_HARD_GATE`이며, 34개 차단 사유가 남아 있어 8001/8000 및 NCP 배포를 실행하지 않았다. 다음 작업은 private holdout 120건과 실제 staging provider/identity를 준비해 같은 gate를 재실행하는 것이다.
 
+> 2026-09-05 최종 재검토 갱신: 원격 `main` `f9b6ad1` 위에서 Dense sidecar 장애가 agent 기동을 막지 않도록 release Compose를 수정(`e88854a`)했고, 다중 기업 파생비율이 모든 기업의 operand를 보존하도록 수정했다(`0fb3a07`). 실제 read-only DB에서 에스엠/삼성전자 최근 영업이익률과 citation 4건을 확인했고 전체 Python `943 passed, 2 skipped, 264 subtests`, Web `13/13`을 통과했다. 그러나 새 120-case 검색 평가도 Recall@20 `0.487179...`, p95 `31.29s`였고 fresh gate는 사유 33개의 `BLOCKED_HARD_GATE`다. private holdout/provider/trusted deployment identity와 검색 95%가 충족되기 전에는 8000을 덮어쓰지 않는다. 기존 8000은 HTTP 200·`ready=true` 상태로 유지했다.
+
 > 2026-09-03 Task 8 갱신: 원시 결과 재계산, 변조 방지, all-citation 검증, 동시성/보안 카운터, freshness와 외부 trust anchor를 하나의 gate로 통합했다. 배포는 Git archive 기반 pre-stage→8001 실제 평가→최종 gate→별도 8000 승격의 두 단계다. PASS 보고서도 27개 metric을 독립 검증하고, traversal·rollback 부재·image/mount/health identity 불일치를 fail-closed로 거부한다. 반복 독립 재리뷰에서 발견된 상위 집계, raw latency, provider 실행표지와 untracked build-input 우회를 모두 닫았고 focused `181 passed, 94 subtests`, 전체 Python `868 passed, 2 skipped, 240 subtests`를 통과했다.
 
 > 2026-09-03 정형 응답 QA 갱신: provider 미설정 상태의 결정론적 재무 route가 Tool 실행 전에 `provider_unavailable`로 끝나던 결함을 수정했다. 검증된 fact, 다중 지표, 다중 기업, 기간 차이·증가율은 read-only DB에서 계산하고 claim verifier를 통과한 경우에만 답한다. 같은 공시의 여러 evidence ID는 구조화 citation에 모두 보존하고, 사용자에게 렌더링하는 접수번호 목록만 중복 제거한다. 실제 DB 8종 QA는 모두 기대 상태를 확인했고 8001 `/health`는 10초 timeout이므로 배포는 계속 차단했다.
