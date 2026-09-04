@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>공시 에이전트 검수 데스크</title>
+    <link rel="stylesheet" href="/static/lab.css">
+  </head>
+  <body>
+    <header class="desk-bar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">Q</span>
+        <div>
+          <p class="brand-kicker">팀 공유 원장</p>
+          <h1>공시 답변 검수 데스크</h1>
+        </div>
+      </div>
+      <p id="lab-status" role="status">이름을 적고 검수를 남기면 팀 원장에 쌓입니다.</p>
+    </header>
+
+    <main class="desk">
+      <section class="gate" aria-labelledby="gate-title">
+        <h2 id="gate-title">검수자 연결</h2>
+        <p>공개 질문 화면과 분리된 팀 원장입니다. 입력한 이름은 감사용 라벨이며 인증된 개인 신원이 아닙니다. 실제 2인 검수는 팀 운영자가 확인합니다.</p>
+        <form id="gate-form" class="gate-form">
+          <label>검수자 이름
+            <input id="qa-reviewer" name="reviewer" maxlength="80" required autocomplete="nickname" placeholder="이름">
+          </label>
+          <button type="submit">이름 저장</button>
+        </form>
+      </section>
+
+      <dl id="summary-board" class="summary-board" hidden>
+        <div><dt>검수</dt><dd id="stat-reviews">0</dd></div>
+        <div><dt>맞음</dt><dd id="stat-correct">0</dd></div>
+        <div><dt>틀림·위험</dt><dd id="stat-bad">0</dd></div>
+        <div><dt>성능 실행</dt><dd id="stat-perf">0</dd></div>
+        <div><dt>발전 기록</dt><dd id="stat-miles">0</dd></div>
+        <div><dt>Gold 후보</dt><dd id="stat-gold">0</dd></div>
+        <div><dt>Gold 승인</dt><dd id="stat-gold-approved">0</dd></div>
+      </dl>
+
+      <nav class="tabs" aria-label="원장 구분">
+        <button type="button" class="tab is-active" data-panel="review-panel">검수 기록</button>
+        <button type="button" class="tab" data-panel="perf-panel">성능 기록</button>
+        <button type="button" class="tab" data-panel="mile-panel">발전 과정</button>
+        <button type="button" class="tab" data-panel="gold-panel">Gold Workbench</button>
+        <a id="export-link" class="export" href="/lab/export.html">HTML 원장 내려받기</a>
+        <a class="export" href="/lab/export/gold.jsonl">승인 Gold JSONL</a>
+      </nav>
+
+      <section id="review-panel" class="panel">
+        <form id="ask-form" class="composer">
+          <label>공개 서버에 던질 질문
+            <textarea id="ask-question" maxlength="4000" required placeholder="삼성전자의 최근 사업보고서 기준 매출액을 알려줘"></textarea>
+          </label>
+          <button type="submit">질문하고 답 받기</button>
+          <p id="ask-status" class="hint">같은 서버의 /query를 호출하므로 이용자가 보는 답과 동일합니다.</p>
+        </form>
+        <form id="review-form" class="review-form">
+          <label>질문
+            <textarea id="review-question" maxlength="4000" required></textarea>
+          </label>
+          <label>서버 답변
+            <textarea id="review-answer" maxlength="20000" required></textarea>
+          </label>
+          <fieldset>
+            <legend>판정</legend>
+            <label><input type="radio" name="verdict" value="correct" required> 맞음</label>
+            <label><input type="radio" name="verdict" value="partial"> 부분 맞음</label>
+            <label><input type="radio" name="verdict" value="abstain_ok"> 거절이 맞음</label>
+            <label><input type="radio" name="verdict" value="incorrect"> 틀림</label>
+            <label><input type="radio" name="verdict" value="unsafe"> 근거 없이 답함</label>
+            <label><input type="radio" name="verdict" value="error"> 서버 오류</label>
+          </fieldset>
+          <label>메모
+            <textarea id="review-notes" maxlength="8000" placeholder="원문 대조, 빠진 기간, 잘못된 정정본 등"></textarea>
+          </label>
+          <input type="hidden" id="review-meta">
+          <button type="submit">검수 기록 저장</button>
+        </form>
+        <div id="review-ledger" class="ledger" aria-live="polite"></div>
+      </section>
+
+      <section id="perf-panel" class="panel" hidden>
+        <form id="perf-form" class="review-form">
+          <label>스위트 이름
+            <input id="perf-suite" maxlength="120" required placeholder="pytest / financial_release / stress-300">
+          </label>
+          <div class="number-row">
+            <label>통과 <input id="perf-passed" type="number" min="0" step="1"></label>
+            <label>실패 <input id="perf-failed" type="number" min="0" step="1"></label>
+            <label>건너뜀 <input id="perf-skipped" type="number" min="0" step="1"></label>
+            <label>p50 ms <input id="perf-p50" type="number" min="0" step="0.01"></label>
+            <label>p95 ms <input id="perf-p95" type="number" min="0" step="0.01"></label>
+          </div>
+          <label>커밋
+            <input id="perf-commit" maxlength="64" placeholder="선택">
+          </label>
+          <label>메모
+            <textarea id="perf-notes" maxlength="8000" placeholder="무엇을 측정했는지, 게이트 통과 여부"></textarea>
+          </label>
+          <button type="submit">성능 기록 저장</button>
+        </form>
+        <div id="perf-ledger" class="ledger"></div>
+      </section>
+
+      <section id="mile-panel" class="panel" hidden>
+        <form id="mile-form" class="review-form">
+          <label>제목
+            <input id="mile-title" maxlength="200" required placeholder="예: 정정 계보 fail-closed 적용">
+          </label>
+          <label>구분
+            <select id="mile-category">
+              <option value="process">작업 방식</option>
+              <option value="serving">서빙</option>
+              <option value="retrieval">검색</option>
+              <option value="gold">Gold</option>
+              <option value="perf">성능</option>
+              <option value="deploy">배포</option>
+              <option value="other">기타</option>
+            </select>
+          </label>
+          <label>내용
+            <textarea id="mile-body" maxlength="8000" required placeholder="무엇을 바꿨고, 무엇은 아직 아닌지"></textarea>
+          </label>
+          <button type="submit">발전 과정 저장</button>
+        </form>
+        <div id="mile-ledger" class="ledger"></div>
+      </section>
+
+      <section id="gold-panel" class="panel" hidden>
+        <header class="gold-heading">
+          <div>
+            <h2>Gold Workbench</h2>
+            <p>QA 판정과 정답은 분리됩니다. 근거를 먼저 확인하고 정답을 작성한 뒤 다른 검수자가 승인합니다.</p>
+          </div>
+          <button id="gold-refresh" type="button" class="secondary-button">후보 새로고침</button>
+        </header>
+        <label class="candidate-picker">검수할 후보
+          <select id="gold-candidate-select">
+            <option value="">후보를 선택하세요</option>
+          </select>
+        </label>
+        <p id="gold-empty" class="empty-state">검수 기록 표의 ‘Gold 후보’ 버튼으로 후보를 만드세요.</p>
+        <article id="gold-workspace" class="gold-workspace" hidden>
+          <header class="candidate-titlebar">
+            <div>
+              <p id="gold-candidate-meta" class="candidate-meta"></p>
+              <h3 id="gold-question"></h3>
+            </div>
+            <span id="gold-status" class="status-chip"></span>
+          </header>
+
+          <details class="model-answer">
+            <summary>모델 답변 보기 — 원문 판단을 마친 뒤 여세요</summary>
+            <p id="gold-model-answer"></p>
+          </details>
+
+          <form id="gold-form" class="gold-form">
+            <section class="gold-pane evidence-pane" aria-labelledby="evidence-title">
+              <div class="pane-heading">
+                <h3 id="evidence-title">근거 패킷</h3>
+                <p>정확한 셀·문장과 공시 버전을 확인하고 사용할 근거만 선택하세요.</p>
+              </div>
+              <div id="gold-evidence-list" class="evidence-list"></div>
+              <label>후보 공시 접수번호
+                <textarea id="gold-filing-ids" rows="2" placeholder="한 줄에 하나씩 입력"></textarea>
+              </label>
+              <label class="check-row">
+                <input id="gold-table-validated" type="checkbox">
+                선택한 표 셀의 행·열 헤더와 단위를 원문에서 확인함
+              </label>
+            </section>
+
+            <section class="gold-pane truth-pane" aria-labelledby="truth-title">
+              <div class="pane-heading">
+                <h3 id="truth-title">정답 계약</h3>
+                <p>모델 문장을 평가하는 대신 원문으로 확정한 정답을 기록하세요.</p>
+              </div>
+              <div class="field-grid">
+                <label>질문 ID
+                  <input id="gold-question-id" maxlength="200" required>
+                </label>
+                <label>질문 유형
+                  <select id="gold-question-type">
+                    <option value="single_filing_fact">단일 공시 사실</option>
+                    <option value="table_cell">표 셀</option>
+                    <option value="period_comparison">기간 비교</option>
+                    <option value="cross_company_comparison">기업 비교</option>
+                    <option value="correction_aware">정정 인지</option>
+                    <option value="multi_filing_synthesis">복수 공시 종합</option>
+                    <option value="unanswerable">답변 불가</option>
+                    <option value="adversarial">공격·함정</option>
+                  </select>
+                </label>
+                <label>답변 가능성
+                  <select id="gold-answerability">
+                    <option value="answerable">답변 가능</option>
+                    <option value="unanswerable">답변 불가</option>
+                    <option value="ambiguous">모호함</option>
+                  </select>
+                </label>
+                <label>정답 형식
+                  <select id="gold-answer-kind">
+                    <option value="text">텍스트</option>
+                    <option value="numeric">숫자</option>
+                    <option value="multi_numeric">복수 숫자</option>
+                    <option value="unanswerable">답변 불가</option>
+                  </select>
+                </label>
+              </div>
+
+              <label data-answer-kind="text">정답 문장
+                <textarea id="gold-answer-text" placeholder="원문이 직접 뒷받침하는 정답"></textarea>
+              </label>
+              <div class="number-row" data-answer-kind="numeric" hidden>
+                <label>값 <input id="gold-answer-value" inputmode="decimal" placeholder="쉼표 없이 입력"></label>
+                <label>단위 <input id="gold-answer-unit" placeholder="원, 주, %"></label>
+                <label>배율 <input id="gold-answer-scale" type="number" min="1" step="1" value="1"></label>
+              </div>
+              <label data-answer-kind="multi_numeric" hidden>복수 숫자 값 JSON
+                <textarea id="gold-answer-values" spellcheck="false" placeholder='[{"label":"2025년","value":"100","unit":"원","scale":1,"evidence_ids":["ev..."]}]'></textarea>
+              </label>
+              <label data-answer-kind="unanswerable" hidden>답변 불가 사유
+                <textarea id="gold-answer-reason" placeholder="자료에 없거나 확정할 수 없는 이유"></textarea>
+              </label>
+
+              <fieldset>
+                <legend>기간</legend>
+                <div class="field-grid">
+                  <label>기간 유형
+                    <select id="gold-period-type">
+                      <option value="not_applicable">해당 없음</option>
+                      <option value="instant">시점</option>
+                      <option value="duration">기간</option>
+                      <option value="event_date">사건일</option>
+                    </select>
+                  </label>
+                  <label>시작일 <input id="gold-period-start" type="date"></label>
+                  <label>종료일 <input id="gold-period-end" type="date"></label>
+                  <label>시점·사건일 <input id="gold-period-instant" type="date"></label>
+                </div>
+              </fieldset>
+
+              <div class="field-grid">
+                <label>재무 범위
+                  <select id="gold-scope">
+                    <option value="not_applicable">해당 없음</option>
+                    <option value="consolidated">연결</option>
+                    <option value="separate">별도</option>
+                  </select>
+                </label>
+                <label>버전 기준
+                  <select id="gold-version-basis">
+                    <option value="latest_effective">현재 유효본</option>
+                    <option value="as_of">기준일 당시</option>
+                    <option value="not_applicable">해당 없음</option>
+                  </select>
+                </label>
+                <label>기준일
+                  <input id="gold-as-of" type="date">
+                </label>
+                <label>공격 유형
+                  <input id="gold-attack-label" maxlength="120" placeholder="선택">
+                </label>
+              </div>
+              <label>검수 메모
+                <textarea id="gold-notes" maxlength="8000" placeholder="원문 대조 위치, 단위와 정정 계보 판단"></textarea>
+              </label>
+              <section class="automatic-checks" aria-labelledby="checks-title">
+                <h3 id="checks-title">자동검사</h3>
+                <ul id="gold-checks"></ul>
+              </section>
+              <div class="gold-actions">
+                <button id="gold-save" type="submit">초안 저장·재검사</button>
+                <button id="gold-approve" type="button" class="approve-button">Gold 승인</button>
+                <button id="gold-reject" type="button" class="danger-button">반려</button>
+              </div>
+              <p id="gold-action-status" class="hint" role="status"></p>
+            </section>
+          </form>
+        </article>
+      </section>
+    </main>
+    <script type="module" src="/static/lab.js"></script>
+  </body>
+</html>

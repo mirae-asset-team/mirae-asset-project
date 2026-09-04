@@ -81,6 +81,61 @@ class QaEvaluationTests(unittest.TestCase):
         )
         self.assertIsNone(format_financial_value("7332", 1, None))
 
+    def test_backend_formats_explicit_requested_krw_unit_without_rounding(self) -> None:
+        # A value of at least one whole requested unit renders in that unit,
+        # exactly (no rounding).
+        self.assertEqual(
+            format_financial_value("12500000000000", 1, "KRW", output_unit="jo"),
+            "12.5조 원",
+        )
+        self.assertEqual(
+            format_financial_value("665007", 1_000_000, "KRW", output_unit="eok"),
+            "6,650.07억 원",
+        )
+        self.assertEqual(
+            format_financial_value("3380060390", 1_000, "KRW", output_unit="won"),
+            "3,380,060,390,000원",
+        )
+        self.assertIsNone(
+            format_financial_value("1", 1, "KRW", output_unit="unsupported")
+        )
+
+    def test_requested_large_unit_below_one_falls_back_to_natural_units(self) -> None:
+        # A sub-조 value asked "in 조" must not render as an unreadable
+        # "0.0561363조"; it falls back to the natural mixed units, still exact.
+        self.assertEqual(
+            format_financial_value("665007", 1_000_000, "KRW", output_unit="jo"),
+            "6,650억 700만 원",
+        )
+        self.assertEqual(
+            format_financial_value("-5", 100_000_000, "KRW", output_unit="jo"),
+            "-5억 원",
+        )
+        self.assertEqual(
+            format_financial_value("56136309970", 1, "KRW", output_unit="jo"),
+            "561억 3,630만 9,970원",
+        )
+
+    def test_korean_krw_amounts_are_parsed_from_answer_prose(self) -> None:
+        from decimal import Decimal
+
+        from disclosure_db.disclosure_tools import parse_korean_krw_amounts
+
+        cases = {
+            "매출액은 333조 6,059억 원입니다.": [Decimal("333605900000000")],
+            "**33,360억 원**으로 집계되었습니다.": [Decimal("3336000000000")],
+            "영업이익은 1,231십억 원입니다.": [Decimal("1231000000000")],
+            "매출은 131,370,425백만원입니다.": [Decimal("131370425000000")],
+            "당기순이익은 770,249,337,092원입니다.": [Decimal("770249337092")],
+            "2025년 매출과 2024년 매출은 각각 1조 원, 9,000억 원입니다.": [
+                Decimal("1000000000000"), Decimal("900000000000"),
+            ],
+            "성장률은 5.2%입니다.": [],
+            "2025년 사업보고서를 참조하세요.": [],
+        }
+        for text, expected in cases.items():
+            self.assertEqual(parse_korean_krw_amounts(text), expected, text)
+
     def test_real_comparison_workflow_executes_both_companies_and_blocks_missing_value(self) -> None:
         def financial(company: str, value: str, index: int) -> dict[str, object]:
             evidence_id = f"ev-{index}"; receipt = f"2026031800000{index}"

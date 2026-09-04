@@ -36,9 +36,11 @@ _ACCOUNT_SUFFIXES = (
     "은", "는", "이", "가", "을", "를", "의", "과", "와", "도", "만", "에", "로", "으로",
     "에서", "부터", "까지", "보다", "대비", "이며", "이고", "인지", "인가", "에는", "에대해",
     "에대한", "관련", "기준", "금액", "값", "규모", "기여", "영향", "전망", "표", "셀", "항목",
-    "계정", "얼마", "수치", "실적", "결과", "정보", "내역", "추이", "변화", "증가", "감소", "비교",
+    "계정", "얼마", "수치", "실적", "결과", "정보", "내역", "추이", "변화", "변동", "증가", "감소", "비교",
     "차이", "증감", "비율", "비중", "합계", "총액", "최근", "상위", "하위", "넘", "초과",
     "이상", "알려", "찾아", "조회", "확인", "주",
+    # Colloquial tails: a register change must not hide the account word.
+    "좀", "궁금", "어때", "어떻", "말해", "보여", "몇",
 )
 
 
@@ -228,12 +230,40 @@ class FinancialAccountCatalog:
                 yield found, end
             offset = found + 1
 
+    def _english_matches(self, text: str) -> list[_Match]:
+        """Match registered English labels on word boundaries before compaction."""
+        result: list[_Match] = []
+        seen: set[tuple[int, int, str]] = set()
+        for account in self.accounts:
+            for raw_surface in (account.label_en, *account.aliases):
+                if not raw_surface or not raw_surface.isascii() or not any(
+                    character.isalpha() for character in raw_surface
+                ):
+                    continue
+                words = re.findall(r"[a-z0-9]+", raw_surface.casefold())
+                if not words:
+                    continue
+                pattern = re.compile(
+                    r"(?<![a-z0-9])" + r"[\s\W_]+".join(map(re.escape, words)) + r"(?![a-z0-9])",
+                    re.IGNORECASE,
+                )
+                for found in pattern.finditer(text):
+                    key = (found.start(), found.end(), account.canonical_id)
+                    if key not in seen:
+                        result.append(_Match(
+                            found.start(), found.end(), "exact_alias", raw_surface,
+                            account.canonical_id,
+                        ))
+                        seen.add(key)
+        return result
+
     def _matches(self, text: str) -> list[_Match]:
         result: list[_Match] = []
         seen: set[tuple[int, int, str, str | None]] = set()
         for account in self.accounts:
             surfaces = (
                 ("exact_label", account.label_ko),
+                ("exact_alias", account.label_en),
                 *(("exact_alias", alias) for alias in account.aliases),
                 *(("typo_alias", alias) for alias in account.typo_aliases),
             )
@@ -291,8 +321,10 @@ class FinancialAccountCatalog:
             if any(folded == unicodedata.normalize("NFKC", concept).strip().casefold() for concept in account.xbrl_concepts):
                 return self._resolved(account, "exact_xbrl_concept", raw)
 
+        english_matches = self._non_shadowed(self._english_matches(folded))
         compact = normalize_account_text(raw)
-        matches = self._non_shadowed(self._matches(compact))
+        compact_matches = self._non_shadowed(self._matches(compact))
+        matches = [*english_matches, *compact_matches]
         if not matches:
             legacy_target = self.legacy_ids.get(raw)
             if legacy_target is not None:

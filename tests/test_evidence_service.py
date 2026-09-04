@@ -43,6 +43,42 @@ def seed_search_db(path: Path) -> None:
 
 
 class EvidenceServiceTests(unittest.TestCase):
+    def test_dense_company_filings_supports_base_without_reporter_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            database = Path(temp) / "base.sqlite"
+            connection = sqlite3.connect(database)
+            connection.execute(
+                "CREATE TABLE filing(filing_id TEXT PRIMARY KEY, issuer_name TEXT, listed_name TEXT, "
+                "stock_code TEXT, issuer_corp_code TEXT)"
+            )
+            connection.execute(
+                "CREATE TABLE filing_version(filing_id TEXT, lineage_status TEXT, is_current INTEGER, "
+                "effective_from TEXT, effective_to TEXT)"
+            )
+            connection.execute(
+                "INSERT INTO filing VALUES (?,?,?,?,?)",
+                ("f1", "삼성전자", "삼성전자", "005930", "00126380"),
+            )
+            connection.execute(
+                "INSERT INTO filing_version VALUES (?,?,?,?,?)",
+                ("f1", "root", 1, "2024-03-01", None),
+            )
+            connection.commit()
+            connection.close()
+
+            service = EvidenceService(database)
+
+            kwargs = {
+                "filing_id": None,
+                "as_of": None,
+                "filed_at": None,
+                "start_date": None,
+                "end_date": None,
+                "correction_policy": "current",
+            }
+            self.assertEqual(service._dense_filings(company="삼성전자", **kwargs), ["f1"])
+            self.assertEqual(service._dense_filings(company="005930", **kwargs), ["f1"])
+
     @staticmethod
     def _search_rows() -> list[dict[str, object]]:
         return [
@@ -301,6 +337,25 @@ class EvidenceServiceTests(unittest.TestCase):
             search_index.assert_not_called()
             self.assertTrue(bundle.answerable)
             self.assertEqual(bundle.financial_facts[0]["value_numeric"], "100")
+
+    def test_account_id_lookup_caps_overlay_rows_to_latest_period_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            base, overlay = root / "base.sqlite", root / "overlay.sqlite"
+            seed_search_db(base)
+            overlay.touch()
+            service = EvidenceService(base, overlay, attestation=Mock())
+            plan = QueryPlan(
+                "삼성전자 매출액", company="삼성전자", fact_domain="financial",
+                account_id="revenue", latest_period_count=1,
+            )
+            with patch.object(service, "_base_identity_valid", return_value=True), patch(
+                "disclosure_db.evidence_service.overlay_matches_base", return_value=True,
+            ), patch("disclosure_db.evidence_service.fetch_overlay_facts", return_value=[]) as fetch, patch(
+                "disclosure_db.evidence_service.query_database", return_value=[],
+            ):
+                service.search(plan, limit=8)
+            self.assertEqual(fetch.call_args.kwargs["limit"], 1)
 
     def test_search_returns_safe_evidence_refs_and_plan(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

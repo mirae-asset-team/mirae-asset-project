@@ -29,7 +29,11 @@ from .claim_verification import (
     build_claim_admission,
     verify_generated_claims,
 )
-from .disclosure_tools import format_financial_value
+from .disclosure_tools import (
+    format_financial_value,
+    normalized_financial_value,
+    parse_korean_krw_amounts,
+)
 from .evidence_sufficiency import EvidenceSufficiencyChecker
 from .hcx_prompts import (
     HCX_FINAL_ANSWER_SYSTEM_PROMPT,
@@ -60,6 +64,17 @@ _FORECAST_CLAIM = re.compile(
     r"전망(?:됩니다|입니다|된다|될|치)|추정(?:됩니다|입니다|된다|될|치)|forecast|estimated?)",
     re.IGNORECASE,
 )
+_AMOUNT_VERIFICATION_MARKERS = ("맞죠", "맞나요", "맞습니까", "맞아요", "맞는지", "맞는가")
+_AMOUNT_UNIT_TOKEN = re.compile(r"([0-9][0-9,.]*)\s*(조|십억|억|천만|백만|만|원)")
+_AMOUNT_UNIT_FACTOR = {
+    "조": Decimal(10) ** 12,
+    "십억": Decimal(10) ** 9,
+    "억": Decimal(10) ** 8,
+    "천만": Decimal(10) ** 7,
+    "백만": Decimal(10) ** 6,
+    "만": Decimal(10) ** 4,
+    "원": Decimal(1),
+}
 _SAFE_DIAGNOSTIC_TOKEN = re.compile(r"[A-Za-z0-9_.:-]{1,128}\Z")
 _LOGGER = logging.getLogger(__name__)
 
@@ -890,6 +905,12 @@ class HcxFunctionCallingService:
         ]
         if not safe_ids:
             safe_ids = list(available_evidence_ids)
+        if route is not None and route.workflow == "financial_change_reason":
+            premise = str(data.get("premise") or "")
+            if premise.endswith("_not_confirmed"):
+                return self._deterministic_change_reason_answer(
+                    route, safe_response, safe_ids,
+                )
         comparison = data.get("comparison")
         if isinstance(comparison, Mapping) and comparison.get("status") == "complete":
             comparison_answer = self._deterministic_financial_comparison_answer(
@@ -952,17 +973,24 @@ class HcxFunctionCallingService:
         common: Mapping[str, object],
         warning_codes: Sequence[str],
         limitation_code: str,
+        fallback_override: HcxGeneratedAnswer | None = None,
+        metadata_updates: Mapping[str, object] | None = None,
     ) -> FunctionCallingResult:
         result_common = dict(common)
         result_common["metadata"] = dict(
             common.get("metadata") if isinstance(common.get("metadata"), Mapping) else {}
         )
+        if metadata_updates:
+            result_common["metadata"].update(metadata_updates)  # type: ignore[union-attr]
         admission = build_claim_admission(tool_response)
-        fallback = self._deterministic_claim_fallback(
-            tool_response,
-            admission,
-            tuple(available_citations),
-            route,
+        fallback = (
+            fallback_override
+            or self._deterministic_claim_fallback(
+                tool_response,
+                admission,
+                tuple(available_citations),
+                route,
+            )
         )
         if fallback is None:
             result_common["recommended_action"] = "abstain"
@@ -1061,6 +1089,35 @@ class HcxFunctionCallingService:
             warnings=list(warning_codes),
             **result_common,
         )
+
+    @staticmethod
+    def _requested_unit_response(
+        route: QuestionRoute, response: Mapping[str, object],
+    ) -> dict[str, object]:
+        """Replace fact display strings with exact backend-rendered requested units."""
+
+        output_unit = str(route.context.get("requested_output_unit") or "")
+        if output_unit not in {"jo", "eok", "won"}:
+            return dict(response)
+        data = response.get("data")
+        facts = data.get("facts") if isinstance(data, Mapping) else None
+        if not isinstance(facts, list):
+            return dict(response)
+        rendered_facts: list[object] = []
+        for raw_fact in facts:
+            if not isinstance(raw_fact, Mapping):
+                rendered_facts.append(raw_fact)
+                continue
+            fact = dict(raw_fact)
+            rendered = format_financial_value(
+                fact.get("value_numeric"), fact.get("scale") or 1,
+                fact.get("unit") or "KRW", output_unit=output_unit,
+            )
+            if rendered:
+                fact["display_value"] = rendered
+                fact["requested_output_unit"] = output_unit
+            rendered_facts.append(fact)
+        return {**dict(response), "data": {**dict(data), "facts": rendered_facts}}
 
     def _merged_response(
         self,
@@ -1260,6 +1317,66 @@ class HcxFunctionCallingService:
             return None
         return value if value.is_finite() else None
 
+    @classmethod
+    def _calculation_grain_key(cls, fact: Mapping[str, object]) -> tuple[str, ...] | None:
+        period = fact.get("period")
+        identifiers = fact.get("company_identifiers")
+        if not isinstance(period, Mapping) or not isinstance(identifiers, Mapping):
+            return None
+        company = next((
+            str(identifiers.get(name) or "").strip()
+            for name in ("issuer_corp_code", "stock_code", "listed_name", "issuer_name", "company")
+            if str(identifiers.get(name) or "").strip()
+        ), "")
+        filing_id = str(fact.get("filing_id") or fact.get("rcept_no") or "").strip()
+        scope = str(fact.get("scope") or "").strip()
+        period_type = str(period.get("period_type") or "").strip()
+        if period_type == "instant":
+            period_key = str(period.get("instant_date") or "").strip()
+        elif period_type == "duration":
+            period_key = "|".join((
+                str(period.get("period_start") or "").strip(),
+                str(period.get("period_end") or "").strip(),
+            ))
+        else:
+            return None
+        if not all((company, filing_id, scope, period_key)):
+            return None
+        return company, filing_id, scope, period_type, period_key
+
+    @classmethod
+    def _facts_share_calculation_grain(
+        cls, selected: list[tuple[dict[str, object], dict[str, object], Decimal]],
+    ) -> bool:
+        keys = [cls._calculation_grain_key(fact) for _, fact, _ in selected]
+        return bool(keys) and all(key is not None for key in keys) and len(set(keys)) == 1
+
+    @staticmethod
+    def _comparison_scope_key(fact: Mapping[str, object]) -> tuple[str, ...] | None:
+        period = fact.get("period")
+        identifiers = fact.get("company_identifiers")
+        if not isinstance(period, Mapping) or not isinstance(identifiers, Mapping):
+            return None
+        company = next((
+            str(identifiers.get(name) or "").strip()
+            for name in ("issuer_corp_code", "stock_code", "listed_name", "issuer_name", "company")
+            if str(identifiers.get(name) or "").strip()
+        ), "")
+        key = (
+            company,
+            str(fact.get("account_id") or "").strip(),
+            str(fact.get("scope") or "").strip(),
+            str(period.get("period_type") or "").strip(),
+        )
+        return key if all(key) else None
+
+    @classmethod
+    def _facts_share_comparison_scope(
+        cls, selected: list[tuple[dict[str, object], dict[str, object], Decimal]],
+    ) -> bool:
+        keys = [cls._comparison_scope_key(fact) for _, fact, _ in selected]
+        return bool(keys) and all(key is not None for key in keys) and len(set(keys)) == 1
+
     def _financial_comparison_response(
         self, route: QuestionRoute, primary: Mapping[str, object],
     ) -> dict[str, object]:
@@ -1337,7 +1454,20 @@ class HcxFunctionCallingService:
             all_facts.append(fact)
         calculations: list[dict[str, object]] = []
         calculation_failed = False
-        if len(metrics) == 1 and len(companies) == 1 and len(periods) >= 2:
+        calculation_grain_mismatch = False
+        derived_operation = str(route.context.get("derived_operation") or "")
+        accounting_identity: dict[str, object] | None = None
+        is_cross_period_calculation = (
+            len(metrics) == 1 and len(companies) == 1 and len(periods) >= 2
+        )
+        if (
+            is_cross_period_calculation
+            and selected
+            and not self._facts_share_comparison_scope(selected)
+        ):
+            calculation_failed = True
+            calculation_grain_mismatch = True
+        if is_cross_period_calculation and not calculation_grain_mismatch:
             ordered_selected = sorted(selected, key=lambda item: str(item[0].get("period") or ""))
             for (previous_requirement, previous, previous_value), (current_requirement, current, current_value) in zip(
                 ordered_selected, ordered_selected[1:],
@@ -1374,16 +1504,122 @@ class HcxFunctionCallingService:
                         "to_period": current_requirement.get("period"),
                     },
                 ))
-        complete = (
-            len(requirements) >= 2
-            and len(selected) == len(requirements)
-            and not calculation_failed
-            and (
+        # A catalog-declared ratio (부채비율, 영업이익률 …) reaches here with its
+        # two source accounts already fetched, in (denominator, numerator)
+        # order. Computing it from validated facts keeps the answer grounded in
+        # the same evidence as the operands.
+        if (
+            derived_operation in {"percentage_ratio", "accounting_identity"}
+            and selected
+            and not calculation_grain_mismatch
+            and not self._facts_share_calculation_grain(selected)
+        ):
+            calculation_failed = True
+            calculation_grain_mismatch = True
+        if (
+            derived_operation == "percentage_ratio"
+            and len(selected) == 2
+            and not calculation_grain_mismatch
+        ):
+            (_, denominator_fact, denominator_value), (_, numerator_fact, numerator_value) = selected
+            evidence_ids = [
+                str(item)
+                for fact in (denominator_fact, numerator_fact)
+                for item in fact.get("evidence_ids", [])
+                if item
+            ]
+            try:
+                ratio = calculate(
+                    "percentage_ratio", [denominator_value, numerator_value],
+                    unit="%", evidence_ids=evidence_ids,
+                )
+            except (TypeError, ValueError):
+                # A zero or non-finite denominator is not an answerable ratio.
+                calculation_failed = True
+            else:
+                calculations.append({
+                    **self._calculation_payload(ratio),
+                    "company": companies[0] if companies else None,
+                    "metric": route.context.get("metric"),
+                    "metric_id": route.context.get("metric_id"),
+                    "period": route.context.get("period"),
+                })
+        if (
+            derived_operation == "accounting_identity"
+            and len(selected) == 3
+            and not calculation_grain_mismatch
+        ):
+            metric_labels = [
+                str(item) for item in route.context.get("metrics", []) if item
+            ]
+            metric_ids = [
+                str(item) for item in route.context.get("metric_ids", []) if item
+            ]
+            account_ids_by_label = dict(zip(metric_labels, metric_ids))
+            by_account = {
+                str(
+                    requirement.get("account_id")
+                    or account_ids_by_label.get(str(requirement.get("account") or ""))
+                    or ""
+                ): (fact, value)
+                for requirement, fact, value in selected
+            }
+            if set(by_account) == {"total_assets", "total_liabilities", "total_equity"}:
+                assets_fact, assets = by_account["total_assets"]
+                liabilities_fact, liabilities = by_account["total_liabilities"]
+                equity_fact, equity = by_account["total_equity"]
+                right_side_evidence_ids = [
+                    str(item)
+                    for fact in (liabilities_fact, equity_fact)
+                    for item in fact.get("evidence_ids", [])
+                    if item
+                ]
+                residual_evidence_ids = [
+                    str(item)
+                    for fact in (assets_fact, liabilities_fact, equity_fact)
+                    for item in fact.get("evidence_ids", [])
+                    if item
+                ]
+                try:
+                    right_side = calculate(
+                        "sum", [liabilities, equity], unit="KRW",
+                        evidence_ids=right_side_evidence_ids,
+                    )
+                    residual = calculate(
+                        "difference", [right_side.value, assets],
+                        unit="KRW", evidence_ids=residual_evidence_ids,
+                    )
+                except (TypeError, ValueError):
+                    calculation_failed = True
+                else:
+                    calculations.extend((
+                        {**self._calculation_payload(right_side), "role": "liabilities_plus_equity"},
+                        {**self._calculation_payload(residual), "role": "assets_minus_liabilities_and_equity"},
+                    ))
+                    accounting_identity = {
+                        "status": "matches" if residual.value == 0 else "does_not_match",
+                        "assets": format(assets, "f"),
+                        "liabilities_plus_equity": format(right_side.value, "f"),
+                        "difference": format(residual.value, "f"),
+                        "unit": "KRW",
+                    }
+
+        if derived_operation == "percentage_ratio":
+            operation_complete = len(calculations) == 1
+        elif derived_operation == "accounting_identity":
+            operation_complete = accounting_identity is not None
+        else:
+            operation_complete = (
                 len(metrics) != 1
                 or len(companies) != 1
                 or len(periods) < 2
                 or len(calculations) == 2 * (len(periods) - 1)
             )
+        complete = (
+            len(requirements) >= 2
+            and len(selected) == len(requirements)
+            and not calculation_failed
+            and operation_complete
         )
         comparison: dict[str, object] = {
             "status": "complete" if complete else "incomplete",
@@ -1402,6 +1638,7 @@ class HcxFunctionCallingService:
                 for requirement, fact, _ in selected
             ],
             "calculations": calculations,
+            "accounting_identity": accounting_identity,
             "winner": None,
         }
         if complete and len(metrics) == 1 and len(companies) >= 2 and len(periods) <= 1:
@@ -1432,7 +1669,16 @@ class HcxFunctionCallingService:
             checker_tool="get_financial_facts",
             checker_data={"facts": all_facts, "requirement_coverage": requirement_coverage},
             required_response_indexes=tuple(range(len(responses))),
-            extra_reasons=("all_financial_comparison_requirements_covered",) if complete else ("financial_comparison_requirement_missing",),
+            extra_reasons=(
+                ("all_financial_comparison_requirements_covered",)
+                if complete
+                else (
+                    "financial_calculation_grain_mismatch",
+                    "financial_comparison_requirement_missing",
+                )
+                if calculation_grain_mismatch
+                else ("financial_comparison_requirement_missing",)
+            ),
             force_answer_allowed=complete,
         )
 
@@ -1488,6 +1734,16 @@ class HcxFunctionCallingService:
                 force_answer_allowed=False,
             )
         previous, current = ordered[current_index - 1], ordered[current_index]
+        previous_value = self._fact_comparable_value(previous)
+        current_value = self._fact_comparable_value(current)
+        if previous_value is None or current_value is None:
+            return self._merged_response(
+                tool_name="get_financial_facts", request=route.arguments,
+                data={**dict(primary_data), "calculations": [], "premise": "unverified"},
+                responses=[primary], checker_tool="get_financial_facts", checker_data=dict(primary_data),
+                required_response_indexes=(0,), extra_reasons=("backend_normalized_value_unavailable",),
+                force_answer_allowed=False,
+            )
         evidence_ids = [
             str(item)
             for fact in (previous, current)
@@ -1496,11 +1752,11 @@ class HcxFunctionCallingService:
         ]
         try:
             difference = calculate(
-                "difference", [previous.get("value_numeric"), current.get("value_numeric")],
-                unit=current.get("unit"), evidence_ids=evidence_ids,
+                "difference", [previous_value, current_value],
+                unit="KRW", evidence_ids=evidence_ids,
             )
             growth = calculate(
-                "growth_rate", [previous.get("value_numeric"), current.get("value_numeric")],
+                "growth_rate", [previous_value, current_value],
                 unit="%", evidence_ids=evidence_ids,
             )
         except (TypeError, ValueError):
@@ -1512,13 +1768,35 @@ class HcxFunctionCallingService:
                 force_answer_allowed=False,
             )
         calculations.extend((self._calculation_payload(difference), self._calculation_payload(growth)))
-        increased = getattr(difference, "value") > 0
+        if difference.value > 0:
+            actual_direction = "increase"
+        elif difference.value < 0:
+            actual_direction = "decrease"
+        else:
+            actual_direction = "unchanged"
+        claimed_direction = str(route.context.get("claimed_direction") or "") or None
+        premise_confirmed = (
+            actual_direction != "unchanged"
+            if claimed_direction is None
+            else claimed_direction == actual_direction
+        )
+        premise = (
+            f"confirmed_{actual_direction}"
+            if premise_confirmed and claimed_direction is not None
+            else "change_confirmed"
+            if premise_confirmed
+            else f"{claimed_direction}_not_confirmed"
+            if claimed_direction is not None
+            else "change_not_confirmed"
+        )
         base_data = {
             **dict(primary_data),
             "calculations": calculations,
-            "premise": "confirmed_increase" if increased else "increase_not_confirmed",
+            "premise": premise,
+            "claimed_direction": claimed_direction,
+            "actual_direction": actual_direction,
         }
-        if not increased:
+        if not premise_confirmed:
             return self._merged_response(
                 tool_name="get_financial_facts", request=route.arguments, data=base_data,
                 responses=[primary], checker_tool="get_financial_facts", checker_data=dict(primary_data),
@@ -1538,7 +1816,7 @@ class HcxFunctionCallingService:
             tool_name="get_financial_facts", request=route.arguments,
             data={**base_data, "reason_evidence": dict(search.get("data") or {})},
             responses=[primary, search], checker_tool="get_financial_facts", checker_data=dict(primary_data),
-            required_response_indexes=(0, 1), extra_reasons=("increase_verified_before_reason_search",),
+            required_response_indexes=(0, 1), extra_reasons=("change_verified_before_reason_search",),
             force_answer_allowed=True,
         )
 
@@ -1595,6 +1873,83 @@ class HcxFunctionCallingService:
             required_response_indexes=(0,),
             extra_reasons=("requested_document_confirmed",) if matched else ("requested_document_not_found",),
             force_answer_allowed=bool(matched),
+        )
+
+    def _event_disclosure_response(
+        self, route: QuestionRoute, primary: Mapping[str, object],
+    ) -> dict[str, object]:
+        patterns = [
+            re.sub(r"[^가-힣A-Za-z0-9]", "", str(item))
+            for item in route.context.get("required_report_patterns", [])
+            if item
+        ]
+        if not patterns:
+            return dict(primary)
+        bundle = self._bundle_from_response(primary)
+        items = bundle.get("items")
+        required_start = str(route.context.get("required_start_date") or "")
+        required_end = str(route.context.get("required_end_date") or "")
+        matched = [
+            item for item in items
+            if isinstance(item, Mapping)
+            and any(
+                pattern in re.sub(
+                    r"[^가-힣A-Za-z0-9]", "", str(item.get("report_name") or "")
+                )
+                for pattern in patterns
+            )
+            and (
+                not required_start
+                or required_start <= str(item.get("filed_at") or "") <= required_end
+            )
+        ] if isinstance(items, list) else []
+        if matched:
+            evidence_ids = list(dict.fromkeys(
+                str(evidence_id)
+                for item in matched
+                for evidence_id in (
+                    item.get("evidence_ids")
+                    if isinstance(item.get("evidence_ids"), (list, tuple))
+                    else [item.get("evidence_id")]
+                )
+                if evidence_id
+            ))
+            filing_ids = list(dict.fromkeys(
+                str(item.get("filing_id") or item.get("rcept_no"))
+                for item in matched
+                if item.get("filing_id") or item.get("rcept_no")
+            ))
+            primary_data = primary.get("data") if isinstance(primary.get("data"), Mapping) else {}
+            return {
+                **dict(primary),
+                "data": {
+                    **dict(primary_data),
+                    "results": matched,
+                    "document_existence": "confirmed",
+                    "required_report_patterns": patterns,
+                },
+                "evidence_bundle": {
+                    **dict(bundle),
+                    "items": matched,
+                    "evidence_ids": evidence_ids,
+                    "filing_ids": filing_ids,
+                },
+            }
+        primary_data = primary.get("data") if isinstance(primary.get("data"), Mapping) else {}
+        return self._merged_response(
+            tool_name="search_disclosures",
+            request=route.arguments,
+            data={
+                **dict(primary_data),
+                "document_existence": "not_found",
+                "required_report_patterns": patterns,
+            },
+            responses=[primary],
+            checker_tool="search_disclosures",
+            checker_data=dict(primary_data),
+            required_response_indexes=(0,),
+            extra_reasons=("requested_event_report_not_found",),
+            force_answer_allowed=False,
         )
 
     @staticmethod
@@ -1717,6 +2072,8 @@ class HcxFunctionCallingService:
         primary = self.registry.dispatch(tool_call.name, tool_call.arguments)
         if str(primary.get("status") or "error") in {"invalid_request", "error"}:
             return tool_call, primary
+        if route.context.get("requested_output_unit"):
+            primary = self._requested_unit_response(route, primary)
         if route.workflow == "financial_derived":
             return tool_call, self._financial_derived_response(route, primary)
         if route.workflow == "financial_comparison":
@@ -1725,6 +2082,8 @@ class HcxFunctionCallingService:
             return tool_call, self._trend_response(question, route, primary)
         if route.workflow == "financial_change_reason":
             return tool_call, self._change_reason_response(question, route, primary)
+        if route.workflow == "event_disclosure_check":
+            return tool_call, self._event_disclosure_response(route, primary)
         if route.workflow == "correction_search_then_lineage":
             return self._correction_response(route, primary)
         if route.workflow == "document_summary_check":
@@ -2017,7 +2376,7 @@ class HcxFunctionCallingService:
             )
         if not answer_allowed:
             return self._result(
-                "abstained", self._abstention_text(recommended_action),
+                "abstained", self._abstention_text(recommended_action, sufficiency),
                 warnings=["answer_generation_blocked_by_sufficiency"], **common,
             )
 
@@ -2042,6 +2401,49 @@ class HcxFunctionCallingService:
                 "abstained", UNANSWERABLE_TEXT,
                 warnings=["answer_generation_blocked_by_incomplete_correction_receipts"], **common,
             )
+
+        if (
+            route is not None
+            and route.reason == "structured_financial_lookup"
+            and any(marker in question for marker in _AMOUNT_VERIFICATION_MARKERS)
+        ):
+            available_ids = list(
+                tool_response.get("evidence_bundle", {}).get("evidence_ids", [])  # type: ignore[union-attr]
+            )
+            verification = self._deterministic_amount_verification_answer(
+                question, tool_response, available_ids,
+            )
+            if verification is not None:
+                generated, claimed_amount_matches = verification
+                return self._verified_deterministic_fallback_result(
+                    tool_call=tool_call,
+                    tool_response=tool_response,
+                    route=route,
+                    available_citations=available_citations,
+                    common=common,
+                    warning_codes=("deterministic_amount_verification",),
+                    limitation_code="deterministic_amount_verification",
+                    fallback_override=generated,
+                    metadata_updates={
+                        "deterministic_amount_verification_used": True,
+                        "claimed_amount_matches": claimed_amount_matches,
+                    },
+                )
+
+        if route is not None and route.workflow == "financial_change_reason":
+            data = tool_response.get("data")
+            premise = str(data.get("premise") or "") if isinstance(data, Mapping) else ""
+            if premise.endswith("_not_confirmed"):
+                common["metadata"]["deterministic_premise_correction_used"] = True  # type: ignore[index]
+                return self._verified_deterministic_fallback_result(
+                    tool_call=tool_call,
+                    tool_response=tool_response,
+                    route=route,
+                    available_citations=available_citations,
+                    common=common,
+                    warning_codes=("question_premise_not_confirmed",),
+                    limitation_code="question_premise_not_confirmed",
+                )
 
         if not self.client.configured:
             if not self._allows_deterministic_fallback(tool_call, route):
@@ -2290,6 +2692,68 @@ class HcxFunctionCallingService:
         answer = sentences[0] if len(sentences) == 1 else "\n".join(f"- {item}" for item in sentences)
         return HcxGeneratedAnswer(answer, tuple(available_evidence_ids[:5]))
 
+    @classmethod
+    def _deterministic_amount_verification_answer(
+        cls,
+        question: str,
+        tool_response: Mapping[str, object],
+        available_evidence_ids: Sequence[str],
+    ) -> tuple[HcxGeneratedAnswer, bool] | None:
+        claimed_amounts = parse_korean_krw_amounts(question)
+        unit_tokens = list(_AMOUNT_UNIT_TOKEN.finditer(question))
+        if len(claimed_amounts) != 1 or not unit_tokens or not available_evidence_ids:
+            return None
+        data = tool_response.get("data")
+        facts = data.get("facts") if isinstance(data, Mapping) else None
+        ordered = sorted(
+            (dict(item) for item in facts if isinstance(item, Mapping)),
+            key=cls._fact_period_key,
+        ) if isinstance(facts, list) else []
+        candidates = [
+            fact for fact in ordered
+            if fact.get("support_level") == "structured"
+            and fact.get("validation_status") == "validated"
+        ]
+        if len(candidates) != 1:
+            return None
+        fact = candidates[0]
+        actual = normalized_financial_value(
+            fact.get("value_numeric"), fact.get("scale") or 1, fact.get("unit") or "KRW",
+        )
+        display_value = str(fact.get("display_value") or "") or format_financial_value(
+            fact.get("value_numeric"), fact.get("scale") or 1, fact.get("unit") or "KRW",
+        )
+        if actual is None or not display_value:
+            return None
+        claimed = claimed_amounts[0]
+        if re.search(r"(?:-|마이너스)\s*[0-9]", question):
+            claimed = -claimed
+        precision_text = unit_tokens[-1].group(1).replace(",", "")
+        decimal_places = len(precision_text.partition(".")[2])
+        rounding_step = _AMOUNT_UNIT_FACTOR[unit_tokens[-1].group(2)] / (Decimal(10) ** decimal_places)
+        claimed_amount_matches = abs(actual - claimed) <= rounding_step / 2
+
+        identifiers = fact.get("company_identifiers")
+        company = str(identifiers.get("company") or "") if isinstance(identifiers, Mapping) else ""
+        period = cls._fact_period_key(fact)[:4]
+        account = str(fact.get("account_name") or fact.get("account_id") or "재무 수치")
+        scope = {"consolidated": "연결", "separate": "별도"}.get(str(fact.get("scope") or ""), "")
+        subject = " ".join(item for item in (company, f"{period}년" if period else "", scope, account) if item)
+        if claimed_amount_matches:
+            answer = f"네. 공시 수치 기준으로 {subject}은 {display_value}입니다."
+        else:
+            answer = (
+                f"아니요. 질문에 제시된 금액은 공시 수치와 일치하지 않습니다. "
+                f"{subject}은 {display_value}입니다."
+            )
+        fact_evidence_ids = [
+            str(item) for item in fact.get("evidence_ids", [])
+            if str(item) in available_evidence_ids
+        ]
+        if not fact_evidence_ids:
+            return None
+        return HcxGeneratedAnswer(answer, tuple(fact_evidence_ids)), claimed_amount_matches
+
     @staticmethod
     def _deterministic_financial_comparison_answer(
         tool_response: Mapping[str, object],
@@ -2333,7 +2797,87 @@ class HcxFunctionCallingService:
                 pass
             else:
                 lines.append(f"증가율은 약 {growth_value:.2f}%입니다.")
+        ratio = next((item for item in calculation_rows if item.get("operation") == "percentage_ratio"), None)
+        if ratio is not None and ratio.get("value") is not None:
+            try:
+                ratio_value = Decimal(str(ratio["value"]))
+            except (InvalidOperation, ValueError):
+                pass
+            else:
+                lines.append(f"{metric}은 약 {ratio_value:.2f}%입니다.")
+        identity = comparison.get("accounting_identity")
+        if isinstance(identity, Mapping):
+            right_side = format_financial_value(
+                identity.get("liabilities_plus_equity"), 1, identity.get("unit") or "KRW",
+            )
+            difference_value = format_financial_value(
+                identity.get("difference"), 1, identity.get("unit") or "KRW",
+            )
+            if right_side and identity.get("status") == "matches":
+                lines.append(f"부채총계와 자본총계의 합은 {right_side}으로 자산총계와 일치합니다.")
+            elif right_side and difference_value:
+                lines.append(
+                    f"부채총계와 자본총계의 합은 {right_side}이며, "
+                    f"자산총계와의 차이는 {difference_value}입니다."
+                )
         return HcxGeneratedAnswer("\n".join(lines), tuple(available_evidence_ids[:5]))
+
+    @classmethod
+    def _deterministic_change_reason_answer(
+        cls,
+        route: QuestionRoute,
+        tool_response: Mapping[str, object],
+        available_evidence_ids: Sequence[str],
+    ) -> HcxGeneratedAnswer | None:
+        data = tool_response.get("data")
+        facts = data.get("facts") if isinstance(data, Mapping) else None
+        if not isinstance(facts, list) or len(facts) < 2 or not available_evidence_ids:
+            return None
+        ordered = sorted(
+            (dict(item) for item in facts if isinstance(item, Mapping)),
+            key=cls._fact_period_key,
+        )
+        target_end = str(route.context.get("target_end_date") or "")
+        if target_end:
+            target_year = target_end[:4]
+            indexes = [
+                index for index, fact in enumerate(ordered)
+                if cls._fact_period_key(fact).startswith(target_year)
+            ]
+            current_index = indexes[-1] if indexes else -1
+        else:
+            current_index = len(ordered) - 1
+        if current_index <= 0:
+            return None
+        previous, current = ordered[current_index - 1], ordered[current_index]
+        previous_display = str(previous.get("display_value") or "") or format_financial_value(
+            previous.get("value_numeric"), previous.get("scale") or 1,
+            previous.get("unit") or "KRW",
+        )
+        current_display = str(current.get("display_value") or "") or format_financial_value(
+            current.get("value_numeric"), current.get("scale") or 1,
+            current.get("unit") or "KRW",
+        )
+        if not previous_display or not current_display:
+            return None
+        claimed = str(route.context.get("claimed_direction") or "change")
+        actual = str(data.get("actual_direction") or "unchanged") if isinstance(data, Mapping) else "unchanged"
+        direction_ko = {"increase": "증가", "decrease": "감소", "unchanged": "변동 없음"}
+        claimed_ko = direction_ko.get(claimed, "변동")
+        actual_ko = direction_ko.get(actual, "변동 없음")
+        previous_period = cls._fact_period_key(previous)[:4]
+        current_period = cls._fact_period_key(current)[:4]
+        identifiers = current.get("company_identifiers")
+        company = str(identifiers.get("company") or "") if isinstance(identifiers, Mapping) else ""
+        account = str(current.get("account_name") or current.get("account_id") or "재무 수치")
+        subject = " ".join(item for item in (company, account) if item)
+        answer = (
+            f"질문의 {claimed_ko} 전제는 공시 수치와 일치하지 않습니다. "
+            f"{subject}은 {previous_period}년 {previous_display}에서 "
+            f"{current_period}년 {current_display}로 {actual_ko}했습니다. "
+            f"따라서 {claimed_ko} 원인은 검색하지 않았습니다."
+        )
+        return HcxGeneratedAnswer(answer, tuple(available_evidence_ids[:5]))
 
     @staticmethod
     def _deterministic_trend_answer(
@@ -2484,9 +3028,21 @@ class HcxFunctionCallingService:
         return sufficiency if isinstance(sufficiency, Mapping) else {}
 
     @staticmethod
-    def _abstention_text(action: str) -> str:
+    def _abstention_text(action: str, sufficiency: Mapping[str, object] | None = None) -> str:
         if action == "ask_clarification":
             return "근거 범위를 확정할 수 있도록 회사, 계정 또는 기간을 더 구체적으로 알려주세요."
+        missing = {str(item) for item in (sufficiency or {}).get("missing_requirements") or []}
+        if "validated_structured_financial_fact" in missing:
+            return (
+                "요청하신 회사·계정·기간의 검증된 재무 수치가 공시 코퍼스에서 확인되지 않아 "
+                "답변을 보류합니다. 회계연도나 연결/별도 범위를 바꿔 다시 시도해 주세요. "
+                "금융지주·보험사 손익계산서에는 매출액 계정이 별도로 표시되지 않을 수 있습니다."
+            )
+        if "search_results" in missing or "citable_evidence" in missing:
+            return (
+                "요청과 일치하는 공시 근거를 코퍼스에서 찾지 못해 답변을 보류합니다. "
+                "회사명이나 검색어를 바꾸어 다시 시도해 주세요."
+            )
         return UNANSWERABLE_TEXT
 
     def _record_failure(

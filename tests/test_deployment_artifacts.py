@@ -74,14 +74,37 @@ class DeploymentArtifactTests(unittest.TestCase):
     def test_public_limit_defaults_are_explicit_in_compose_and_example_env(self):
         compose = Path("compose.yaml").read_text(encoding="utf-8")
         example = Path(".env.example").read_text(encoding="utf-8")
+        production = compose.split("  disclosure-agent:\n", 1)[1].split(
+            "  disclosure-agent-staging:\n", 1
+        )[0]
         expected = {
             "DISCLOSURE_PUBLIC_RATE_PER_MINUTE": "120",
             "DISCLOSURE_PUBLIC_PER_IP_CONCURRENCY": "4",
             "DISCLOSURE_PUBLIC_GLOBAL_CONCURRENCY": "8",
         }
+        self.assertNotIn("DISCLOSURE_QA_DB", production)
+        self.assertNotIn('Path("/runtime").is_dir()', Path("src/disclosure_db/api.py").read_text(encoding="utf-8"))
+        self.assertIn("DISCLOSURE_QA_DB=/runtime/qa_lab.sqlite", example)
+        self.assertNotIn("DISCLOSURE_QA_TOKEN", compose)
+        self.assertNotIn("DISCLOSURE_QA_TOKEN", example)
         for name, value in expected.items():
             self.assertIn(f"{name}: ${{{name}:-{value}}}", compose)
             self.assertIn(f"{name}={value}", example)
+
+    def test_team_qa_compose_keeps_data_read_only_and_uses_nonpublic_port(self):
+        compose = Path("compose.team-qa.yaml").read_text(encoding="utf-8")
+        caddyfile = Path("Caddyfile.team-qa").read_text(encoding="utf-8")
+        self.assertNotIn("8001:8000", compose)
+        self.assertIn('"80:80"', compose)
+        self.assertIn('"443:443"', compose)
+        self.assertIn("DISCLOSURE_QA_PASSWORD_HASH", compose)
+        self.assertIn("basic_auth", caddyfile)
+        self.assertIn("reverse_proxy team-qa:8000", caddyfile)
+        self.assertIn("DISCLOSURE_QA_DB: /runtime/qa_lab.sqlite", compose)
+        self.assertIn("${DISCLOSURE_BASE_DB_HOST}:/data/base/disclosure.sqlite:ro", compose)
+        self.assertIn("${DISCLOSURE_AGENT_DB_DIR_HOST}:/data/agent:ro", compose)
+        self.assertIn("${DISCLOSURE_ATTESTATION_HOST}:/data/attestation.json:ro", compose)
+        self.assertNotIn("0.0.0.0/0", compose)
 
     def test_hcx_function_calling_environment_is_forwarded_without_tracking_local_env(self):
         compose = Path("compose.yaml").read_text(encoding="utf-8")

@@ -26,8 +26,43 @@ _TREND_MARKERS = ("트렌드", "트랜드", "추이", "동향", "빈도", "건�
 _SUMMARY_MARKERS = ("요약", "요악", "요약해", "정리해", "핵심 내용")
 _SEARCH_MARKERS = ("찾아", "검색", "언급", "관련 공시", "공시 내용", "어떤 공시")
 _CORRECTION_MARKERS = ("정정", "최초공시", "원공시", "변경 전", "변경 후")
-_CHANGE_REASON_MARKERS = ("증가한 이유", "감소한 이유", "증가 이유", "감소 이유", "변동 이유", "왜 증가", "왜 감소")
+_INCREASE_REASON_MARKERS = (
+    "증가한 이유", "증가 이유", "왜 증가", "증가했는데", "증가한 배경", "증가 배경",
+)
+_DECREASE_REASON_MARKERS = (
+    "감소한 이유", "감소 이유", "왜 감소", "감소했는데", "감소한 배경", "감소 배경",
+)
+_CHANGE_REASON_MARKERS = (*_INCREASE_REASON_MARKERS, *_DECREASE_REASON_MARKERS, "변동 이유")
+_EVENT_DISCLOSURE_MARKERS = (
+    "대량보유", "자기주식", "유상증자", "무상증자", "전환사채", "조건부자본증권",
+    "시설투자", "공급계약", "회사합병", "합병 결정", "회사분할", "분할 결정",
+    "감자 결정", "주식교환", "투자판단", "소송",
+)
+_STOCK_SPLIT_MARKERS = ("액면분할", "주식분할")
+_STOCK_SPLIT_REPORT_PATTERNS = ("주식분할결정", "액면분할결정")
 _UNAVAILABLE_MARKERS = ("시가총액", "목표주가", "미래 주가", "주가 예측", "예상 주가")
+_FOREIGN_CURRENCY_MARKERS = (
+    "미국 달러", "달러", "usd", "유로", "eur", "엔화", "일본 엔", "jpy", "위안", "cny",
+)
+# Solicitation phrasings ask for a trading decision rather than a disclosure
+# fact. Routing them through the provider cost ~9s and still ended in a
+# refusal, so the refusal is made deterministic and immediate.
+_ADVICE_MARKERS = (
+    "사도 될까", "사도 되나", "사도 돼", "매수해도", "매도해도", "팔아도 될까",
+    "投資", "투자해도", "사는 게 좋을", "사는게 좋을", "사는 게 맞", "사는게 맞",
+    "살까요", "팔까요",
+    "말려야", "추천해", "추천할", "유망한가", "괜찮은 종목", "들어가도",
+)
+_NONPUBLIC_INFORMATION_MARKERS = (
+    "공시 전인", "공시되지 않은", "아직 공시되지", "아직 공개되지", "미공개", "내부정보",
+)
+# Document-shaped questions that name no financial account. These carry a
+# company and a disclosure topic, so the search tool is the grounded route.
+_DOCUMENT_TOPIC_MARKERS = (
+    "배당", "연구개발", "위험요인", "리스크", "사업 내용", "사업내용", "주요 사업",
+    "경영진", "임원", "종업원", "직원 수", "계열회사", "지배구조", "주주",
+    "설비투자", "생산능력", "매출 구성", "제품", "시장 점유", "소송", "특허",
+)
 _COMPARISON_MARKERS = ("비교", "중", "더 높은", "더 낮은", "큰 곳", "작은 곳", "어디")
 _PERIOD_COMPARISON_MARKERS = (
     "비교", "대비", "보다", "차이", "증감액", "변화", "추이", "증가", "감소", "상승", "하락", "늘", "줄",
@@ -39,6 +74,37 @@ _CALENDAR_DATE = re.compile(
 )
 _FISCAL_YEAR_MENTION = re.compile(r"(?<!\d)(20\d{2}|\d{2})\s*년")
 _KOREAN_SUFFIXES = ("으로", "에서", "에게", "까지", "부터", "처럼", "보다", "의", "은", "는", "이", "가", "을", "를", "로")
+
+
+def _claimed_change_direction(text: str) -> str | None:
+    if any(marker in text for marker in _INCREASE_REASON_MARKERS):
+        return "increase"
+    if any(marker in text for marker in _DECREASE_REASON_MARKERS):
+        return "decrease"
+    return None
+
+
+def _requested_output_unit(text: str) -> str | None:
+    """Return only explicit KRW display-unit requests, most specific first."""
+
+    if re.search(r"조(?:원)?\s*단위", text):
+        return "jo"
+    if re.search(r"억(?:원)?\s*단위", text):
+        return "eok"
+    if re.search(r"(?<![가-힣A-Za-z0-9])원\s*단위", text):
+        return "won"
+    return None
+
+
+def _required_event_report_patterns(text: str) -> tuple[str, ...]:
+    if any(marker in text for marker in _STOCK_SPLIT_MARKERS):
+        return _STOCK_SPLIT_REPORT_PATTERNS
+    return ()
+
+
+def _requests_foreign_currency_conversion(text: str) -> bool:
+    lowered = text.casefold()
+    return "환산" in text and any(marker in lowered for marker in _FOREIGN_CURRENCY_MARKERS)
 
 
 def _distance_at_most_one(left: str, right: str) -> bool:
@@ -195,6 +261,35 @@ class DeterministicQuestionRouter:
                     corrections.append(f"alias:{observed.casefold()}->{canonical}")
         return normalized, tuple(dict.fromkeys(corrections))
 
+    def _collapse_spaced_companies(self, text: str) -> tuple[str, tuple[str, ...]]:
+        """Collapse whitespace inserted inside a registered company surface.
+
+        Token-based typo repair cannot see '삼 성 전 자' because every token
+        shrinks below the minimum match length, so spaced variants must be
+        repaired on the raw text before alias and typo normalization.
+        """
+        normalized = text
+        corrections: list[str] = []
+        surfaces = sorted(
+            {
+                surface
+                for canonical, aliases in self.company_aliases.items()
+                for surface in (canonical, *aliases)
+            } | set(self.company_candidates),
+            key=len,
+            reverse=True,
+        )
+        for company in surfaces:
+            if len(company.replace(" ", "")) < 3 or company in normalized:
+                continue
+            pattern = re.compile(r"[ \t]*".join(re.escape(character) for character in company if character != " "))
+            match = pattern.search(normalized)
+            if match is None or " " not in match.group(0) and "\t" not in match.group(0):
+                continue
+            normalized = normalized[: match.start()] + company + normalized[match.end():]
+            corrections.append(f"spacing:{match.group(0)}->{company}")
+        return normalized, tuple(corrections)
+
     def _companies_in_text(self, text: str) -> tuple[str, ...]:
         matches = [
             (text.find(company), -len(company), company)
@@ -232,7 +327,8 @@ class DeterministicQuestionRouter:
         return text.replace(core, replacement, 1), f"{core}->{replacement}"
 
     def _normalize_typos(self, text: str) -> tuple[str, tuple[str, ...]]:
-        normalized, alias_corrections = self._normalize_company_aliases(text)
+        normalized, spacing_corrections = self._collapse_spaced_companies(text)
+        normalized, alias_corrections = self._normalize_company_aliases(normalized)
         company_surfaces = tuple(
             (normalize_account_text(company), company, company)
             for company in self.company_candidates
@@ -245,6 +341,7 @@ class DeterministicQuestionRouter:
         else:
             account_correction = None
         return normalized, tuple([
+            *spacing_corrections,
             *alias_corrections,
             *(item for item in (company_correction, account_correction) if item),
         ])
@@ -272,7 +369,7 @@ class DeterministicQuestionRouter:
                 return ()
             positions = [
                 compact.find(normalize_account_text(surface))
-                for surface in (account.label_ko, *account.aliases)
+                for surface in (account.label_ko, account.label_en, *account.aliases)
             ]
             positions = [position for position in positions if position >= 0]
             if not positions:
@@ -399,6 +496,45 @@ class DeterministicQuestionRouter:
                 **route_context,
             )
 
+        if any(marker in text for marker in _ADVICE_MARKERS):
+            return QuestionRoute(
+                "unavailable",
+                "investment_solicitation_out_of_scope",
+                response_mode="deterministic",
+                message="이 서비스는 DART 공시 근거를 확인해 드리는 곳으로, 매수·매도 판단이나 투자 권유는 하지 않습니다. 공시에 기재된 재무수치나 공시 내용은 알려드릴 수 있습니다.",
+                metric_kind="UNAVAILABLE",
+                context={"available_range": "DART 공시, 구조화 재무수치, 공시 검색·요약·정정 관계"},
+                **route_context,
+            )
+
+        if _requests_foreign_currency_conversion(text):
+            return QuestionRoute(
+                "unavailable",
+                "foreign_currency_conversion_requires_external_rate",
+                response_mode="deterministic",
+                message=(
+                    "DART 공시 근거에는 환율의 기준 시점과 출처가 없어 외화 환산값을 "
+                    "검증할 수 없습니다. 공시에 기재된 원화 수치는 확인할 수 있습니다."
+                ),
+                metric_kind="UNAVAILABLE",
+                context={"available_range": "DART 공시에 기재된 원화 재무수치"},
+                **route_context,
+            )
+
+        if any(marker in text for marker in _NONPUBLIC_INFORMATION_MARKERS):
+            return QuestionRoute(
+                "unavailable",
+                "nonpublic_information_unavailable",
+                response_mode="deterministic",
+                message=(
+                    "아직 공시되지 않은 정보나 내부정보는 확인하거나 제공할 수 없습니다. "
+                    "공개된 DART 공시만 근거로 답변할 수 있습니다."
+                ),
+                metric_kind="UNAVAILABLE",
+                context={"available_range": "공개된 DART 공시"},
+                **route_context,
+            )
+
         if plan.question_type == "out_of_scope" or any(marker in text for marker in _UNAVAILABLE_MARKERS):
             return QuestionRoute(
                 "unavailable",
@@ -431,6 +567,11 @@ class DeterministicQuestionRouter:
                 for period in required_periods
                 for _, metric in metrics
             ]
+            metric_ids = {account_id for account_id, _ in metrics}
+            accounting_identity = (
+                metric_ids == {"total_assets", "total_liabilities", "total_equity"}
+                and any(marker in text for marker in ("합", "일치", "회계등식"))
+            )
             first_requirement = requirements[0]
             arguments: dict[str, object] = {
                 "company": first_requirement["company"],
@@ -469,6 +610,9 @@ class DeterministicQuestionRouter:
                     "metric_ids": [account_id for account_id, _ in metrics],
                     "intent": "financial_comparison",
                     "requirements": requirements,
+                    "derived_operation": (
+                        "accounting_identity" if accounting_identity else None
+                    ),
                     "required_evidence": "validated_structured_fact_per_company_and_period",
                 },
                 **route_context,
@@ -520,6 +664,40 @@ class DeterministicQuestionRouter:
                 **route_context,
             )
 
+        if plan.company and any(marker in text for marker in _EVENT_DISCLOSURE_MARKERS):
+            # Event-report questions (holding reports, treasury stock, capital
+            # actions...) must not depend on provider tool selection, which has
+            # been observed picking get_correction_lineage for them.
+            required_report_patterns = _required_event_report_patterns(text)
+            arguments: dict[str, object] = {
+                "question": text,
+                "company": plan.company,
+                "top_k": 10,
+            }
+            if required_report_patterns and plan.period_start and plan.period_end:
+                arguments.update({
+                    "start_date": plan.period_start,
+                    "end_date": plan.period_end,
+                })
+            return QuestionRoute(
+                "tool",
+                "event_disclosure_type_question",
+                "search_disclosures",
+                arguments,
+                workflow=(
+                    "event_disclosure_check"
+                    if required_report_patterns
+                    else "single"
+                ),
+                metric_kind="SEARCH",
+                context={
+                    "required_report_patterns": required_report_patterns,
+                    "required_start_date": plan.period_start if required_report_patterns else None,
+                    "required_end_date": plan.period_end if required_report_patterns else None,
+                },
+                **route_context,
+            )
+
         if (
             plan.company
             and plan.account_status == "resolved"
@@ -547,9 +725,69 @@ class DeterministicQuestionRouter:
                     "company": plan.company,
                     "target_start_date": plan.period_start,
                     "target_end_date": plan.period_end,
+                    "claimed_direction": _claimed_change_direction(text),
                 },
                 **route_context,
             )
+
+        if (
+            plan.company
+            and plan.account_status == "resolved"
+            and plan.account_support_level == "derived"
+            and plan.operation == "percentage_ratio"
+            and len(plan.required_account_ids) == 2
+        ):
+            # A two-account ratio (부채비율, 영업이익률 …) has both operands in
+            # the catalog formula, so it is answerable from two structured
+            # facts. Leaving it unrouted sent every one of these to provider
+            # tool selection, which picked a single-account tool and answered
+            # none of them.
+            derived = self.account_catalog.by_id.get(str(plan.account_id or ""))
+            formula = dict(derived.formula or {}) if derived is not None else {}
+            numerator = str(formula.get("numerator") or "")
+            denominator = str(formula.get("denominator") or "")
+            sources = [
+                self.account_catalog.by_id.get(denominator),
+                self.account_catalog.by_id.get(numerator),
+            ]
+            if all(item is not None and item.support_level == "structured" for item in sources):
+                period = periods[0] if periods else None
+                requirements = [
+                    {"company": str(plan.company), "period": period, "account": item.label_ko}
+                    for item in sources
+                ]
+                arguments = {
+                    "company": str(plan.company),
+                    "account": requirements[0]["account"],
+                    "correction_policy": plan.correction_policy,
+                    "top_k": 1,
+                }
+                if period:
+                    arguments["start_date"] = f"{period}-01-01"
+                    arguments["end_date"] = f"{period}-12-31"
+                if plan.scope:
+                    arguments["scope"] = plan.scope
+                return QuestionRoute(
+                    "tool",
+                    "structured_financial_derived_ratio",
+                    "get_financial_facts",
+                    arguments,
+                    workflow="financial_comparison",
+                    metric_kind="DERIVED",
+                    context={
+                        "companies": [str(plan.company)],
+                        "period": period,
+                        "periods": [period] if period else [],
+                        "metric": derived.label_ko if derived is not None else None,
+                        "metric_id": str(plan.account_id or ""),
+                        "intent": "financial_derived_ratio",
+                        "requirements": requirements,
+                        "derived_operation": "percentage_ratio",
+                        "derived_operands": [denominator, numerator],
+                        "required_evidence": "validated_structured_fact_per_account",
+                    },
+                    **route_context,
+                )
 
         if (
             plan.company
@@ -612,6 +850,7 @@ class DeterministicQuestionRouter:
                 "get_financial_facts",
                 arguments,
                 metric_kind="DIRECT",
+                context={"requested_output_unit": _requested_output_unit(text)},
                 **route_context,
             )
 
@@ -707,6 +946,24 @@ class DeterministicQuestionRouter:
             return QuestionRoute(
                 "tool",
                 "explicit_disclosure_search",
+                "search_disclosures",
+                {**common_search, "top_k": 10},
+                metric_kind="SEARCH",
+                **route_context,
+            )
+
+        if (
+            plan.company
+            and plan.question_type == "text"
+            and plan.account_status in {"unknown", "unsupported"}
+            and any(marker in text for marker in _DOCUMENT_TOPIC_MARKERS)
+        ):
+            # Named company plus a disclosure topic but no financial account:
+            # the evidence lives in report text, so search it directly instead
+            # of asking the provider which tool to use.
+            return QuestionRoute(
+                "tool",
+                "disclosure_topic_search",
                 "search_disclosures",
                 {**common_search, "top_k": 10},
                 metric_kind="SEARCH",

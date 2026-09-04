@@ -7,4 +7,3 @@ RUN pip install --no-cache-dir "torch==2.13.0+cpu" --index-url https://download.
     && pip install --no-cache-dir ".[dense]"
 EXPOSE 8080
 CMD ["disclosure-dense"]
-

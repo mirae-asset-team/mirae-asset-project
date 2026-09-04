@@ -704,7 +704,9 @@ class FinancialOverlayTests(unittest.TestCase):
                     "mtime_ns": base.stat().st_mtime_ns,
                 },
             }), encoding="utf-8")
-            answer = DisclosureAgent(AgentSettings(base, overlay, attestation_path=manifest)).answer("테스트 매출액은 얼마인가?", company="테스트")
+            answer = DisclosureAgent(AgentSettings(
+                base, overlay, attestation_path=manifest, use_hcx=False,
+            )).answer("테스트 매출액은 얼마인가?", company="테스트")
             self.assertTrue(answer.verified)
             self.assertEqual(answer.numeric_values, ["1000"])
 

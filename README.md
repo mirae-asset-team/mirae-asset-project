@@ -2,7 +2,7 @@
 
 주최 측이 제공한 공시 코퍼스를 검색·해석하고, 사용자의 주식 관련 질문에 근거 공시를 붙여 답하는 HyperCLOVA X 기반 질의응답 시스템 프로젝트입니다.
 
-처음 프로젝트를 보는 팀원은 [초보자용 프로젝트 구조·테스트·잔여 작업 안내](docs/README-project-guide.md)부터 읽어 주세요. 지금까지 구현한 흐름, 구조도, 테스트 방법, NCP 실행과 남은 전체 embedding 작업을 한 문서에 정리했습니다.
+처음 프로젝트를 보는 팀원은 [초보자용 프로젝트 구조·테스트·잔여 작업 안내](docs/README-project-guide.md)부터 읽어 주세요. 지금까지 구현한 흐름, 구조도, 테스트 방법, NCP 실행과 남은 embedding 평가·배포 작업을 한 문서에 정리했습니다.
 
 팀 저장소: [ksm12030-sudo/mirae-asset-project](https://github.com/ksm12030-sudo/mirae-asset-project)
 
@@ -10,7 +10,7 @@
 
 > **Judge Stress V2 인수인계:** Task 1~8의 로컬 구현과 회귀가 완료되었습니다. Task 8은 원시 case 결과를 재검산하는 통합 release gate와 동일-image 8001→8000 배포/rollback 절차를 구현했지만, 현재 판정은 의도적으로 `BLOCKED_HARD_GATE`입니다. private holdout·실제 staging/provider·신뢰 앵커가 없고 Sparse Recall@20이 `0.487179... < 0.95`이므로 운영 승격은 실행하지 않았습니다. 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)를 읽고 차단 항목을 해소한 뒤 같은 gate를 다시 실행하세요.
 
-> **2026-09-03 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, bounded analysis, 주장 단위 검증, HCX Function Calling V1.1, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결이 구현되어 있습니다. Judge Stress V2의 tracked 코드는 개발 480건만 생성하고, 전체 600건 검증에는 별도 git-ignored private holdout 120건을 요구합니다. 로컬 contract harness는 앱·provider를 호출하지 않으므로 해당 480건 통과를 앱 품질로 해석하면 안 됩니다. 통합 release gate는 누락·stale·비유한 지표, 원시 결과 불일치, identity 불일치와 변조된 PASS 보고서를 fail-closed로 거부합니다.
+> **2026-09-05 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, bounded analysis, 주장 단위 검증, HCX Function Calling V1.2, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결 및 QA Growth v4 보완이 안전 통합되어 있습니다. Judge Stress V2의 tracked 코드는 개발 480건만 생성하고, 전체 600건 검증에는 별도 git-ignored private holdout 120건을 요구합니다. 로컬 contract harness는 앱·provider를 호출하지 않으므로 해당 480건 통과를 앱 품질로 해석하면 안 됩니다. 통합 release gate는 누락·stale·비유한 지표, 원시 결과 불일치, identity 불일치와 변조된 PASS 보고서를 fail-closed로 거부합니다.
 
 > **2026-09-03 정형 응답 QA 보완:** HCX credential이 없거나 provider가 일시 중단돼도 결정론적으로 라우팅할 수 있는 재무 수치·기업 비교·기간 증감 질문은 read-only SQLite의 검증된 fact와 citation으로 답합니다. HCX는 이 경로의 도구 선택·계산에 관여하지 않으며, 서버가 만든 답변도 주장 단위 숫자·계산·evidence 검증을 모두 통과해야 노출됩니다. 실제 DB 8종 QA에서 삼성전자 최신값, 에스엠 alias, 다중 지표, 다중 기업, 기간 차이/증가율과 세 가지 안전 거절을 확인했습니다. 이는 private holdout/provider/Dense release gate를 대체하지 않으며, 8001은 외부 health timeout 상태라 배포하지 않았습니다.
 
@@ -27,19 +27,19 @@
 → backend가 검증된 citation과 접수번호를 Web에 반환
 ```
 
-| 영역 | 2026-09-02 상태 | 다음 작업 |
+| 영역 | 2026-09-05 상태 | 다음 작업 |
 |---|---|---|
-| 작업 브랜치 | `agent/judge-stress-v2` | Task별 독립 commit 유지 |
-| Task 8 기준 커밋 | 커밋 전 기준 `0e4e5b3` | 이 README와 같은 브랜치의 최신 커밋이 최종 기준 |
+| 작업 브랜치 | `main` + `agent/qa-growth-v4` 안전 통합 후보 | PR 검증 후 `main` 병합 |
+| 통합 기준 | `main` `cee4a56`, QA source `9d8c06a`, candidate `810ca5b` 이후 | 문제 archive 이력은 연결하지 않음 |
 | 재무계정 카탈로그 | 구현·테스트 완료 | 신규 계정 추가 시 중앙 카탈로그만 확장 |
 | Embedding Chunk v1 | XML/HTML/PDF, streaming, checkpoint/resume 구현 완료 | 전체 corpus 산출물의 manifest와 count 확인 |
 | Sparse 검색 | 운영 안전 경로, query-time fallback 회귀 통과 | Dense 장애·재시작 평가에서 계속 hard gate로 확인 |
 | BGE-M3/FAISS | full-corpus sidecar와 identity 계약 구현; Compose vector count `2,571,506`은 선언값 | 새 image/runtime manifest와 실제 artifact identity 대조 |
 | Hybrid retrieval | remote Dense adapter, RRF, 중복 제거, filter, query-time Sparse fallback 구현 | cold start/restart fallback과 Dense 품질 gate 측정 |
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
-| HCX Function Calling | V1.1 및 providerless 검증 정형 fallback 구현 | 운영 provider 문장화와 fallback을 각각 반복 smoke |
+| HCX Function Calling | V1.2 및 providerless 검증 정형 fallback 구현 | 운영 provider 문장화와 fallback을 각각 반복 smoke |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
-| 테스트 | 최신 전체 Python `877 passed, 2 skipped, 240 subtests`; Web JS `13 passed` | private/provider 600건과 실제 staging identity 평가 |
+| 테스트 | 전체 Python `941 passed, 2 skipped, 260 subtests`; Web JS `13 passed`; 팀 QA `1 passed`; 배포·위생 `48 passed, 94 subtests` | private/provider 600건과 실제 staging identity 평가 |
 | Release gate | `BLOCKED_HARD_GATE` (34개 사유) | 차단 사유를 해소한 동일 입력으로만 재평가; 임계값 완화 금지 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
@@ -104,7 +104,7 @@ python scripts/run_judge_stress_v2.py `
 
 ```powershell
 git fetch origin
-git switch agent/judge-stress-v2
+git switch main
 git pull --ff-only
 $env:PYTHONPATH = 'src'
 .\.venv\Scripts\python.exe -m pytest -q
@@ -121,6 +121,8 @@ node --test tests\web_api.test.mjs tests\web_history.test.mjs
 8. 전체 corpus HCX E2E와 Web 5종 질문을 다시 실행하고 결과를 [개발 로그](docs/development-log.md)에 기록합니다.
 
 세부 embedding 명령, 환경변수, NCP 재배포 순서는 [초보자용 프로젝트 안내](docs/README-project-guide.md)의 “남은 핵심 작업: 전체 embedding” 절을 따릅니다.
+
+팀 QA는 공개 질문 화면(`/`)이 아니라 [검수 데스크](docs/operations/qa-lab.md) `/lab`를 사용합니다. 검수 판정, 성능 측정, 발전 과정을 공유 SQLite에 쌓고 HTML 원장으로 내려받습니다. 암호는 없고 기록에 이름만 남깁니다.
 
 ## 공식 제약
 

@@ -637,6 +637,18 @@
 - Real build disposition: correction had one fully paired original/current serving group; management had two mixed text/financial groups; governance had sufficient substantive indexed evidence. The build then rejected profitability with `0/12` audited issuers satisfying both mandatory two-period slots because the structured judgment subquery serves one latest period. It failed before artifact replacement, so no replacement metric or embedding gate was produced and no target/threshold was weakened.
 - Read-only boundary: the real probes opened the immutable base, overlay and search index read-only. Pre-state identities were base `b8fb3be8...46563`, overlay `a4491f20...cb55`, and search `e223a19fc...a8793`; no promotion or database write was attempted.
 
+## 2026-08-21T17:43:48+09:00 / 2026-08-21T08:43:48Z — Loop 1 structured slot period bound
+
+- Root cause: profitability `income_trend` and `balance_sheet` require two distinct serving periods, but `_search_structured_slot` created a `QueryPlan` with default `latest_period_count=1`. Overlay then capped financial rows to that count, so same-year multi-account hits could exhaust the budget before a second period appeared. Gold also required one evidence node to carry two periods, which does not match the documented slot-level serving-result contract.
+- TDD: new tests first failed with `latest_period_count=[1, 1]`, missing `min_periods`, overlay `limit=2`, and a one-item period union. Catalog slots now declare `min_periods`; structured subqueries use `max(slot.min_periods, base.latest_period_count)`; account-id lookups still cap overlay rows to the requested period count; explicit 3-year questions remain at 3; financing-pressure financial slots stay at 1. Gold selection now takes the shortest serving-order prefix whose distinct periods meet the minimum.
+- Verification: focused freeform/planner/evidence/search/dense suites passed `135` tests with `8` subtests. Full `PYTHONPATH=src python -m pytest -q` passed `393` tests with `19` subtests. `python -m compileall -q src tests scripts` and `git diff --check` passed. Existing FastAPI lifespan deprecation warnings remain.
+- Not done: this machine has no D-drive attested base/overlay/search, so serving-admitted Gold was not regenerated and no replacement Recall/embedding gate exists. Prior `Recall@20=0.007936...` remains invalid. Loop 1 is not GO. Task 4+ and NCP redeploy were not started.
+
+## 2026-08-21 — Team QA lab ledger at `/lab`
+
+- Public `/` remains anonymous localStorage chat. Team review, performance runs, and development milestones accumulate in a separate SQLite file (`DISCLOSURE_QA_DB`, default `/runtime/qa_lab.sqlite`). There is no access token; reviewer name is stored with each record. Contest `/query` behavior, immutable corpus mounts, and rate limits were not changed. The public `/lab` URL is readable and writable by anyone who has the address.
+- HTML export is script-free. The lab page asks the same-origin `/query` so recorded answers match the public surface.
+- Verification: focused `tests/test_qa_lab.py` plus deployment/public web checks. NCP enablement still needs a token in the server `.env` and a code-only redeploy; not performed here.
 ## 2026-08-22T01:10:06+09:00 / 2026-08-21T16:10:06Z — Loop 1 Task 3 independent evaluation and NO-GO handoff
 
 - TDD RED/GREEN, period contract: profitability financial slots first failed because both audited subqueries retained `latest_period_count=1`; explicit three-year intent also collapsed to one period. `EvidenceSlot.min_periods`, the dimension catalog's `min_periods=2`, and `max(base.latest_period_count, slot.min_periods)` fixed the contract while preserving one-period lookups and explicit three-year requests. The first focused RED had two failures; the first GREEN passed `71` tests with `4` subtests.
@@ -948,3 +960,61 @@
 - Evidence: 로컬에서는 `PYTHONPATH=src python -m pytest -q`가 `877 passed, 2 skipped, 240 subtests`, Web이 `13 passed`였지만 최초 GitHub Actions run `33706316028`은 collection에서 `numpy`와 `yaml`을 찾지 못해 4 errors로 실패했다. workflow가 `.[agent] pytest httpx`만 설치하면서 Dense 단위 테스트와 compose 계약 테스트도 모두 수집한 것이 원인이다.
 - Finding: 운영 main API의 `[agent]` extra와 `Dockerfile`에 NumPy를 추가하는 것은 기존 런타임 경계를 깨고 불필요한 의존성을 늘린다. CI 테스트 환경에만 현재 검증 버전 `numpy==2.5.2`, `PyYAML==6.0.3`을 설치하고, `[dense]` 전체(FAISS/모델 포함)는 설치하지 않는 최소 변경을 선택했다.
 - TDD: workflow 계약 테스트를 먼저 바꿔 누락 설치 명령으로 `1 failed`를 확인했고, workflow 수정 후 같은 테스트가 `1 passed`로 전환됐다. D 드라이브 원본 DB, live overlay/index, credential, `.env`, PEM, NCP 설정과 운영 이미지는 변경하지 않았다.
+
+## 2026-09-02T21:20+09:00 — 대량 QA 파이프라인 1차 사이클 (judge-stress-v2 병합 후)
+
+- 통합: `origin/agent/judge-stress-v2` 23커밋을 `agent/disclosure-db-foundation`에 병합(d8cc643). 로컬 QA lab·dense WIP는 스냅샷 커밋(3139c35) 후 병합해 보존. 충돌 16개 파일은 코어 검색·평가는 팀원 일반화판, 라우트·테스트·문서는 union으로 해소. 전체 회귀 `576 passed, 2 skipped`, Web `12/12`.
+- 하네스: `scripts/run_mass_qa.py`(69개사×21템플릿=1,460문항, 결정론 검증기: 기대행동·인용·금액표시 일관성·metamorphic 쌍·안전 프로브)와 `scripts/report_mass_qa.py`, 원장 `runs/qa_mass.sqlite`(Git 제외)를 추가했다.
+- 프로덕션(:8000) 1,460문항 실측: pass 1,017 / fail 230 / error 213. error는 전부 HCX `hcx_final_generation_failed` 즉시 거절(0.1~0.3초)로, 분당 85~105건 페이스가 CLOVA QPM을 초과한 것이다. 대량 QA 지속 페이스는 concurrency 1·pace 1.3s에서도 일부 거절이 남는다.
+- 판정: sonnet 배치 7 + opus 클러스터러 1 워크플로로 실패 102건 전수 판정 후 8개 근본원인 클래스 확정. 잔여 신규 실패 151건도 동일 클래스 분포(표시 오류 111·띄어쓰기 보류 24·metamorphic 16)로 확인했다.
+- 클래스와 조치: A+B 금액 표시 오류(전체 실패의 대부분, 10×/100×/1000×)는 병합 코드의 `format_financial_value`+`display_value` 계약이 이미 해결하며 배포 대기. C 회사명 띄어쓰기 변형은 `question_routing._collapse_spaced_companies`로 TDD 수정(bfbe647). D "금융지주·보험 매출액 결손"은 신한지주 CIS 실측으로 재판정 — 순액 표시라 매출액 계정이 원래 없어 보류가 정답이며, 질문뱅크를 업종 인지형으로 보정(d7419f4)하고 런 24건을 소급 정정. E KB금융 18/18 결손은 유니버스가 고른 최신 정정본(20260619000667)이 PDF 원문이라 table_record 0건(이전 XML판 20260324000835에 4개 본표 존재), 하나금융지주는 본표 unit_text 부재로 분류 탈락 — 계보 내 표 보유 버전 fallback+출처 명시는 서빙 수치 정책이라 팀 결정 대기로 남긴다.
+- 하네스 자체 결함 수정: 서버 오류를 abstain 통과로 세던 거짓 정상 제거(cc0926d).
+- 미실행·경계: NCP 배포·스테이징 접근·overlay/검색 인덱스 확보는 하지 않았다. 원본 코퍼스는 ro/immutable로만 열었다. push는 하지 않았다.
+
+## 2026-09-02T22:05+09:00 — QA 개선 사이클 2: 결정론 폴백·귀속행 합산 복구
+
+- HCX 최종 문장화 실패 시 결정론 폴백(5bbf7b0): 정형 재무 route(single/financial_comparison)는 backend `display_value` 기반 결정론 렌더러로 답하고 `hcx_final_generation_failed_deterministic_fallback` warning과 `deterministic_fallback_used` metadata를 남긴다. 근거 없는 text 답변은 기존대로 fail-closed. QA pass1의 error 213건(HCX QPM 거절) 클래스를 소멸시키고 거절 시 재시도 지연도 제거한다. TDD 2건(폴백 성공·display_value 부재 fail-closed) + HCX 전체 35 passed.
+- 빈 당기순이익 합계행 복구(5af7a2e): DART 연결 손익계산서에서 합계행이 비고 '지배기업 소유주지분'+'비지배지분' 두 행에 값이 있는 표준 패턴을 결정론 합산(회계 항등식)으로 복구한다. `extraction_method=annual_statement_attribution_sum_v1`, evidence는 두 원천 셀 모두 보존, 값이 있는 행은 절대 대체하지 않는다. 실물 검증: 레인보우로보틱스 3개년 정확 복구(2025 1,421,503,230 / 2023 -842,680,471), 전수 스캔에서 삼성중공업 포함 2개사 각 3개년 해당. TDD 3건 + 전체 회귀 `581 passed, 2 skipped`.
+- 배선 주의: 복구된 fact가 서빙에 반영되려면 financial candidates→overlay 재빌드가 필요하다(이번 작업은 추출 코드까지). HCX 폴백·라우팅 수정의 효과 실현은 NCP 재배포 후다.
+- 하나금융지주 재무제표 결손 심층 판정: main dart_xml은 parse success인데 연결재무상태표 table_record가 제목 블록(5셀)+본문 첫 2행(14셀)에서 잘려 있고, '자산총계' 셀이 재무제표 섹션·감사보고서 첨부(src_ea4e…, src_fc2e…) 어디에도 없다. 단위 상속으로 해결 불가한 파서 레벨 인제스트 결손으로, 코퍼스 재수집·재빌드가 필요한 백로그다(KB금융 PDF 정정본 fallback 정책과 함께 팀 결정 대기).
+
+## 2026-09-03T11:45+09:00 — QA 개선 사이클 3: 전제·단위·공시유형 근거 게이트
+
+- 실행 경계: `agent/qa-growth-v4`에서만 수정했다. NCP `:8001`은 `hcx-function-v1.1`, 로컬 브랜치는 `v1.2`이므로 기존 `v4-staging-20260903` 런은 배포 전 실패 발굴용이며 성능·정확도 최종 근거가 아니다. `:8000`, `:8001` 컨테이너와 원격 파일은 변경하지 않았다.
+- 1차 근본원인 수정(`f6df102`): 명시 요청 단위를 backend에서 무반올림 렌더링하고, 증가·감소 원인은 `value_numeric*scale`로 전제를 먼저 검증한다. 거짓 전제는 검색·HCX 호출 없이 정확한 두 기간 수치로 정정한다. 자산=부채+자본은 세 구조화 계정과 정확한 피연산자 evidence로 계산한다. 대량 QA `--retry-errors`는 HTTP/연결 실패(`status IS NULL`)만 제거해 재시도하고 실제 HCX provider 실패는 보존한다.
+- 2차 실패 주도 수정(`62410e8`): 금액 확인 질문은 질문의 표시 정밀도와 검증된 실제값을 비교해 `네/아니요`를 결정론적으로 답한다. 외화 환산은 환율 시점·출처 부재로, 미공개 정보·긴급 매매 지시는 안전 경계에서 즉시 보류한다. 액면/주식분할 질문은 요청 연도와 실제 `report_name`이 모두 맞는 evidence만 남기며, 해당 결정 공시가 없으면 답변 생성을 차단한다.
+- 대량 런 안정화: 과속 프로세스(`pace=1.0`)를 정확한 PID 확인 후 종료하고 같은 탐색 run을 concurrency 1, `pace=2.1`, transient-only retry로 재개했다. 시작 시 일시 오류 272행만 제거했다. 재시작 후 517건 실측에서 transport error/HTTP 429는 0건, 평균 2.699초, p95 6.57초였고 원장 `PRAGMA integrity_check=ok`이다. 백그라운드 PID `51664`가 남은 12,811문항을 계속 처리한다.
+- 검증: 집중 회귀 `85 passed, 47 subtests`, 전체 Python `618 passed, 2 skipped, 71 warnings, 95 subtests`, Web `12/12`, `compileall`, `git diff --check`, staged secret scan을 통과했다. 경고는 기존 FastAPI/Starlette deprecation이다. 로컬 수정의 NCP 실효 검증과 `:8000` 승격은 아직 실행하지 않았다.
+
+## 2026-09-05T00:06:11+09:00 — QA Growth v4 안전 통합과 main 후보 검증
+
+- 입력: 원격 `main` `cee4a5609157c358c8da4814debd1f14e96e95ea`, QA source `9d8c06abfd6edbf0f2533d0d18d35dbb99871eea`를 사용했다. QA source를 직접 merge하면 불필요한 `.github.zip` 이력이 연결되고 Judge 계보가 보이지 않으므로, main 위에 검토 가능한 QA 커밋을 순서대로 이식했다. 문제 커밋 `cbb8004`는 후보의 조상이 아니다.
+- 충돌 판단: Judge input hardening·5 Tool·bounded analysis·claim verification을 보존하고, QA Growth의 별칭·공시유형·파생비율·문서형·단위·전제·금액확인·회계항등식·안전보류를 해당 검증 경로에 연결했다. 금액 확인 응답도 claim verifier를 우회하지 않게 TDD로 수정했고 public `requirements` 구조는 유지했다.
+- TDD: 금액 확인 응답의 `verification_trace`/`claim_support` 부재를 `1 failed`로 재현한 뒤 검증된 결정론 fallback으로 통합해 `1 passed`로 전환했다. 기존 routing 구조를 바꾼 회계항등식 회귀 3건은 내부 `metric_ids` 매핑으로 복구했다.
+- 최종 검증: 전체 Python `930 passed, 2 skipped, 98 warnings, 260 subtests passed` (`456.67s`), Web `13/13`, 팀 QA `1/1`, 배포·저장소 위생 `45 passed, 94 subtests`, `compileall`, `git diff --check`가 통과했다. 실제 `.env`, `.pem`, `.key`, `.zip` 추적 파일은 없다. 팀 QA Next build는 이 호스트의 `npm ci` 장시간 무응답으로 `BLOCKED_ENVIRONMENT`이며 운영 8000 API와 별도 앱이다.
+- 배포 경계: 코드·테스트 통과만으로 private/provider/Dense release gate를 대체하지 않는다. 기존 `BLOCKED_HARD_GATE`와 Recall@20 `0.487179... < 0.95`를 그대로 보존하며, 실제 PASS 없이 8000 승격을 주장하거나 임계값을 낮추지 않는다. credential, `.env`, PEM, D 드라이브 원본·live overlay/index 및 NCP 보안 설정은 변경하지 않았다.
+
+### 2026-09-05T00:27:01+09:00 — 독립 리뷰 차단 결함 수정
+
+- 독립 리뷰가 공개 8000 QA/Gold API 활성화, 다계정 계산의 기간·scope·filing 혼합, QA truth index의 scope 누락, Ground Truth 의미검증 부재를 P1으로 확인했다. 자연스러운 영어 계정 라우팅과 팀 QA 배포 문서 불일치도 P2로 확인했다.
+- TDD RED는 운영 Compose 노출, 두 계산 혼합, truth scope 충돌, 세 가지 의미 불일치를 합쳐 `5 failed, 1 passed`; 영어 문장 라우팅은 `2 failed`였다. 최소 수정 후 각각 `6 passed`, `2 passed`로 전환했고 확대 회귀는 `124 passed, 70 subtests`였다.
+- 운영 `compose.yaml`에서 QA DB를 제거하고 API의 `/runtime` 암묵 활성화를 없앴다. 별도 `compose.team-qa.yaml`만 QA DB를 명시하며 Caddy Basic Auth 뒤에서 사용한다. 공개 질문 서비스의 무로그인 정책은 유지된다.
+- 비율·회계항등식은 기업, exact period, scope, filing ID가 모두 동일한 fact만 계산한다. QA truth key는 `(company, account_id, fiscal_year, scope)`이며 Ground Truth는 validated `financial_fact_evidence`의 기업·계정·기간·scope·filing·scaled value까지 대조한다. 의미 provenance가 없으면 숫자가 같아도 fail-close한다.
+- 자연스러운 영어 계정명은 등록된 ASCII 단어 경계에서만 인식한다. QA 운영문서는 실제 HTTPS/Caddy 구성으로 동기화했고 작성자·검수자 문자열이 인증 신원이 아니라는 한계를 명시했다.
+- 수정 후 전체 Python은 `936 passed, 2 skipped, 98 warnings, 260 subtests passed` (`459.27s`)였고 저장소·배포·Ground Truth 위생 묶음은 `48 passed, 94 subtests passed`였다. hard gate, credential, D 드라이브 및 live 데이터 경계는 변경하지 않았다.
+
+### 2026-09-05T00:49:25+09:00 — 독립 재리뷰 차단 결함 수정
+
+- 재리뷰에서 base DB에 재무 fact가 없고 overlay에 1,191건이 있는 실제 분리 구조, 기간 시작일 미검증, 연도 간 scope 혼합, 한영 혼합 다중지표 축소를 확인했다. 신규 RED는 `5 failed, 1 passed`였다.
+- Ground Truth builder에 필수 `--overlay` 입력을 추가하고 base와 overlay를 모두 `mode=ro&immutable=1`, `query_only=ON`으로 연다. 의미 검증은 overlay의 validated `financial_fact_evidence`, 기업·공시·셀 검증은 base를 사용하며 기간 유형·시작·종료·기준일 전체를 exact match한다.
+- 연도 간 계산에는 기업·계정·scope·period type 일치 gate를 추가했다. 영어 단어 경계 match와 compact 한국어 match를 합쳐 한영 혼합 두 지표를 모두 requirements로 보존했다.
+- 최소 수정 후 신규 focused는 `6 passed`, 관련 확대 회귀는 `127 passed, 70 subtests`였다. 실제 D 드라이브 read-only 감사에서 base `financial_fact=0`, overlay `financial_fact=1,191`을 확인했고 첫 validated 표본이 `corpus_confirmed`로 통과했다.
+- 최종 전체 Python은 `939 passed, 2 skipped, 98 warnings, 260 subtests passed` (`424.44s`)였다. D 드라이브 파일은 수정하지 않았고 credential/NCP 설정과 release hard gate도 변경하지 않았다.
+
+### 2026-09-05T01:18:00+09:00 — 최종 재리뷰 기간·검수자 신원 경계 수정
+
+- 최종 재리뷰에서 Ground Truth grouping이 기간 전체 signature를 키에서 버려 같은 연도·scope의 분기 flow와 연간 flow를 합칠 수 있음을 P1으로 확인했다. 또한 QA 화면의 작성자·검수자 이름은 하나의 공유 Basic Auth 뒤에서 사용자가 입력하는 문자열이므로 독립 신원을 기술적으로 증명하지 못한다는 P2를 재확인했다.
+- TDD RED는 분기 duration/비연말 instant가 연간 truth index에 들어가는 문제, 서로 다른 시작일을 가진 fact가 하나의 grain으로 합쳐지는 문제, QA 화면의 신원 한계 미표시를 합쳐 `3 failed, 10 passed`였다.
+- Ground Truth key와 출력에 `period_type`, `period_start`, `period_end`, `instant_date`를 모두 보존한다. v4 연간 질문에는 `YYYY-01-01~YYYY-12-31` duration 또는 `YYYY-12-31` instant만 사용할 수 있고 그 외 fact는 `non_annual_period`로 거절한다.
+- QA 화면은 입력 이름이 인증된 개인 신원이 아니라 감사 라벨이며 실제 2인 검수는 팀 운영자가 확인해야 함을 명시한다. 동일 라벨 자기 승인 차단은 실수 방지 절차 통제로 유지하지만 인증 보장으로 주장하지 않는다.
+- focused Python은 `13 passed`, Web은 `13 passed`였다. 최종 전체 Python은 `941 passed, 2 skipped, 98 warnings, 260 subtests passed` (`344.73s`)였다. base/overlay는 이 수정에서 열지 않았고 credential, NCP 설정, release hard gate도 변경하지 않았다.

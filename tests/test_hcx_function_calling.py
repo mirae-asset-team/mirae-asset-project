@@ -6,6 +6,7 @@ import json
 import unittest
 import urllib.error
 from urllib.parse import quote
+from decimal import Decimal
 
 from disclosure_db.disclosure_tools import build_tool_registry
 from disclosure_db.hcx_function_calling import (
@@ -176,6 +177,7 @@ class NamedRegistry:
 def _sufficient_response(
     tool_name: str, data: dict[str, object], *, evidence_id: str, receipt: str,
     company: str = "삼성전자", account: str | None = None, report_name: str = "사업보고서",
+    filed_at: str = "2026-03-18",
 ) -> dict[str, object]:
     covered_scope: dict[str, object] = {"company": [company]}
     if account:
@@ -194,7 +196,7 @@ def _sufficient_response(
                 "filing_id": receipt,
                 "rcept_no": receipt,
                 "report_name": report_name,
-                "filed_at": "2026-03-18",
+                "filed_at": filed_at,
                 "quality_status": "validated_structured_evidence",
             }],
             "evidence_ids": [evidence_id],
@@ -226,6 +228,8 @@ def _financial_response(values: list[tuple[str, str]], account: str = "매출액
         filing_ids.append(receipt)
         facts.append({
             "financial_fact_id": f"ff-{year}-{index}",
+            "filing_id": receipt,
+            "rcept_no": receipt,
             "account_id": "revenue" if account == "매출액" else "operating_profit",
             "account_name": account,
             "value_numeric": value,
@@ -303,7 +307,176 @@ class PeriodFinancialRegistry:
         return response
 
 
+class AccountFinancialRegistry(PeriodFinancialRegistry):
+    """Serves one validated fact per requested account for ratio questions."""
+
+    def dispatch(self, name: str, arguments: object) -> dict[str, object]:
+        request = dict(arguments)  # type: ignore[arg-type]
+        company = str(request["company"])
+        account = str(request.get("account") or "")
+        year = str(request.get("end_date") or "")[:4]
+        value = self.values.get((company, account))
+        if value is None:
+            return super().dispatch(name, {**request, "company": "__missing__"})
+        self.calls.append((name, request))
+        response = _financial_response([(year, value)])
+        evidence_id = f"ev-{account}"
+        receipt = f"{year}0318000001"
+        fact = response["data"]["facts"][0]
+        fact.update({
+            "company_identifiers": {"company": company},
+            "account_name": account,
+            "normalized_value": value,
+            "display_value": f"{int(value):,}원",
+            "evidence_ids": [evidence_id],
+        })
+        item = response["evidence_bundle"]["items"][0]
+        item.update({
+            "evidence_id": evidence_id, "evidence_ids": [evidence_id],
+            "filing_id": receipt, "rcept_no": receipt,
+        })
+        response["evidence_bundle"].update({
+            "covered_scope": {"company": [company], "account": [account]},
+            "evidence_ids": [evidence_id], "filing_ids": [receipt],
+        })
+        return response
+
+
+class MixedGrainAccountRegistry(AccountFinancialRegistry):
+    """Returns individually valid facts that cannot safely share one calculation."""
+
+    def __init__(self, *, periods: dict[str, str], scopes: dict[str, str]) -> None:
+        super().__init__({
+            ("삼성전자", "부채총계"): "40",
+            ("삼성전자", "자본총계"): "160",
+        })
+        self.periods = periods
+        self.scopes = scopes
+
+    def dispatch(self, name: str, arguments: object) -> dict[str, object]:
+        response = super().dispatch(name, arguments)
+        request = dict(arguments)  # type: ignore[arg-type]
+        account = str(request.get("account") or "")
+        facts = response.get("data", {}).get("facts", [])  # type: ignore[union-attr]
+        if facts:
+            fact = facts[0]
+            year = self.periods[account]
+            fact["period"] = {
+                "period_type": "instant",
+                "period_start": None,
+                "period_end": None,
+                "instant_date": f"{year}-12-31",
+            }
+            fact["scope"] = self.scopes[account]
+            fact["filing_id"] = f"filing-{year}-{self.scopes[account]}"
+            fact["rcept_no"] = fact["filing_id"]
+        return response
+
+
+class MixedScopePeriodRegistry(PeriodFinancialRegistry):
+    def dispatch(self, name: str, arguments: object) -> dict[str, object]:
+        response = super().dispatch(name, arguments)
+        facts = response.get("data", {}).get("facts", [])  # type: ignore[union-attr]
+        if facts:
+            year = str(facts[0]["period"]["period_end"])[:4]
+            facts[0]["scope"] = "separate" if year == "2024" else "consolidated"
+        return response
+
+
 class HcxFunctionCallingTests(unittest.TestCase):
+    def test_two_account_ratio_is_calculated_from_validated_facts(self) -> None:
+        """부채비율 등 다계정 비율은 provider 도구선택 없이 계산돼야 한다."""
+        registry = AccountFinancialRegistry({
+            ("삼성전자", "부채총계"): "40",
+            ("삼성전자", "자본총계"): "160",
+        })
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자의 2025년 부채비율은 얼마인가요?")
+
+        self.assertFalse(result.metadata["tool_selection_called"])
+        self.assertEqual(result.metadata["workflow"], "financial_comparison")
+        calculations = result.tool_response["data"]["calculations"]
+        self.assertEqual([item["operation"] for item in calculations], ["percentage_ratio"])
+        # 부채총계 40 / 자본총계 160 = 25%
+        self.assertEqual(Decimal(str(calculations[0]["value"])), Decimal("25"))
+        self.assertEqual(calculations[0]["unit"], "%")
+        self.assertEqual(
+            sorted(calculations[0]["evidence_ids"]), ["ev-부채총계", "ev-자본총계"],
+        )
+
+    def test_ratio_blocks_when_one_operand_is_missing(self) -> None:
+        registry = AccountFinancialRegistry({("삼성전자", "자본총계"): "160"})
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry, client, router=DeterministicQuestionRouter(["삼성전자"]),  # type: ignore[arg-type]
+        )
+
+        result = service.answer("삼성전자의 2025년 부채비율은 얼마인가요?")
+
+        self.assertNotEqual(result.status, "answered")
+        self.assertFalse(result.answer_allowed)
+
+    def test_ratio_blocks_facts_from_different_periods_and_scopes(self) -> None:
+        service = HcxFunctionCallingService(
+            MixedGrainAccountRegistry(
+                periods={"부채총계": "2025", "자본총계": "2024"},
+                scopes={"부채총계": "separate", "자본총계": "consolidated"},
+            ),
+            FakeHcxClient(self._search_call()),
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자의 부채비율은 얼마인가요?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual(
+            result.tool_response["data"]["comparison"]["status"],
+            "incomplete",
+        )
+        self.assertIn(
+            "financial_calculation_grain_mismatch",
+            result.tool_response["metadata"]["sufficiency_check"]["reasons"],
+        )
+
+    def test_ratio_blocks_mixed_scope_even_when_period_matches(self) -> None:
+        service = HcxFunctionCallingService(
+            MixedGrainAccountRegistry(
+                periods={"부채총계": "2025", "자본총계": "2025"},
+                scopes={"부채총계": "separate", "자본총계": "consolidated"},
+            ),
+            FakeHcxClient(self._search_call()),
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자의 2025년 부채비율은 얼마인가요?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+
+    def test_cross_year_change_blocks_mixed_consolidation_scope(self) -> None:
+        service = HcxFunctionCallingService(
+            MixedScopePeriodRegistry({
+                ("삼성전자", "2024"): "100",
+                ("삼성전자", "2025"): "200",
+            }),
+            FakeHcxClient(self._search_call()),
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자의 2024년 대비 2025년 매출액 증감률은?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual(
+            result.tool_response["data"]["comparison"]["status"],
+            "incomplete",
+        )
+
     def _registry(self, rows: list[dict[str, object]] | None = None):
         hybrid = StaticHybrid(list(rows or []))
         return build_tool_registry(hybrid_retriever=hybrid), hybrid  # type: ignore[arg-type]
@@ -576,6 +749,53 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(result.metadata["route_source"], "deterministic")
         self.assertEqual(registry.calls[0][0], "get_financial_facts")
 
+    def test_final_prompts_demand_disclosure_type_fidelity(self) -> None:
+        from disclosure_db.hcx_prompts import (
+            HCX_FINAL_ANSWER_SYSTEM_PROMPT,
+            HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT,
+        )
+
+        for prompt in (HCX_FINAL_ANSWER_SYSTEM_PROMPT, HCX_ROUTED_FINAL_ANSWER_SYSTEM_PROMPT):
+            self.assertIn("보고서 유형을 답변에 명시", prompt)
+            self.assertIn("정기보고서 서술을", prompt)
+        self.assertEqual(HCX_FUNCTION_PROMPT_VERSION, "hcx-function-v1.2")
+
+    def test_missing_structured_fact_abstention_names_the_data_gap(self) -> None:
+        response: dict[str, object] = {
+            "status": "success",
+            "tool_name": "get_financial_facts",
+            "data": {"facts": [], "account_resolution": {"status": "resolved"}},
+            "evidence_bundle": {"evidence_ids": [], "items": []},
+            "warnings": [],
+            "metadata": {
+                "sufficiency_check": {
+                    "status": "insufficient",
+                    "answer_allowed": False,
+                    "recommended_action": "abstain",
+                    "reasons": ["financial_fact_contract_not_met"],
+                    "missing_requirements": [
+                        "validated_structured_financial_fact",
+                        "citable_evidence",
+                        "evidence_items",
+                    ],
+                }
+            },
+        }
+        registry = StaticRegistry(response)
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry,  # type: ignore[arg-type]
+            client,
+            router=DeterministicQuestionRouter(["신한지주"]),
+        )
+
+        result = service.answer("신한지주의 2025년 연결 매출액은 얼마인가요?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertIn("검증된 재무 수치가 공시 코퍼스에서 확인되지 않아", result.answer)
+        self.assertIn("금융지주", result.answer)
+        self.assertEqual(client.generation_calls, [])
+
     def test_ambiguous_financial_term_skips_provider_and_tool(self) -> None:
         registry = StaticRegistry({})
         client = FakeHcxClient(self._search_call())
@@ -805,7 +1025,10 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(result.status, "answered")
         self.assertEqual(result.tool_response["data"]["premise"], "increase_not_confirmed")
         self.assertEqual([name for name, _ in registry.calls], ["get_financial_facts"])
-        self.assertEqual(len(client.generation_calls), 1)
+        self.assertEqual(client.generation_calls, [])
+        self.assertIn("증가 전제는 공시 수치와 일치하지 않습니다", result.answer)
+        self.assertIn("감소했습니다", result.answer)
+        self.assertTrue(result.metadata["deterministic_premise_correction_used"])
 
     def test_change_reason_searches_once_only_after_increase_is_verified(self) -> None:
         financial = _financial_response([("2025", "100"), ("2026", "150")])
@@ -1364,6 +1587,113 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(raised.exception.http_status, 400)
         self.assertEqual(raised.exception.provider_error_code, "40001")
         self.assertNotIn("raw provider detail", str(raised.exception))
+
+    def test_false_amount_confirmation_is_corrected_without_hcx_generation(self) -> None:
+        registry = AccountFinancialRegistry({
+            ("삼성전자", "매출액"): "97146675000000",
+        })
+        client = FakeHcxClient(self._search_call())
+        result = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        ).answer("삼성전자의 2025년 연결 매출액이 971.5조 맞죠?")
+
+        self.assertEqual(result.status, "answered")
+        self.assertTrue(result.answer.startswith("아니요."))
+        self.assertIn("97,146,675,000,000원", result.answer)
+        self.assertEqual(client.generation_calls, [])
+        self.assertFalse(result.metadata["claimed_amount_matches"])
+        self.assertEqual(result.metadata["verification_trace"]["status"], "fallback")
+        self.assertEqual(len(result.metadata["claim_support"]), 1)
+
+    def test_foreign_currency_conversion_abstains_without_external_rate(self) -> None:
+        registry = NamedRegistry({})
+        client = FakeHcxClient(self._search_call())
+        result = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        ).answer("삼성전자의 2025년 연결 매출액을 미국 달러로 환산하면 얼마인가요?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual(registry.calls, [])
+        self.assertEqual(client.generation_calls, [])
+        self.assertIn("환율의 기준 시점과 출처", result.answer)
+
+    def test_stock_split_question_abstains_without_matching_report_type(self) -> None:
+        unrelated = _sufficient_response(
+            "search_disclosures",
+            {"results": [], "retrieval_mode": "hybrid"},
+            evidence_id="ev-other",
+            receipt="20260318000001",
+            report_name="사업보고서",
+        )
+        registry = NamedRegistry({"search_disclosures": unrelated})
+        client = FakeHcxClient(self._search_call())
+        result = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        ).answer("삼성전자의 2025년 액면분할 결정 공시에서 분할 비율이 어떻게 되나요?")
+
+        self.assertEqual(result.status, "abstained")
+        self.assertFalse(result.answer_allowed)
+        self.assertEqual(
+            result.tool_response["data"]["document_existence"],
+            "not_found",
+        )
+        self.assertEqual(client.generation_calls, [])
+
+    def test_accounting_identity_is_calculated_from_three_validated_facts(self) -> None:
+        registry = AccountFinancialRegistry({
+            ("삼성전자", "자산총계"): "1000",
+            ("삼성전자", "부채총계"): "400",
+            ("삼성전자", "자본총계"): "600",
+        })
+        client = FakeHcxClient(self._search_call())
+        service = HcxFunctionCallingService(
+            registry,
+            client,
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer(
+            "삼성전자의 2025년 연결 부채총계와 자본총계를 각각 알려주고 "
+            "그 합을 자산총계와 비교해 주세요."
+        )
+
+        self.assertEqual(result.status, "answered")
+        identity = result.tool_response["data"]["comparison"]["accounting_identity"]
+        self.assertEqual(identity["status"], "matches")
+        self.assertEqual(identity["liabilities_plus_equity"], "1000")
+        self.assertEqual(identity["difference"], "0")
+        self.assertEqual(
+            [item["operation"] for item in result.tool_response["data"]["calculations"]],
+            ["sum", "difference"],
+        )
+
+    def test_requested_unit_is_rendered_by_backend_before_generation(self) -> None:
+        response = _financial_response([("2025", "665007")], account="영업이익")
+        response["data"]["facts"][0].update({
+            "scale": 1_000_000,
+            "display_value": "6,650억 700만 원",
+        })
+        service = HcxFunctionCallingService(
+            StaticRegistry(response),
+            HyperClovaFunctionClient(env={}),
+            router=DeterministicQuestionRouter(["삼성전자"]),
+        )
+
+        result = service.answer("삼성전자 2025년 연결 영업이익을 조 단위로 알려주세요.")
+
+        self.assertEqual(result.status, "answered")
+        self.assertIn("6,650억 700만 원", result.answer)
+        self.assertEqual(
+            result.tool_response["data"]["facts"][0]["requested_output_unit"],
+            "jo",
+        )
 
 
 if __name__ == "__main__":
