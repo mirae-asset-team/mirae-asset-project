@@ -42,6 +42,49 @@ class AgentRuntimeTests(unittest.TestCase):
         generator.generate.assert_not_called()
         self.assertNotIn(decoded, json.dumps(to_jsonable(result), ensure_ascii=False))
 
+    def test_nested_request_model_routes_accept_json_bodies(self) -> None:
+        from fastapi.testclient import TestClient
+
+        class Service:
+            base_database = Path("missing.sqlite")
+            overlay_database = None
+            search_database = None
+            attestation = None
+            corpus_revision = "test-revision"
+
+            def company_candidates(self):
+                return ["삼성전자"]
+
+            def search(self, plan, *, limit):
+                return EvidenceBundle(
+                    question=plan.question,
+                    answerable=True,
+                    retrieval_diagnostics={"limit": limit},
+                )
+
+        class FakeAgent:
+            evidence_service = Service()
+            provider_configured = False
+
+        client = TestClient(create_app(FakeAgent()))
+
+        planned = client.post("/v1/query/plan", json={"question": "삼성전자 매출액"})
+        searched = client.post(
+            "/v1/evidence/search",
+            json={"question": "삼성전자 주요 제품", "company": "삼성전자", "limit": 7},
+        )
+        calculated = client.post(
+            "/v1/calculate",
+            json={"operation": "sum", "operands": ["2", "3"]},
+        )
+
+        self.assertEqual(planned.status_code, 200)
+        self.assertEqual(planned.json()["company"], "삼성전자")
+        self.assertEqual(searched.status_code, 200)
+        self.assertEqual(searched.json()["retrieval_diagnostics"]["limit"], 7)
+        self.assertEqual(calculated.status_code, 200)
+        self.assertEqual(calculated.json()["value"], "5")
+
     def test_financial_api_exposes_filters_and_coverage(self) -> None:
         from fastapi.testclient import TestClient
 
@@ -857,6 +900,42 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertTrue(draft.answerable)
         self.assertIn("hcx_fallback", draft.reason_codes)
         self.assertEqual(draft.numeric_values, ["2000"])
+
+    def test_hcx_007_uses_v3_structured_outputs(self) -> None:
+        provider_payload = {
+            "answer": "계약 상대방은 테스트회사입니다.",
+            "citation_ids": ["ev1"],
+            "numeric_values": [],
+            "answerable": True,
+        }
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = json.dumps({
+            "status": {"code": "20000", "message": "OK"},
+            "result": {"message": {"content": json.dumps(provider_payload, ensure_ascii=False)}},
+        }).encode("utf-8")
+        bundle = EvidenceBundle(
+            question="계약 상대방은 누구인가?",
+            evidence=[EvidenceRef("ev1", "f1", "s1", "계약 상대방은 테스트회사입니다.")],
+            answerable=True,
+        )
+
+        with patch("disclosure_db.generation.urllib.request.urlopen", return_value=response) as urlopen:
+            draft = HyperClovaGenerator(api_key="key", model="HCX-007").generate(bundle)
+
+        request = urlopen.call_args.args[0]
+        sent = json.loads(request.data.decode("utf-8"))
+        headers = {name.casefold(): value for name, value in request.header_items()}
+        self.assertEqual(request.full_url, "https://clovastudio.stream.ntruss.com/v3/chat-completions/HCX-007")
+        self.assertEqual(sent["responseFormat"]["type"], "json")
+        self.assertEqual(
+            sent["responseFormat"]["schema"]["required"],
+            ["answer", "citation_ids", "numeric_values", "answerable"],
+        )
+        self.assertIn("x-ncp-clovastudio-request-id", headers)
+        self.assertTrue(draft.answerable)
+        self.assertEqual(draft.citation_ids, ["ev1"])
 
     def test_hcx_never_calls_provider_without_admitted_database_evidence(self) -> None:
         bundle = EvidenceBundle(

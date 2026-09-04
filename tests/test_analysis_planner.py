@@ -36,6 +36,7 @@ def test_profitability_and_financial_health_requires_three_evidence_slots():
         "financing_events",
     ]
     assert all(slot.mandatory for slot in plan.required_evidence_slots[:2])
+    assert [slot.min_periods for slot in plan.required_evidence_slots] == [2, 2, 1]
 
 
 @pytest.mark.parametrize(

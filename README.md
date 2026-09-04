@@ -29,8 +29,8 @@
 
 | 영역 | 2026-09-02 상태 | 다음 작업 |
 |---|---|---|
-| 작업 브랜치 | `agent/judge-stress-v2` | Task별 독립 commit 유지 |
-| Task 8 기준 커밋 | 커밋 전 기준 `0e4e5b3` | 이 README와 같은 브랜치의 최신 커밋이 최종 기준 |
+| 작업 브랜치 | `main` + `agent/qa-growth-v4` 안전 통합 | QA 순수 변경만 독립 커밋으로 이식 |
+| 통합 기준 | `main` `cee4a56`, QA source `9d8c06a` | 문제 archive 이력은 연결하지 않음 |
 | 재무계정 카탈로그 | 구현·테스트 완료 | 신규 계정 추가 시 중앙 카탈로그만 확장 |
 | Embedding Chunk v1 | XML/HTML/PDF, streaming, checkpoint/resume 구현 완료 | 전체 corpus 산출물의 manifest와 count 확인 |
 | Sparse 검색 | 운영 안전 경로, query-time fallback 회귀 통과 | Dense 장애·재시작 평가에서 계속 hard gate로 확인 |
@@ -104,7 +104,7 @@ python scripts/run_judge_stress_v2.py `
 
 ```powershell
 git fetch origin
-git switch agent/judge-stress-v2
+git switch agent/disclosure-db-foundation
 git pull --ff-only
 $env:PYTHONPATH = 'src'
 .\.venv\Scripts\python.exe -m pytest -q
@@ -121,6 +121,8 @@ node --test tests\web_api.test.mjs tests\web_history.test.mjs
 8. 전체 corpus HCX E2E와 Web 5종 질문을 다시 실행하고 결과를 [개발 로그](docs/development-log.md)에 기록합니다.
 
 세부 embedding 명령, 환경변수, NCP 재배포 순서는 [초보자용 프로젝트 안내](docs/README-project-guide.md)의 “남은 핵심 작업: 전체 embedding” 절을 따릅니다.
+
+팀 QA는 공개 질문 화면(`/`)이 아니라 [검수 데스크](docs/operations/qa-lab.md) `/lab`를 사용합니다. 검수 판정, 성능 측정, 발전 과정을 공유 SQLite에 쌓고 HTML 원장으로 내려받습니다. 암호는 없고 기록에 이름만 남깁니다.
 
 ## 공식 제약
 

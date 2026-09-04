@@ -1,0 +1,11 @@
+node_modules
+.next
+.env
+.env.local
+.env*.local
+.vercel
+data/*.json
+data/*.sqlite
+data/*.sqlite-*
+
+.vercel

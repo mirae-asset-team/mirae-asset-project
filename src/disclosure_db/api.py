@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from datetime import date
-import sqlite3
 import os
+import sqlite3
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -22,6 +22,7 @@ from .input_hardening import (
     preflight_public_question,
 )
 from .query_planner import plan_query
+from .qa_lab import QaLabError, QaLabStore
 
 
 SECURITY_HEADERS = {
@@ -171,10 +172,11 @@ def create_app(
     *,
     function_calling_service: Any | None = None,
     public_limits: PublicLimitSettings | None = None,
+    qa_database: Path | None = None,
 ):
     try:
         from fastapi import FastAPI, HTTPException, Query
-        from fastapi.responses import FileResponse, JSONResponse
+        from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
         from fastapi.staticfiles import StaticFiles
         from pydantic import BaseModel, Field, field_validator
     except ImportError as exc:  # pragma: no cover - depends on optional deployment extra
@@ -300,7 +302,28 @@ def create_app(
             request_limiter.release(client_ip)
 
     app.mount("/static", StaticFiles(directory=web_directory), name="static")
+    configured_qa_db = qa_database
+    if configured_qa_db is None:
+        env_qa_db = os.environ.get("DISCLOSURE_QA_DB")
+        if env_qa_db:
+            configured_qa_db = Path(env_qa_db)
+        elif Path("/runtime").is_dir():
+            configured_qa_db = Path("/runtime/qa_lab.sqlite")
+    corpus_database = getattr(getattr(agent, "evidence_service", None), "base_database", None)
+    qa_store = (
+        QaLabStore(
+            configured_qa_db,
+            corpus_database=Path(corpus_database) if corpus_database is not None else None,
+        )
+        if configured_qa_db is not None
+        else None
+    )
     startup_health: dict[str, Any] | None = None
+
+    def require_qa_store() -> QaLabStore:
+        if qa_store is None:
+            raise HTTPException(status_code=503, detail="lab_db_not_configured")
+        return qa_store
 
     def validated_health_snapshot() -> dict[str, Any]:
         health = _health_status(agent.evidence_service)
@@ -315,6 +338,10 @@ def create_app(
     @app.get("/", include_in_schema=False)
     def public_web():
         return FileResponse(web_directory / "index.html")
+
+    @app.get("/lab", include_in_schema=False)
+    def qa_lab_page():
+        return FileResponse(web_directory / "lab.html")
 
     @app.get("/eval", include_in_schema=False)
     def eval_web():
@@ -556,6 +583,162 @@ def create_app(
 
     answer.__annotations__["request"] = QueryRequest
     app.post("/v1/answer")(answer)
+
+    class QaReviewRequest(BaseModel):
+        reviewer: str = Field(min_length=1, max_length=80)
+        question: str = Field(min_length=1, max_length=4000)
+        answer: str = Field(min_length=1, max_length=20000)
+        verdict: str = Field(min_length=1, max_length=32)
+        notes: str = ""
+        question_id: str | None = None
+        answerable: bool | None = None
+        verified: bool | None = None
+        latency_ms: float | None = None
+        request_id: str | None = None
+        corpus_revision: str | None = None
+        citations: list[dict[str, Any]] = Field(default_factory=list)
+        endpoint: str | None = None
+
+    class QaPerfRequest(BaseModel):
+        recorder: str = Field(min_length=1, max_length=80)
+        suite: str = Field(min_length=1, max_length=120)
+        passed: int | None = None
+        failed: int | None = None
+        skipped: int | None = None
+        p50_ms: float | None = None
+        p95_ms: float | None = None
+        git_commit: str | None = None
+        notes: str = ""
+        metrics: dict[str, Any] | None = None
+
+    class QaMilestoneRequest(BaseModel):
+        author: str = Field(min_length=1, max_length=80)
+        title: str = Field(min_length=1, max_length=200)
+        body: str = Field(min_length=1, max_length=8000)
+        category: str = "process"
+
+    class GoldCandidateCreateRequest(BaseModel):
+        review_id: str = Field(min_length=1, max_length=64)
+        annotator: str = Field(min_length=1, max_length=80)
+
+    class GoldCandidateUpdateRequest(BaseModel):
+        editor: str = Field(min_length=1, max_length=80)
+        annotation: dict[str, Any]
+
+    class GoldDecisionRequest(BaseModel):
+        reviewer: str = Field(min_length=1, max_length=80)
+        decision: str = Field(min_length=1, max_length=16)
+        notes: str = Field(default="", max_length=8000)
+
+    def _lab_error(exc: QaLabError) -> HTTPException:
+        return HTTPException(status_code=400, detail=str(exc))
+
+    @app.get("/lab/api/summary")
+    def qa_summary() -> dict[str, Any]:
+        return require_qa_store().summary()
+
+    @app.get("/lab/api/reviews")
+    def qa_reviews() -> dict[str, Any]:
+        return {"reviews": require_qa_store().list_reviews()}
+
+    def qa_create_review(payload: QaReviewRequest) -> dict[str, Any]:
+        try:
+            review = require_qa_store().add_review(**payload.model_dump())
+        except QaLabError as exc:
+            raise _lab_error(exc) from exc
+        return {"review": review}
+
+    qa_create_review.__annotations__["payload"] = QaReviewRequest
+    app.post("/lab/api/reviews")(qa_create_review)
+
+    @app.get("/lab/api/perf-runs")
+    def qa_perf_runs() -> dict[str, Any]:
+        return {"runs": require_qa_store().list_perf_runs()}
+
+    def qa_create_perf(payload: QaPerfRequest) -> dict[str, Any]:
+        try:
+            run = require_qa_store().add_perf_run(**payload.model_dump())
+        except QaLabError as exc:
+            raise _lab_error(exc) from exc
+        return {"run": run}
+
+    qa_create_perf.__annotations__["payload"] = QaPerfRequest
+    app.post("/lab/api/perf-runs")(qa_create_perf)
+
+    @app.get("/lab/api/milestones")
+    def qa_milestones() -> dict[str, Any]:
+        return {"milestones": require_qa_store().list_milestones()}
+
+    def qa_create_milestone(payload: QaMilestoneRequest) -> dict[str, Any]:
+        try:
+            milestone = require_qa_store().add_milestone(**payload.model_dump())
+        except QaLabError as exc:
+            raise _lab_error(exc) from exc
+        return {"milestone": milestone}
+
+    qa_create_milestone.__annotations__["payload"] = QaMilestoneRequest
+    app.post("/lab/api/milestones")(qa_create_milestone)
+
+    @app.get("/lab/api/gold-candidates")
+    def qa_gold_candidates() -> dict[str, Any]:
+        return {"candidates": require_qa_store().list_gold_candidates()}
+
+    def qa_create_gold_candidate(payload: GoldCandidateCreateRequest) -> dict[str, Any]:
+        try:
+            candidate = require_qa_store().create_gold_candidate(**payload.model_dump())
+        except QaLabError as exc:
+            raise _lab_error(exc) from exc
+        return {"candidate": candidate}
+
+    qa_create_gold_candidate.__annotations__["payload"] = GoldCandidateCreateRequest
+    app.post("/lab/api/gold-candidates")(qa_create_gold_candidate)
+
+    def qa_update_gold_candidate(candidate_id: str, payload: GoldCandidateUpdateRequest) -> dict[str, Any]:
+        try:
+            candidate = require_qa_store().update_gold_candidate(
+                candidate_id=candidate_id,
+                **payload.model_dump(),
+            )
+        except QaLabError as exc:
+            raise _lab_error(exc) from exc
+        return {"candidate": candidate}
+
+    qa_update_gold_candidate.__annotations__["payload"] = GoldCandidateUpdateRequest
+    app.put("/lab/api/gold-candidates/{candidate_id}")(qa_update_gold_candidate)
+
+    def qa_decide_gold_candidate(candidate_id: str, payload: GoldDecisionRequest) -> dict[str, Any]:
+        try:
+            candidate = require_qa_store().decide_gold_candidate(
+                candidate_id=candidate_id,
+                **payload.model_dump(),
+            )
+        except QaLabError as exc:
+            raise _lab_error(exc) from exc
+        return {"candidate": candidate}
+
+    qa_decide_gold_candidate.__annotations__["payload"] = GoldDecisionRequest
+    app.post("/lab/api/gold-candidates/{candidate_id}/decision")(qa_decide_gold_candidate)
+
+    @app.get("/lab/export/gold.jsonl", include_in_schema=False)
+    def qa_export_gold_jsonl():
+        return Response(
+            require_qa_store().export_gold_jsonl(),
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": 'attachment; filename="gold_qa.approved.jsonl"'},
+        )
+
+    @app.get("/lab/source", include_in_schema=False)
+    def qa_source_file(source_id: str = Query(min_length=1, max_length=200)):
+        try:
+            path = require_qa_store().source_path(source_id)
+        except QaLabError as exc:
+            status = 404 if str(exc) in {"source_not_found", "source_file_unavailable"} else 400
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
+        return FileResponse(path, filename=path.name)
+
+    @app.get("/lab/export.html", include_in_schema=False)
+    def qa_export_html():
+        return HTMLResponse(require_qa_store().export_html())
 
     def hcx_function_answer(request: HcxFunctionCallingRequest) -> dict[str, Any]:
         started = perf_counter()

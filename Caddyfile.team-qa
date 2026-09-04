@@ -1,0 +1,13 @@
+{$DISCLOSURE_QA_HOST} {
+	encode zstd gzip
+
+	basic_auth {
+		mirae-team {$DISCLOSURE_QA_PASSWORD_HASH}
+	}
+
+	header {
+		X-Robots-Tag "noindex, nofollow, noarchive"
+	}
+
+	reverse_proxy team-qa:8000
+}
