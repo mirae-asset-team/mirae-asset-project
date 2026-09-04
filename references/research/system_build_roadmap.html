@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="공시 Agent 개발을 위한 데이터 설계부터 비공개 테스트까지의 실행 플로차트">
+  <title>공시 Agent 실행 로드맵</title>
+  <link rel="stylesheet" href="roadmap/roadmap.css">
+</head>
+<body class="execution-home">
+  <header class="topbar execution-topbar">
+    <div class="shell">
+      <a class="brand" href="#top"><span class="brand-mark">DI</span><span>Disclosure Intelligence</span></a>
+      <div class="execution-status"><i></i>현재 위치 · Gold v1 완료 → Semantic DB v1</div>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="execution-hero">
+      <div class="shell execution-hero-grid">
+        <div><div class="eyebrow">Disclosure Agent · Execution Map</div><h1>설계부터<br>최종 검증까지.</h1></div>
+        <div class="execution-intro">
+          <p>데이터 4,204건의 구조 적재, QA 23건의 사람 승인, 원본 보존형 semantic DB migration과 전수 schema·FTS 검증까지 끝났습니다. 이제 별도 재무 의미 층과 Evidence API를 구축하는 구간입니다.</p>
+          <span>결론 · 구조 SSOT는 동결하고 검증된 semantic 사본을 사용합니다. PostgreSQL·OpenSearch·LLM보다 financial_fact Gold와 Evidence API를 먼저 닫습니다.</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="progress-section" aria-labelledby="progress-title">
+      <div class="shell">
+        <div class="progress-head">
+          <div><span class="section-no">CURRENT CHECKPOINT</span><h2 id="progress-title">실행 노드 05의 DB 기반을 완료했습니다.</h2></div>
+          <p>구조 파싱·안전 조회·semantic schema·FTS 기준선은 통과했습니다. 다만 재무 계정과 기간, 남은 정정 541건, PDF 표를 검증하지 않았으므로 RAG 학습·튜닝으로 바로 넘어가지 않습니다.</p>
+        </div>
+        <div class="progress-board">
+          <article class="progress-conclusion">
+            <span class="progress-pill hold">DB 기반 통과 · 의미 보류</span>
+            <h3>검색·근거 원장으로 사용 가능,<br>재무 정답 원장으로는 아직 보류</h3>
+            <div class="stage-mapping"><span>상세 탭</span><b>03 DB·인덱스</b><i>≙</i><span>실행 노드</span><b>05 DB 조회</b></div>
+            <p>원본을 보존한 38.77GB semantic 사본은 구조·semantic schema Gate를 통과했습니다. FTS rowid와 evidence 귀속 불일치는 0건이며, 검색 가능 8문항·9근거의 조건부 Recall@20은 100%입니다.</p>
+            <a href="roadmap/database.html#current">현재 DB 결론과 예시 보기 →</a>
+          </article>
+          <div class="progress-metrics" aria-label="현재 구축 결과">
+            <div><strong>4,204</strong><span>공시 filing 전수</span></div>
+            <div><strong>4,622</strong><span>원본 source 전수</span></div>
+            <div><strong>8.44M</strong><span>검색 fragment</span></div>
+            <div><strong>36.70M</strong><span>표 anchor cell</span></div>
+            <div><strong>0</strong><span>구조 invariant 오류</span></div>
+            <div class="warn"><strong>539+2</strong><span>차단 정정 계보</span></div>
+          </div>
+          <ol class="next-actions">
+            <li><span>DONE 1</span><b>답변 안전 차단</b><p>candidate fact와 unresolved/missing-original version을 기본 조회에서 제외했습니다.</p></li>
+            <li><span>DONE 2</span><b>Gold QA 23건 승인</b><p>19개 문서를 100% 커버했고 모두 human_verified/approved입니다.</p></li>
+            <li><span>DONE 3</span><b>Semantic DB v1</b><p>원본 보존 사본에 evidence 제약·lineage 재계산·external-content FTS를 적용했습니다.</p></li>
+            <li><span>NOW 4</span><b>financial_fact Gold</b><p>계정·기간·scope·scale을 검수한 표본부터 별도 의미 grain에 채웁니다.</p></li>
+            <li><span>NOW 5</span><b>정정·PDF 의미 검수</b><p>unresolved 539건·missing-original 2건·PDF 3건을 답변에서 차단한 채 검수합니다.</p></li>
+            <li><span>NEXT</span><b>RAG ablation</b><p>같은 Gold에서 BM25·dense·hybrid·reranker를 비교합니다.</p></li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <section class="execution-map-section">
+      <div class="shell">
+        <div class="execution-map-head">
+          <div><span class="section-no">MASTER FLOW</span><h2>전체 실행 파이프라인</h2></div>
+          <div class="execution-key"><span><i class="key-done"></i>완료</span><span><i class="key-current"></i>현재</span><span><i class="key-hold"></i>검수 필요</span><span><i class="key-wait"></i>대기</span></div>
+        </div>
+
+        <div class="vertical-map">
+          <div class="phase-rail" aria-hidden="true">
+            <span class="phase-data">DATA FOUNDATION</span>
+            <span class="phase-rag">RETRIEVAL</span>
+            <span class="phase-agent">AGENT</span>
+            <span class="phase-eval">EVALUATION</span>
+          </div>
+
+          <div class="return-loop loop-data"><span>품질 실패 · 설계/파싱 수정</span></div>
+          <div class="return-loop loop-rag"><span>검색 실패 · 청킹/인덱스 수정</span></div>
+          <div class="return-loop loop-agent"><span>생성·도구 오류 · 단계별 수정</span></div>
+
+          <div class="vertical-flow">
+            <a class="execution-node is-done" style="--node:#2563eb" href="roadmap/evaluation.html#current">
+              <span class="execution-no">01</span><div><small>MEASURE</small><em class="node-state">Gold v1 완료</em><h3>평가 기준·질문 유형 설계</h3><p>23개 QA가 19개 문서를 모두 덮고 계약·DB 대조 오류 0, 사람 승인 23건으로 release gate를 통과했습니다.</p></div><b>Schema·validator ✓<br>Gold 23/23 ✓<br>Recall@20 baseline ✓</b>
+            </a>
+            <div class="downline"></div>
+
+            <a class="execution-node is-done" style="--node:#078aa3" href="roadmap/data.html#current">
+              <span class="execution-no">02</span><div><small>MODEL</small><em class="node-state">구조 완료</em><h3>Canonical 데이터 설계</h3><p>Filing·Source·Fragment·Table·Cell·Fact·Lineage와 evidence_id를 구현했습니다.</p></div><b>Schema v1 ✓</b>
+            </a>
+            <div class="downline"></div>
+
+            <a class="execution-node is-done" style="--node:#0a9f91" href="roadmap/data.html#current">
+              <span class="execution-no">03</span><div><small>INGEST</small><em class="node-state">전수 완료</em><h3>전체 데이터 적재·파싱</h3><p>4,204건·4,622파일을 SHA와 parser version을 고정해 전수 적재했습니다.</p></div><b>Parsed corpus ✓</b>
+            </a>
+            <div class="downline"></div>
+
+            <a class="execution-node is-hold" style="--node:#13a36f" href="roadmap/data.html#current">
+              <span class="execution-no">04</span><div><small>QUALITY</small><em class="node-state">구조·schema 통과 · 일부 의미 보류</em><h3>데이터 품질·정정 계보 평가</h3><p>구조와 semantic schema invariant 오류는 0건입니다. unresolved 539건·missing-original 2건·PDF 표·기존 cell의 header/unit은 답변 차단 상태입니다.</p></div><b>Structure/Schema ✓<br>Meaning 일부 보류</b>
+            </a>
+            <div class="gate-label gate-hold"><span>STRUCTURE + SCHEMA PASS</span><p>재무·정정·PDF 의미 정확도는 별도 Gold가 없어 답변 차단 유지</p></div>
+            <div class="downline"></div>
+
+            <a class="execution-node is-current" style="--node:#54a944" href="roadmap/database.html#current">
+              <span class="execution-no">05</span><div><small>QUERY · 지금 여기</small><em class="node-state">Semantic DB 통과 · API 대기</em><h3>DB 조회·Evidence API 구현</h3><p>구조 SSOT를 보존한 semantic 사본과 안전 lineage·validated fact 조회, external-content FTS를 검증했습니다. 다음은 같은 계약을 Evidence API로 노출하는 일입니다.</p></div><b>Structure/Semantic ✓<br>Recall@20 100%*<br>API 대기</b>
+            </a>
+            <div class="downline"></div>
+
+            <a class="execution-node is-wait" style="--node:#98b637" href="roadmap/retrieval.html">
+              <span class="execution-no">06</span><div><small>RETRIEVE</small><em class="node-state">Gold 이후</em><h3>RAG 기준선 구축·평가</h3><p>Metadata/PIT 필터와 BM25부터 dense·RRF·reranker를 비교합니다.</p></div><b>미착수</b>
+            </a>
+            <div class="downline"></div>
+
+            <a class="execution-node is-wait" style="--node:#d8912d" href="roadmap/evidence.html">
+              <span class="execution-no">07</span><div><small>TOOLS</small><em class="node-state">대기</em><h3>계산 Tool 정의·테스트</h3><p>수치·기간·단위 호환성을 검사하는 결정론적 함수를 만듭니다.</p></div><b>미착수</b>
+            </a>
+            <div class="downline"></div>
+
+            <a class="execution-node is-wait" style="--node:#e07830" href="roadmap/server.html#process">
+              <span class="execution-no">08</span><div><small>SERVE</small><em class="node-state">대기</em><h3>Tool 서버·MCP Adapter 구축</h3><p>FastAPI Tool 서버를 기본으로 만들고 필요할 때 MCP 표면을 연결합니다.</p></div><b>미착수</b>
+            </a>
+            <div class="downline"></div>
+
+            <a class="execution-node is-wait" style="--node:#e85f49" href="roadmap/llm.html#candidates">
+              <span class="execution-no">09</span><div><small>CONNECT</small><em class="node-state">대기</em><h3>Function Calling 연결</h3><p>허용 Tool과 인자 schema, 호출 횟수와 timeout을 고정합니다.</p></div><b>미착수</b>
+            </a>
+            <div class="downline"></div>
+
+            <a class="execution-node is-wait" style="--node:#d95061" href="roadmap/llm.html#process">
+              <span class="execution-no">10</span><div><small>INTEGRATE</small><em class="node-state">대기</em><h3>HyperCLOVA X Agent 통합</h3><p>검색·계산 결과를 EvidenceBundle로 고정한 뒤 답변 초안을 만듭니다.</p></div><b>미착수</b>
+            </a>
+            <div class="downline"></div>
+
+            <a class="execution-node is-wait" style="--node:#a95c9e" href="roadmap/llm.html#criteria">
+              <span class="execution-no">11</span><div><small>REFINE</small><em class="node-state">대기</em><h3>프롬프트·답변 형식 개선</h3><p>근거 제한, 거절, claim 구조와 출력 schema의 반복 오류를 줄입니다.</p></div><b>미착수</b>
+            </a>
+            <div class="downline"></div>
+
+            <a class="execution-node is-wait" style="--node:#725fbd" href="roadmap/verification.html">
+              <span class="execution-no">12</span><div><small>VERIFY</small><em class="node-state">대기</em><h3>단계별 통합 평가</h3><p>파싱·검색·계산·생성·인용·거절 오류를 분리해 판정합니다.</p></div><b>미착수</b>
+            </a>
+            <div class="gate-label final-gate"><span>FINAL PASS</span><p>품질·안전성·재현성 기준 충족</p></div>
+            <div class="downline"></div>
+
+            <a class="execution-node final-node is-wait" style="--node:#ad456f" href="roadmap/server.html#criteria">
+              <span class="execution-no">13</span><div><small>SUBMIT</small><em class="node-state">대기</em><h3>비공개 테스트·제출 환경 검증</h3><p>동일 컨테이너와 revision에서 출력 계약·지연·복구를 최종 확인합니다.</p></div><b>미착수</b>
+            </a>
+          </div>
+
+          <aside class="error-router">
+            <span>12단계 오류 라우팅</span>
+            <ul>
+              <li><b>파싱·정정</b><i>→ 02–04</i></li>
+              <li><b>검색</b><i>→ 05–06</i></li>
+              <li><b>계산·Tool</b><i>→ 07–09</i></li>
+              <li><b>생성·형식</b><i>→ 10–11</i></li>
+            </ul>
+          </aside>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer><div class="shell"><span>공시 Agent 실행 로드맵</span><span>각 단계는 이전 단계의 검증 산출물을 입력으로 사용합니다.</span></div></footer>
+</body>
+</html>

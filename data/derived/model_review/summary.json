@@ -1,0 +1,14 @@
+{
+  "records": 3,
+  "reviewer_models": [
+    "qwen",
+    "grok",
+    "codex"
+  ],
+  "answerability_agreement": 3,
+  "exact_numeric_agreement": 1,
+  "all_reviewers_supported": 2,
+  "silver_auto_pass": 1,
+  "gold_promoted": 0,
+  "errors": 0
+}

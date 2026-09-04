@@ -1,0 +1,10 @@
+{
+  "chunk_version": "chunk-v1",
+  "tokenizer": "unicode-regex-v1",
+  "target_tokens": 450,
+  "max_tokens": 700,
+  "overlap_tokens": 80,
+  "batch_size": 1000,
+  "checkpoint_every_groups": 100,
+  "include_section_prefix": true
+}

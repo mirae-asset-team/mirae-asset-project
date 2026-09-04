@@ -1,0 +1,48 @@
+{
+  "schema_version": "release-gate-contract-v1",
+  "freshness": {
+    "max_age_seconds": 86400,
+    "future_skew_seconds": 300
+  },
+  "financial": {
+    "required_total": 856,
+    "required_passed": 856
+  },
+  "judge": {
+    "required_total": 600,
+    "required_passed": 600,
+    "numeric_exactness": 1.0,
+    "claim_citation_coverage": 1.0,
+    "answerability_agreement_min": 0.95,
+    "metamorphic_consistency_min": 0.98,
+    "provider_eligible_root_count": 42,
+    "provider_probe_observation_count": 120,
+    "provider_call_count": 120,
+    "provider_p95_ms_max": 10000
+  },
+  "retrieval": {
+    "recall_at_20_min": 0.95
+  },
+  "concurrency": {
+    "request_count": 20,
+    "error_count": 0,
+    "p95_ms_max": 2000
+  },
+  "zero_counters": [
+    "hallucinated_numeric_claim_count",
+    "unknown_citation_count",
+    "cross_filing_citation_count",
+    "policy_violation_count",
+    "secret_leak_count",
+    "evaluator_error_count",
+    "forbidden_provider_call_count",
+    "deterministic_provider_call_count"
+  ],
+  "identity_fields": [
+    "commit",
+    "image_id",
+    "base_sha256",
+    "overlay_sha256",
+    "search_index_sha256"
+  ]
+}

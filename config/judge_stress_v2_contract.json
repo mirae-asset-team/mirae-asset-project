@@ -1,0 +1,114 @@
+{
+  "schema_version": "judge-stress-v2-contract-v1",
+  "generator": "deterministic_judge_stress_v2",
+  "case_count": 600,
+  "split_counts": {
+    "development": 480,
+    "holdout": 120
+  },
+  "allocation": {
+    "structured": 120,
+    "alias_period_correction": 90,
+    "free_form": 120,
+    "multi_evidence_judgment": 90,
+    "policy_adversarial": 90,
+    "api_concurrency": 60,
+    "fault": 30
+  },
+  "failure_categories": [
+    "entity",
+    "period",
+    "account",
+    "routing",
+    "retrieval",
+    "evidence",
+    "calculation",
+    "generation",
+    "security",
+    "runtime"
+  ],
+  "provider_probe_contract": {
+    "probe_version": "judge-probes-v1",
+    "eligible_root_count": 42,
+    "observation_count": 120,
+    "source_split": "holdout",
+    "category_root_counts": {
+      "free_form": 24,
+      "multi_evidence_judgment": 18
+    }
+  },
+  "development_issuer_group_ids": [
+    "issuer-0423338934cd55a48b6861fb",
+    "issuer-0a76ef0e1362e07a40308305",
+    "issuer-1068203af120e299fbef5e15",
+    "issuer-19e7005d39cce786f9f56eba",
+    "issuer-1b297811017d2025e7333e1c",
+    "issuer-20d122f4a0250d0f69ad11a3",
+    "issuer-217063939cce48a2c02ff356",
+    "issuer-234adea71e639f4ad4d2893d",
+    "issuer-2a493dc9d973d74990d6aaed",
+    "issuer-335841c8413dd9bf381e814f",
+    "issuer-5a262a897111c51102152e4c",
+    "issuer-61a5773d05da8e90cb147d02",
+    "issuer-64db45d17a930127aef38da5",
+    "issuer-68959c0d8ca78cb995750f14",
+    "issuer-7790ab1b829c26d48125baa1",
+    "issuer-7a49b58a019a3b91bf7fda29",
+    "issuer-82756b1ae36948e14c3dc070",
+    "issuer-8533a3b32ce1f0b1a5cc24cf",
+    "issuer-86a463db8ecfe3c8dcf5bb72",
+    "issuer-8d1d5c0506080e885560405e",
+    "issuer-923f5eb9ea3c61c938e7ce0c",
+    "issuer-936ed7c7ff58c4c313d74dd2",
+    "issuer-939041c15eeed620baf135f9",
+    "issuer-93aaa4c1becb917a3e96fc2f",
+    "issuer-9ba340eb1bf0a723cf5bb1c5",
+    "issuer-a52ac097810393816b3560c6",
+    "issuer-acc86bbe2da940e1d52d75b5",
+    "issuer-b1be319fde3ad5127c90ead2",
+    "issuer-b58328e190027516b4ad625d",
+    "issuer-b8515e0a384e4cb11774da7f",
+    "issuer-bfb78c94b73db7f69bc5b519",
+    "issuer-c1183d89756de111e6a2a4c3",
+    "issuer-c30b16aca1d7cbe449b45668",
+    "issuer-c616765012cb53f67b4611e6",
+    "issuer-c689e0405bf4ec0d619408f9",
+    "issuer-c822a15c74c9fe23c5c2e127",
+    "issuer-d6cb659ce290e5c2636bc369",
+    "issuer-d9d97569fd71e8257055c071",
+    "issuer-e702d8229bbb15ee6bdb5274",
+    "issuer-e91a95ae186781032629630a",
+    "issuer-ebd6956d9117cf44d6c4ccf0",
+    "issuer-ef5eb777bd0c263f3978cfe9",
+    "issuer-f143e353311093d92414dadf",
+    "issuer-f54fae81101243c2d7a5e389",
+    "issuer-f72254ba04ebcab1bff1da87",
+    "issuer-ff3d7152aefbfbc245f4347b"
+  ],
+  "source_artifacts": {
+    "gold": {
+      "path": "data/derived/gold_qa.agent_audited.jsonl",
+      "format": "jsonl"
+    },
+    "financial_seed": {
+      "path": "data/derived/financial_fact_gold_seed.jsonl",
+      "format": "jsonl"
+    },
+    "financial_facts": {
+      "path": "data/derived/financial_fact_agent_audited_seed.jsonl",
+      "format": "jsonl"
+    },
+    "financial_coverage": {
+      "path": "data/derived/financial_fact_coverage.json",
+      "format": "json"
+    },
+    "freeform": {
+      "path": "data/derived/freeform_gold.agent_audited.jsonl",
+      "format": "jsonl"
+    }
+  },
+  "raw_artifact_root": "eval/judge_stress_v2",
+  "tracked_manifest": "data/derived/judge_stress_v2_manifest.json",
+  "tracked_json_summary": "data/derived/judge_stress_v2_summary.json",
+  "tracked_html_summary": "data/derived/judge_stress_v2_summary.html"
+}

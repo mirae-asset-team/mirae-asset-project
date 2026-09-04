@@ -1,0 +1,46 @@
+{
+  "schema_version": "financial-query-regression-v1",
+  "base_database_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563",
+  "overlay_seed_sha256": "c36a33847d1d67c492d7f4137b428c6cb3bf7cccea8d4a3b0a0d620dbee7a9bf",
+  "coverage_sha256": "19220b5cc21e206304b7744b30182aaf4d86854c39a7df9c78291ee961264722",
+  "cases": [
+    {
+      "id": "samsung_latest_annual_revenue",
+      "question": "삼성전자의 최근 사업보고서 기준 매출액을 알려줘",
+      "answerable": true,
+      "verified": true,
+      "account_id": "revenue",
+      "account_name_raw": "매출액 (주30)",
+      "fiscal_year": 2025,
+      "scope": "consolidated",
+      "value_numeric": "333605938",
+      "scale": 1000000,
+      "unit_raw": "백만원",
+      "filing_id": "20260310002820",
+      "evidence_ids": ["ev1_b81562785c90a11ee03bb9c4d68cf35b"]
+    },
+    {
+      "id": "samsung_three_year_revenue",
+      "question": "삼성전자 최근 3개년 매출액을 비교해줘",
+      "answerable": true,
+      "verified": true,
+      "fiscal_years": [2025, 2024, 2023],
+      "values_numeric": ["333605938", "300870903", "258935494"],
+      "scale": 1000000,
+      "unit_raw": "백만원",
+      "scope": "consolidated",
+      "filing_id": "20260310002820",
+      "citation_count": 3
+    },
+    {
+      "id": "incomplete_operating_income_count",
+      "question": "영업이익 10억 넘는 기업은 몇 개야?",
+      "answerable": false,
+      "verified": false,
+      "reason_code": "corpus_wide_financial_coverage_incomplete",
+      "expected_company_count": 70,
+      "latest_validated_company_count": 67,
+      "missing_companies": ["KB금융", "하나금융지주", "한화솔루션"]
+    }
+  ]
+}

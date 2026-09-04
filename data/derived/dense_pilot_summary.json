@@ -1,0 +1,15 @@
+{
+  "adopted": false,
+  "dense_recall_at_20": null,
+  "manifest_semantic_sha256": "baa2bf3834d347a9b8facbd13aa36c58a5de9638de33251ebdc01576e6127fd4",
+  "measured_gain": null,
+  "p95_ms": null,
+  "reason": "provider_access_unavailable",
+  "residual_text_case_count": 36,
+  "residual_text_target_count": 36,
+  "schema_version": "1.0.0",
+  "sparse_recall_at_20": 0.48717948717948717,
+  "status": "BLOCKED_EXTERNAL",
+  "wrong_issuer_count": null,
+  "wrong_version_count": null
+}

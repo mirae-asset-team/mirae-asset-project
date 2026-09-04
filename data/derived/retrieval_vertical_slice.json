@@ -1,0 +1,482 @@
+{
+  "database": "D:/mirae-asset-project/db/semantic-v1_129f5b0/disclosure_corpus_semantic_v1.sqlite",
+  "gold": "data/derived/gold_qa.agent_audited.jsonl",
+  "limit": 20,
+  "evaluation_scope": "retrieval conditioned on Gold company and candidate-filing metadata",
+  "eligible_questions": 16,
+  "target_evidence_count": 17,
+  "target_recall_at_k": 0.7647058823529411,
+  "target_recall_at_20": 0.7647058823529411,
+  "question_complete_recall_at_k": 0.75,
+  "mrr_at_k": 0.34494498556998554,
+  "post_rerank_recall_at_8": null,
+  "post_rerank_reason": "reranker_not_configured",
+  "post_rerank_attempted_count": 0,
+  "post_rerank_success_count": 0,
+  "post_rerank_failure_count": 0,
+  "post_rerank_failure_reasons": {
+    "reranker_not_configured": 16
+  },
+  "evaluations": [
+    {
+      "question_id": "agent_financial_ff_kores_2024_net_income",
+      "question_type": "table_cell",
+      "query": "\"연결\" OR \"XI\" OR \"당기순이익은\" OR \"당기순이익\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "010130",
+      "filing_filter": [
+        "20260601001725"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 20,
+      "targets": [
+        {
+          "evidence_id": "ev1_ad0443ab98c6ed6c20fa3307e9ae3614",
+          "target_fragment_ids": [
+            "ev1_355749ca296ced23fbd94ce71b7f0fe2"
+          ],
+          "rank": 1
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_ad0443ab98c6ed6c20fa3307e9ae3614",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2024_operating_profit",
+      "question_type": "table_cell",
+      "query": "\"연결\" OR \"영업이익은\" OR \"영업이익\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "010130",
+      "filing_filter": [
+        "20260601001725"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 20,
+      "targets": [
+        {
+          "evidence_id": "ev1_507d9ef2916929b0315db2fb07647f08",
+          "target_fragment_ids": [
+            "ev1_7dce5d2f6b72b54a616efac3a404453b"
+          ],
+          "rank": null
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_507d9ef2916929b0315db2fb07647f08",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2024_revenue",
+      "question_type": "table_cell",
+      "query": "\"연결\" OR \"매출액은\" OR \"매출액\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "010130",
+      "filing_filter": [
+        "20260601001725"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 20,
+      "targets": [
+        {
+          "evidence_id": "ev1_c08a1a0d7188e805eeacbe6971ad4d43",
+          "target_fragment_ids": [
+            "ev1_7e7372e0eece266c0c700ca0b240a092"
+          ],
+          "rank": null
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_c08a1a0d7188e805eeacbe6971ad4d43",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2024_total_assets",
+      "question_type": "table_cell",
+      "query": "\"연결\" OR \"자산총계은\" OR \"자산총계\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "010130",
+      "filing_filter": [
+        "20260601001725"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 20,
+      "targets": [
+        {
+          "evidence_id": "ev1_3cb127df5b9dbb407ea1abfe96a62684",
+          "target_fragment_ids": [
+            "ev1_f3ef75e69479762184ee929d5e583fcd"
+          ],
+          "rank": 11
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_3cb127df5b9dbb407ea1abfe96a62684",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2025_net_income",
+      "question_type": "table_cell",
+      "query": "\"연결\" OR \"XI\" OR \"당기순이익은\" OR \"당기순이익\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "010130",
+      "filing_filter": [
+        "20260601001725"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 20,
+      "targets": [
+        {
+          "evidence_id": "ev1_f003ed7ceeb83b34b979d5472179f1d3",
+          "target_fragment_ids": [
+            "ev1_355749ca296ced23fbd94ce71b7f0fe2"
+          ],
+          "rank": 1
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_f003ed7ceeb83b34b979d5472179f1d3",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2025_operating_profit",
+      "question_type": "table_cell",
+      "query": "\"연결\" OR \"영업이익은\" OR \"영업이익\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "010130",
+      "filing_filter": [
+        "20260601001725"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 20,
+      "targets": [
+        {
+          "evidence_id": "ev1_8dc98a8f0d389f6efdc253502f42a3d2",
+          "target_fragment_ids": [
+            "ev1_7dce5d2f6b72b54a616efac3a404453b"
+          ],
+          "rank": null
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_8dc98a8f0d389f6efdc253502f42a3d2",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2025_revenue",
+      "question_type": "table_cell",
+      "query": "\"연결\" OR \"매출액은\" OR \"매출액\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "010130",
+      "filing_filter": [
+        "20260601001725"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 20,
+      "targets": [
+        {
+          "evidence_id": "ev1_86a468fa9d55b8c8256fba330ca77f5d",
+          "target_fragment_ids": [
+            "ev1_7e7372e0eece266c0c700ca0b240a092"
+          ],
+          "rank": null
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_86a468fa9d55b8c8256fba330ca77f5d",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2025_total_assets",
+      "question_type": "table_cell",
+      "query": "\"연결\" OR \"자산총계은\" OR \"자산총계\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "010130",
+      "filing_filter": [
+        "20260601001725"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 20,
+      "targets": [
+        {
+          "evidence_id": "ev1_0c7b7976d3397205893bfec5ab5b2986",
+          "target_fragment_ids": [
+            "ev1_f3ef75e69479762184ee929d5e583fcd"
+          ],
+          "rank": 11
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_0c7b7976d3397205893bfec5ab5b2986",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "q001_bio_original_contract_amount",
+      "question_type": "table_cell",
+      "query": "\"최초\" OR \"단일판매\" OR \"공급계약의\" OR \"공급계약\" OR \"계약금액\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "207940",
+      "filing_filter": [
+        "20230302800001"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 2,
+      "targets": [
+        {
+          "evidence_id": "ev1_b022cd0c0f236a3563f1b438364b254d",
+          "target_fragment_ids": [
+            "ev1_b1d7b6af9fc21a258a39325e83104d23"
+          ],
+          "rank": 2
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_b022cd0c0f236a3563f1b438364b254d",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "q002_bio_original_counterparty",
+      "question_type": "single_filing_fact",
+      "query": "\"단일판매\" OR \"공급계약의\" OR \"공급계약\" OR \"계약상대는\" OR \"계약상대\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "207940",
+      "filing_filter": [
+        "20230302800001"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 1,
+      "targets": [
+        {
+          "evidence_id": "ev1_6ce523ff6b2e6cfd8957c312a706bda0",
+          "target_fragment_ids": [
+            "ev1_d01e548d2544b719b7c5152642ddf75b"
+          ],
+          "rank": 1
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_6ce523ff6b2e6cfd8957c312a706bda0",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "q004_bio_july_current_contract_amount",
+      "question_type": "table_cell",
+      "query": "\"최초\" OR \"계열의\" OR \"계열\" OR \"정정\" OR \"계약금액\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "207940",
+      "filing_filter": [
+        "20230704800001"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 5,
+      "targets": [
+        {
+          "evidence_id": "ev1_24f083e4b792d00d3507dbf9450c3d35",
+          "target_fragment_ids": [
+            "ev1_3e242e7b149eb2caffbcc82e876c0179"
+          ],
+          "rank": 3
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_24f083e4b792d00d3507dbf9450c3d35",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "q005_bio_amount_change_as_of_july",
+      "question_type": "correction_aware",
+      "query": "\"Pfizer\" OR \"위탁생산계약의\" OR \"위탁생산계약\" OR \"계약금액은\" OR \"계약금액\" OR \"최초\" OR \"공시와\" OR \"정정\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "207940",
+      "filing_filter": [
+        "20230302800001",
+        "20230704800001"
+      ],
+      "mode": "historical_version_expanded",
+      "result_count": 11,
+      "targets": [
+        {
+          "evidence_id": "ev1_b022cd0c0f236a3563f1b438364b254d",
+          "target_fragment_ids": [
+            "ev1_b1d7b6af9fc21a258a39325e83104d23"
+          ],
+          "rank": 9
+        },
+        {
+          "evidence_id": "ev1_24f083e4b792d00d3507dbf9450c3d35",
+          "target_fragment_ids": [
+            "ev1_3e242e7b149eb2caffbcc82e876c0179"
+          ],
+          "rank": 10
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_b022cd0c0f236a3563f1b438364b254d",
+          "rank": null
+        },
+        {
+          "evidence_id": "ev1_24f083e4b792d00d3507dbf9450c3d35",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "q006_celltrion_ct_p39_title",
+      "question_type": "single_filing_fact",
+      "query": "\"투자판단\" OR \"관련\" OR \"주요경영사항의\" OR \"주요경영사항\" OR \"제목은\" OR \"제목\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "068270",
+      "filing_filter": [
+        "20230410800001"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 3,
+      "targets": [
+        {
+          "evidence_id": "ev1_8925dd76eb23ca2a0c50ab2f6cf5cd47",
+          "target_fragment_ids": [
+            "ev1_43bde8f76982da813d14edc1f7a30066"
+          ],
+          "rank": 2
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_8925dd76eb23ca2a0c50ab2f6cf5cd47",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "q009_rainbow_new_common_shares",
+      "question_type": "table_cell",
+      "query": "\"유상증자결정에서\" OR \"유상증자결정\" OR \"발행하는\" OR \"발행하\" OR \"보통주식\" OR \"수는\" OR \"주인가\" OR \"주인\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "277810",
+      "filing_filter": [
+        "20230103000001"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 5,
+      "targets": [
+        {
+          "evidence_id": "ev1_a94bba9e2b86496c516d9275433e1b59",
+          "target_fragment_ids": [
+            "ev1_8049a03f40f6830c2f752cb48dd2ce25"
+          ],
+          "rank": 4
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_a94bba9e2b86496c516d9275433e1b59",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "q010_skhynix_treasury_disposal_shares",
+      "question_type": "table_cell",
+      "query": "\"자기주식처분결정의\" OR \"자기주식처분결정\" OR \"보통주식\" OR \"처분예정주식\" OR \"수는\" OR \"주인가\" OR \"주인\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "000660",
+      "filing_filter": [
+        "20230201000001"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 16,
+      "targets": [
+        {
+          "evidence_id": "ev1_e3367a287004ddd07f084ad4511fb27a",
+          "target_fragment_ids": [
+            "ev1_25f4a232e49c4b8a7d637ff48cd448c8"
+          ],
+          "rank": 2
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_e3367a287004ddd07f084ad4511fb27a",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    },
+    {
+      "question_id": "q011_rainbow_holding_reporter",
+      "question_type": "single_filing_fact",
+      "query": "\"주식등\" OR \"대량보유상황보고서의\" OR \"대량보유상황보고서\" OR \"보고자는\" OR \"보고자\"",
+      "query_execution": "per_term_fts_plus_rrf_k60",
+      "company_filter": "277810",
+      "filing_filter": [
+        "20230316000001"
+      ],
+      "mode": "safe_as_of",
+      "result_count": 19,
+      "targets": [
+        {
+          "evidence_id": "ev1_d787655ab205a4e2f2a605157f369eda",
+          "target_fragment_ids": [
+            "ev1_f79f2a8b5e6b45f3533b76f5b15d6038"
+          ],
+          "rank": 7
+        }
+      ],
+      "post_rerank_targets": [
+        {
+          "evidence_id": "ev1_d787655ab205a4e2f2a605157f369eda",
+          "rank": null
+        }
+      ],
+      "post_rerank_reason": "reranker_not_configured"
+    }
+  ]
+}

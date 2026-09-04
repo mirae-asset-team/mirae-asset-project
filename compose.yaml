@@ -1,0 +1,96 @@
+services:
+  dense-retriever:
+    image: mirae-dense-retriever:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.dense
+    restart: unless-stopped
+    environment:
+      DENSE_INDEX_PATH: /data/dense/index.faiss
+      DENSE_METADATA_PATH: /data/dense/chunk_metadata.jsonl
+      DENSE_MANIFEST_PATH: /data/dense/manifest.json
+      DENSE_OFFSETS_PATH: /runtime/dense_metadata.offsets.u64
+      DENSE_FILING_INDEX_PATH: /runtime/dense_filing_vectors.sqlite
+      DENSE_MODEL_PATH: /model
+      DENSE_RUNTIME_MANIFEST_PATH: /runtime/dense_runtime_manifest.json
+    volumes:
+      - "/srv/mirae/data/dense:/data/dense:ro"
+      - "/srv/mirae/data/model/bge-m3:/model:ro"
+      - "${DISCLOSURE_RUNTIME_DIR_HOST}:/runtime"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8080/health'))['ready']"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 600s
+
+  disclosure-agent:
+    build: .
+    restart: unless-stopped
+    ports: ["8000:8000"]
+    environment:
+      DISCLOSURE_BASE_DB: /data/base/disclosure.sqlite
+      DISCLOSURE_OVERLAY_DB: /data/agent/agent_overlay.sqlite
+      DISCLOSURE_SEARCH_DB: /data/agent/agent_search.sqlite
+      DISCLOSURE_ATTESTATION: /data/attestation.json
+      DISCLOSURE_DENSE_URL: http://dense-retriever:8080
+      DISCLOSURE_DENSE_TIMEOUT_SECONDS: ${DISCLOSURE_DENSE_TIMEOUT_SECONDS:-5}
+      DISCLOSURE_DENSE_VECTOR_COUNT: ${DISCLOSURE_DENSE_VECTOR_COUNT:-2571506}
+      DISCLOSURE_DENSE_ADOPTION_ARTIFACT: /runtime/dense_adoption.json
+      DISCLOSURE_DENSE_EVALUATION_SUMMARY: /app/data/derived/freeform_retrieval_summary.json
+      CLOVASTUDIO_API_KEY: ${CLOVASTUDIO_API_KEY:-}
+      CLOVASTUDIO_BASE_URL: ${CLOVASTUDIO_BASE_URL:-https://clovastudio.stream.ntruss.com/v1/openai}
+      CLOVASTUDIO_MODEL: ${CLOVASTUDIO_MODEL:-HCX-005}
+      DISCLOSURE_PUBLIC_RATE_PER_MINUTE: ${DISCLOSURE_PUBLIC_RATE_PER_MINUTE:-120}
+      DISCLOSURE_PUBLIC_PER_IP_CONCURRENCY: ${DISCLOSURE_PUBLIC_PER_IP_CONCURRENCY:-4}
+      DISCLOSURE_PUBLIC_GLOBAL_CONCURRENCY: ${DISCLOSURE_PUBLIC_GLOBAL_CONCURRENCY:-8}
+    volumes:
+      - "${DISCLOSURE_BASE_DB_HOST}:/data/base/disclosure.sqlite:ro"
+      - "${DISCLOSURE_AGENT_DB_DIR_HOST}:/data/agent:ro"
+      - "${DISCLOSURE_ATTESTATION_HOST}:/data/attestation.json:ro"
+      - "${DISCLOSURE_RUNTIME_DIR_HOST}:/runtime"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/health'))['ready']"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 180s
+
+  disclosure-agent-staging:
+    build: .
+    restart: unless-stopped
+    ports: ["8001:8000"]
+    environment:
+      DISCLOSURE_BASE_DB: /data/base/disclosure.sqlite
+      DISCLOSURE_OVERLAY_DB: /data/agent/agent_overlay.sqlite
+      DISCLOSURE_SEARCH_DB: /data/agent/agent_search.sqlite
+      DISCLOSURE_ATTESTATION: /data/attestation.json
+      DISCLOSURE_DENSE_URL: http://dense-retriever:8080
+      DISCLOSURE_DENSE_TIMEOUT_SECONDS: ${DISCLOSURE_DENSE_TIMEOUT_SECONDS:-5}
+      DISCLOSURE_DENSE_VECTOR_COUNT: ${DISCLOSURE_DENSE_VECTOR_COUNT:-2571506}
+      DISCLOSURE_DENSE_ADOPTION_ARTIFACT: /runtime/dense_adoption.json
+      DISCLOSURE_DENSE_EVALUATION_SUMMARY: /app/data/derived/freeform_retrieval_summary.json
+      CLOVASTUDIO_API_KEY: ${CLOVASTUDIO_API_KEY:-}
+      CLOVASTUDIO_BASE_URL: ${CLOVASTUDIO_BASE_URL:-https://clovastudio.stream.ntruss.com/v1/openai}
+      CLOVASTUDIO_MODEL: ${CLOVASTUDIO_MODEL:-HCX-005}
+      DISCLOSURE_PUBLIC_RATE_PER_MINUTE: ${DISCLOSURE_STAGING_RATE_PER_MINUTE:-30}
+      DISCLOSURE_PUBLIC_PER_IP_CONCURRENCY: ${DISCLOSURE_STAGING_PER_IP_CONCURRENCY:-2}
+      DISCLOSURE_PUBLIC_GLOBAL_CONCURRENCY: ${DISCLOSURE_STAGING_GLOBAL_CONCURRENCY:-4}
+      EVAL_ENABLED: "1"
+      EVAL_CASES_PATH: /app/eval/qa_cases.jsonl
+      EVAL_RESULTS_DIR: /app/eval/qa_results
+    volumes:
+      - "${DISCLOSURE_BASE_DB_HOST}:/data/base/disclosure.sqlite:ro"
+      - "${DISCLOSURE_AGENT_DB_DIR_HOST}:/data/agent:ro"
+      - "${DISCLOSURE_ATTESTATION_HOST}:/data/attestation.json:ro"
+      - "${DISCLOSURE_RUNTIME_DIR_HOST}:/runtime"
+      - "qa-eval-data:/app/eval"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/health')); assert data['ready'] and data['eval_enabled']"]
+      interval: 30s
+      timeout: 30s
+      retries: 5
+      start_period: 180s
+
+volumes:
+  qa-eval-data:

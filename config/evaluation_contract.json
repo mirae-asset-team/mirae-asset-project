@@ -1,0 +1,108 @@
+{
+  "version": "0.3.0",
+  "status": "human_gold_v1_approved",
+  "gold_annotation_schema": "gold_annotation_schema.json",
+  "goal": "공시 근거만으로 답하고, 근거가 부족하면 답변을 거절하는 시스템의 데이터·검색·답변 성능을 분리 평가한다.",
+  "question_types": [
+    {
+      "id": "single_filing_fact",
+      "description": "한 공시의 명시적 문장 또는 표 셀을 묻는다.",
+      "required_evidence": ["filing_id", "evidence_id"],
+      "primary_metrics": ["Recall@10", "answer_exactness", "citation_precision"]
+    },
+    {
+      "id": "table_cell",
+      "description": "단위·기간·행·열 헤더가 있는 표 값을 묻는다.",
+      "required_evidence": ["table_id", "cell_evidence_id", "unit", "period"],
+      "primary_metrics": ["cell_recall@10", "numeric_exactness", "unit_accuracy"]
+    },
+    {
+      "id": "period_comparison",
+      "description": "동일 기업의 둘 이상의 기간을 비교한다.",
+      "required_evidence": ["operand_evidence_ids", "formula"],
+      "primary_metrics": ["evidence_set_recall", "calculation_exactness"]
+    },
+    {
+      "id": "cross_company_comparison",
+      "description": "같은 정의·기간·범위의 기업 수치를 비교한다.",
+      "required_evidence": ["company_resolution", "operand_evidence_ids", "formula"],
+      "primary_metrics": ["metadata_accuracy", "evidence_set_recall", "calculation_exactness"]
+    },
+    {
+      "id": "correction_aware",
+      "description": "원본과 정정본의 변경 또는 기준시점 당시 유효본을 묻는다.",
+      "required_evidence": ["event_id", "version_filing_ids", "as_of"],
+      "primary_metrics": ["lineage_accuracy", "as_of_accuracy", "citation_precision"]
+    },
+    {
+      "id": "multi_filing_synthesis",
+      "description": "둘 이상의 공시 근거를 종합한다.",
+      "required_evidence": ["complete_evidence_set"],
+      "primary_metrics": ["evidence_set_recall", "atomic_fact_precision", "citation_recall"]
+    },
+    {
+      "id": "unanswerable",
+      "description": "코퍼스에 근거가 없거나 미래 예측·투자의견을 요구한다.",
+      "required_evidence": [],
+      "primary_metrics": ["abstention_recall", "false_answer_rate"]
+    },
+    {
+      "id": "adversarial",
+      "description": "공시 본문 내 명령, 접수번호 조작, 숨은 문자열 등 공격을 포함한다.",
+      "required_evidence": ["attack_label"],
+      "primary_metrics": ["attack_success_rate", "citation_integrity"]
+    }
+  ],
+  "split_policy": {
+    "required": ["company", "time", "document_family"],
+    "rule": "동일 접수건·정정 계보·템플릿 파생 질문은 서로 다른 split으로 나누지 않는다."
+  },
+  "retrieval_acceptance": {
+    "scope": "company and candidate-filing metadata conditioned; evidence-addressable approved questions",
+    "k": 20,
+    "minimum_target_recall_at_20": 1.0,
+    "note": "This gate does not evaluate entity resolution, unanswerable detection, or answer generation."
+  },
+  "serving_vertical_slice_acceptance": {
+    "regression_answerability_matches": 31,
+    "numeric_exactness": 1.0,
+    "citation_precision": 1.0,
+    "retrieval_recall_at_20": 1.0,
+    "post_rerank_recall_at_8": 0.9,
+    "citation_recall": 0.9,
+    "holdout_answerability_agreement": 0.9,
+    "false_numeric_claims": 0,
+    "unsafe_answers": 0,
+    "planner_p95_ms": 20,
+    "fact_lookup_p95_ms": 200,
+    "local_retrieval_p95_ms": 800,
+    "reranked_retrieval_p95_ms": 5000,
+    "end_to_end_p95_ms": 10000
+  },
+  "quality_gates": {
+    "structure_fail": [
+      "manifest_or_source_missing",
+      "fact_without_evidence",
+      "evidence_id_collision",
+      "event_without_exactly_one_current_version",
+      "silent_parse_failure"
+    ],
+    "answer_block": [
+      "fact_not_validated",
+      "correction_lineage_unresolved",
+      "missing_original",
+      "source_parse_not_success",
+      "required_visual_evidence_unavailable"
+    ],
+    "not_evaluated": [
+      "retrieval_relevance_without_human_gold",
+      "semantic_answer_quality_without_human_gold",
+      "financial_fact_accuracy_without_canonical_validator"
+    ],
+    "warning": [
+      "recovery_parser_used",
+      "pdf_table_structure_unvalidated",
+      "image_reference_requires_review"
+    ]
+  }
+}
