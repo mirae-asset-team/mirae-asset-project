@@ -40,8 +40,25 @@ def load_truth() -> dict[tuple[str, str, int, str], dict]:
         return {}
     index: dict[tuple[str, str, int, str], dict] = {}
     for grain in payload.get("grains", {}).values():
+        fiscal_year = int(grain["fiscal_year"])
+        period_type = str(grain.get("period_type") or "")
+        period_start = str(grain.get("period_start") or "")
+        period_end = str(grain.get("period_end") or "")
+        instant_date = str(grain.get("instant_date") or "")
+        year_start = f"{fiscal_year:04d}-01-01"
+        year_end = f"{fiscal_year:04d}-12-31"
+        is_annual_duration = (
+            period_type == "duration" and period_start == year_start
+            and period_end == year_end and not instant_date
+        )
+        is_year_end_instant = (
+            period_type == "instant" and instant_date == year_end
+            and not period_start and period_end in {"", year_end}
+        )
+        if not (is_annual_duration or is_year_end_instant):
+            continue
         index[(
-            grain["company"], grain["account_id"], int(grain["fiscal_year"]), grain["scope"],
+            grain["company"], grain["account_id"], fiscal_year, grain["scope"],
         )] = grain
     return index
 

@@ -161,7 +161,7 @@ def test_review_preserves_exact_evidence_packet_fields(tmp_path: Path) -> None:
     }]
 
 
-def test_gold_candidate_requires_independent_approval_and_exports_canonical_record(tmp_path: Path) -> None:
+def test_gold_candidate_rejects_matching_reviewer_label_and_exports_canonical_record(tmp_path: Path) -> None:
     corpus = tmp_path / "corpus.sqlite"
     _build_gold_corpus(corpus)
     store = QaLabStore(tmp_path / "qa.sqlite", corpus_database=corpus)
@@ -289,6 +289,7 @@ def test_lab_page_is_separate_from_public_chat(lab_client) -> None:
     assert "/static/lab.js" in page.text
     assert 'id="gold-panel"' in page.text
     assert "/lab/export/gold.jsonl" in page.text
+    assert "인증된 개인 신원이 아닙니다" in page.text
     assert "기록 전체 삭제" not in page.text
     assert 'id="qa-reviewer"' not in public.text
 

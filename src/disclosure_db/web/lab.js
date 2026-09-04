@@ -473,7 +473,7 @@ function setGoldFormDisabled(disabled) {
 
 function friendlyGoldError(message) {
   if (message === "gold_candidate_exists") return "이미 연결된 Gold 후보가 있습니다.";
-  if (message === "self_approval_forbidden") return "작성자와 다른 검수자가 승인해야 합니다.";
+  if (message === "self_approval_forbidden") return "작성자와 다른 검수자 라벨을 입력하세요. 실제 신원 분리는 팀 운영자가 확인해야 합니다.";
   if (message.startsWith("gold_checks_failed:")) return `자동검사를 통과하지 못했습니다: ${message.split(":").slice(1).join(":")}`;
   return message;
 }

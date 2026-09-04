@@ -1010,3 +1010,11 @@
 - 연도 간 계산에는 기업·계정·scope·period type 일치 gate를 추가했다. 영어 단어 경계 match와 compact 한국어 match를 합쳐 한영 혼합 두 지표를 모두 requirements로 보존했다.
 - 최소 수정 후 신규 focused는 `6 passed`, 관련 확대 회귀는 `127 passed, 70 subtests`였다. 실제 D 드라이브 read-only 감사에서 base `financial_fact=0`, overlay `financial_fact=1,191`을 확인했고 첫 validated 표본이 `corpus_confirmed`로 통과했다.
 - 최종 전체 Python은 `939 passed, 2 skipped, 98 warnings, 260 subtests passed` (`424.44s`)였다. D 드라이브 파일은 수정하지 않았고 credential/NCP 설정과 release hard gate도 변경하지 않았다.
+
+### 2026-09-05T01:18:00+09:00 — 최종 재리뷰 기간·검수자 신원 경계 수정
+
+- 최종 재리뷰에서 Ground Truth grouping이 기간 전체 signature를 키에서 버려 같은 연도·scope의 분기 flow와 연간 flow를 합칠 수 있음을 P1으로 확인했다. 또한 QA 화면의 작성자·검수자 이름은 하나의 공유 Basic Auth 뒤에서 사용자가 입력하는 문자열이므로 독립 신원을 기술적으로 증명하지 못한다는 P2를 재확인했다.
+- TDD RED는 분기 duration/비연말 instant가 연간 truth index에 들어가는 문제, 서로 다른 시작일을 가진 fact가 하나의 grain으로 합쳐지는 문제, QA 화면의 신원 한계 미표시를 합쳐 `3 failed, 10 passed`였다.
+- Ground Truth key와 출력에 `period_type`, `period_start`, `period_end`, `instant_date`를 모두 보존한다. v4 연간 질문에는 `YYYY-01-01~YYYY-12-31` duration 또는 `YYYY-12-31` instant만 사용할 수 있고 그 외 fact는 `non_annual_period`로 거절한다.
+- QA 화면은 입력 이름이 인증된 개인 신원이 아니라 감사 라벨이며 실제 2인 검수는 팀 운영자가 확인해야 함을 명시한다. 동일 라벨 자기 승인 차단은 실수 방지 절차 통제로 유지하지만 인증 보장으로 주장하지 않는다.
+- focused Python은 `13 passed`, Web은 `13 passed`였다. 최종 전체 Python은 `941 passed, 2 skipped, 98 warnings, 260 subtests passed` (`344.73s`)였다. base/overlay는 이 수정에서 열지 않았고 credential, NCP 설정, release hard gate도 변경하지 않았다.

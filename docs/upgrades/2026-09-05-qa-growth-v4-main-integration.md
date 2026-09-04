@@ -28,12 +28,13 @@
 - Ground Truth 확증은 숫자 셀 일치뿐 아니라 `financial_fact_evidence`의 검증 상태, 기업, 계정, 기간, 범위, 공시번호와 scaled value를 모두 독립 대조한다.
 - 재무 의미는 base DB가 아니라 별도 read-only overlay에서 읽고, 기업·공시와 표 셀은 read-only base에서 대조한다. 기간은 종료일뿐 아니라 유형·시작일·종료일·기준일 전체가 일치해야 한다.
 - 연도 간 증감·성장률도 기업·계정·연결/별도·기간 유형이 일치하지 않으면 계산하지 않는다.
+- Ground Truth의 grain key와 직렬화에 기간 유형·시작일·종료일·기준일을 모두 보존한다. 연간 QA bank는 정확한 calendar-year duration 또는 calendar year-end instant만 채택하며 분기 fact는 `non_annual_period`로 제외한다.
 - 자연스러운 영어 문장의 등록된 재무계정명은 ASCII 단어 경계로 인식한다. 등록되지 않은 alias나 유사 계정은 계속 추론하지 않는다.
 - 팀 QA 운영 문서를 실제 Compose의 HTTPS 도메인/Caddy Basic Auth 구성과 일치시켰다. 화면의 검수자 이름은 인증 신원이 아닌 감사 라벨임을 명시했다.
 
 ## 검증 결과
 
-- `PYTHONPATH=src python -m pytest -q`: `939 passed, 2 skipped, 98 warnings, 260 subtests passed`
+- `PYTHONPATH=src python -m pytest -q`: `941 passed, 2 skipped, 98 warnings, 260 subtests passed`
 - `python -m compileall -q src scripts tests`: 통과
 - `node --test tests/web_history.test.mjs tests/web_api.test.mjs`: `13 passed`
 - `team-qa npm test`: `1 passed`

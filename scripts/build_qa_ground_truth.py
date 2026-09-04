@@ -56,8 +56,26 @@ def cell_numbers(text: str) -> list[Decimal]:
     return values
 
 
+def is_annual_period(
+    *,
+    fiscal_year: int,
+    period_type: str,
+    period_start: str,
+    period_end: str,
+    instant_date: str,
+) -> bool:
+    """Admit only full calendar-year flows or calendar year-end balances."""
+    year_start = f"{fiscal_year:04d}-01-01"
+    year_end = f"{fiscal_year:04d}-12-31"
+    if period_type == "duration":
+        return period_start == year_start and period_end == year_end and not instant_date
+    if period_type == "instant":
+        return instant_date == year_end and not period_start and period_end in {"", year_end}
+    return False
+
+
 def harvest(connection: sqlite3.Connection, run_ids: list[str]) -> dict:
-    """Collect every (company, account, year, scope) grain a run answered."""
+    """Collect answered grains without collapsing distinct period signatures."""
     placeholders = ",".join("?" for _ in run_ids)
     rows = connection.execute(
         f"SELECT qid, company, response_json FROM result"
@@ -88,11 +106,19 @@ def harvest(connection: sqlite3.Connection, run_ids: list[str]) -> dict:
                 value = Decimal(str(raw)) * Decimal(str(scale))
             except ArithmeticError:
                 continue
+            period_type = str(period.get("period_type") or "")
+            period_start = str(period.get("period_start") or "")
+            period_end = str(period.get("period_end") or "")
+            instant_date = str(period.get("instant_date") or "")
             key = (
                 str(identifiers.get("issuer_corp_code") or ""),
                 str(fact.get("account_id") or ""),
                 int(end[:4]),
                 str(fact.get("scope") or ""),
+                period_type,
+                period_start,
+                period_end,
+                instant_date,
             )
             grains[key].append({
                 "qid": qid,
@@ -107,10 +133,10 @@ def harvest(connection: sqlite3.Connection, run_ids: list[str]) -> dict:
                 "account_name": str(fact.get("account_name") or ""),
                 "account_id": str(fact.get("account_id") or ""),
                 "scope": str(fact.get("scope") or ""),
-                "period_type": str(period.get("period_type") or ""),
-                "period_start": str(period.get("period_start") or ""),
-                "period_end": end,
-                "instant_date": str(period.get("instant_date") or ""),
+                "period_type": period_type,
+                "period_start": period_start,
+                "period_end": period_end,
+                "instant_date": instant_date,
                 "evidence_ids": [
                     eid for eid in (fact.get("evidence_ids") or []) if eid in items
                 ],
@@ -220,8 +246,24 @@ def main() -> int:
     rejects: list[dict] = []
 
     for key, observations in sorted(grains.items()):
-        corp_code, account_id, fiscal_year, scope = key
+        (corp_code, account_id, fiscal_year, scope, period_type,
+         period_start, period_end, instant_date) = key
         stats["observations"] += len(observations)
+        if not is_annual_period(
+            fiscal_year=fiscal_year,
+            period_type=period_type,
+            period_start=period_start,
+            period_end=period_end,
+            instant_date=instant_date,
+        ):
+            stats["unconfirmed"] += 1
+            rejects.append({
+                "key": list(key),
+                "company": observations[0]["company"],
+                "reason": "non_annual_period",
+                "qids": [observation["qid"] for observation in observations[:6]],
+            })
+            continue
         distinct = {observation["value"] for observation in observations}
         if len(distinct) > 1:
             # The server contradicted itself across questions on one grain; a
@@ -229,7 +271,7 @@ def main() -> int:
             # a finding recorded for the failure ledger.
             stats["conflicting"] += 1
             rejects.append({
-                "key": [corp_code, account_id, fiscal_year, scope],
+                "key": list(key),
                 "company": observations[0]["company"],
                 "reason": "served_values_disagree",
                 "values": sorted(str(value) for value in distinct),
@@ -241,13 +283,16 @@ def main() -> int:
         if not ok:
             stats["unconfirmed"] += 1
             rejects.append({
-                "key": [corp_code, account_id, fiscal_year, scope],
+                "key": list(key),
                 "company": witness["company"], "reason": reason,
                 "qids": [observation["qid"] for observation in observations[:6]],
             })
             continue
         stats["confirmed"] += 1
-        confirmed[f"{corp_code}|{account_id}|{fiscal_year}|{scope}"] = {
+        confirmed[
+            f"{corp_code}|{account_id}|{fiscal_year}|{scope}|{period_type}|"
+            f"{period_start}|{period_end}|{instant_date}"
+        ] = {
             "issuer_corp_code": corp_code,
             "company": witness["company"],
             "stock_code": witness["stock_code"],
@@ -260,7 +305,10 @@ def main() -> int:
             "scale": witness["scale"],
             "filing_id": witness["filing_id"],
             "rcept_no": witness["rcept_no"],
+            "period_type": witness["period_type"],
+            "period_start": witness["period_start"],
             "period_end": witness["period_end"],
+            "instant_date": witness["instant_date"],
             "evidence_ids": witness["evidence_ids"],
             "witness_count": len(observations),
         }
