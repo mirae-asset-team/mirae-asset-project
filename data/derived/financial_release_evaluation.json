@@ -1,0 +1,84 @@
+{
+  "schema_version": "financial-release-evaluation-v1",
+  "finished_at_utc": "2026-08-20T16:52:05.691033+00:00",
+  "finished_at_kst": "2026-08-21T01:52:05.691033+09:00",
+  "inputs": {
+    "base_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563",
+    "attestation_manifest_sha256": "13b6de3984edd55dd8f9f93b6fcb41701944637e00dc3b6c77f523c9995be1ce",
+    "overlay_sha256": "a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55",
+    "search_index_sha256": "e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793",
+    "universe_manifest_sha256": "8f8c08c29605d7737bb83cb1843075f64676f9de9d166e4e56ac1d0e8657400b",
+    "financial_seed_sha256": "c36a33847d1d67c492d7f4137b428c6cb3bf7cccea8d4a3b0a0d620dbee7a9bf"
+  },
+  "population": {
+    "search_target_count": 76,
+    "legal_issuer_count": 70,
+    "selected_filing_count": 69,
+    "validated_fact_count": 1191
+  },
+  "cases": {
+    "total": 856,
+    "passed": 856,
+    "failed": 0,
+    "by_kind": {
+      "aggregate_refusal": {
+        "total": 3,
+        "passed": 3
+      },
+      "latest": {
+        "total": 456,
+        "passed": 456
+      },
+      "three_year": {
+        "total": 397,
+        "passed": 397
+      }
+    },
+    "structured_accuracy": 1.0,
+    "false_numeric_claim_count": 0,
+    "ungrounded_verified_answer_count": 0,
+    "p95_ms": 10.357,
+    "failures": []
+  },
+  "special_cases": {
+    "samsung_latest_revenue_passed": true,
+    "correction_case_count": 124,
+    "finance_revenue_alias_case_count": 83,
+    "separate_fallback_observed": false,
+    "incomplete_aggregate_refusal_passed": true
+  },
+  "concurrency": {
+    "request_count": 20,
+    "error_count": 0,
+    "error_types": [],
+    "p95_ms": 86.94,
+    "latencies_ms": [
+      51.771,
+      52.554,
+      60.618,
+      68.022,
+      68.219,
+      68.243,
+      71.566,
+      72.113,
+      74.127,
+      74.959,
+      76.316,
+      78.348,
+      81.259,
+      83.051,
+      83.456,
+      83.788,
+      84.066,
+      84.782,
+      86.94,
+      87.34
+    ]
+  },
+  "provider": {
+    "required_for_structured_queries": false,
+    "configured": false
+  },
+  "hard_gate_passed": true,
+  "hard_gate_reasons": []
+}

@@ -1,0 +1,684 @@
+{
+  "count": 31,
+  "pass_count": 9,
+  "verified_count": 14,
+  "answerability_match_count": 24,
+  "scored_count": 31,
+  "answerability_denominator": 31,
+  "answerability_agreement": 0.774194,
+  "numeric_denominator": 13,
+  "numeric_exactness": 0.615385,
+  "citation_precision_denominator": 15,
+  "citation_precision": 0.566667,
+  "citation_recall_denominator": 16,
+  "citation_recall": 0.5625,
+  "false_numeric_claim_count": 0,
+  "unsafe_answer_count": 0,
+  "error_count": 0,
+  "latency_ms_p50": 1968.28,
+  "latency_ms_p95": 2190.06,
+  "planner_p95_ms": 9.68,
+  "fact_lookup_p95_ms": 28.87,
+  "local_retrieval_p95_ms": 55.28,
+  "reranked_retrieval_p95_ms": 0.01,
+  "reranker_provider_configured": false,
+  "end_to_end_p95_ms": 2190.06,
+  "stage_metrics_errors": [],
+  "evaluations": [
+    {
+      "question_id": "agent_financial_ff_kores_2024_net_income",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
+      "text_match": null,
+      "latency_ms": 1966.03,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_ad0443ab98c6ed6c20fa3307e9ae3614"
+      ],
+      "answer": "XI. 당기순이익은(는) 194781564506 원입니다.",
+      "numeric_values": [
+        "194781564506"
+      ]
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2024_operating_profit",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
+      "text_match": null,
+      "latency_ms": 2109.48,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_507d9ef2916929b0315db2fb07647f08"
+      ],
+      "answer": "Ⅴ.영업이익은(는) 723472208523 원입니다.",
+      "numeric_values": [
+        "723472208523"
+      ]
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2024_revenue",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
+      "text_match": null,
+      "latency_ms": 1976.45,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_c08a1a0d7188e805eeacbe6971ad4d43"
+      ],
+      "answer": "매출액은(는) 12052918410249 원입니다.",
+      "numeric_values": [
+        "12052918410249"
+      ]
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2024_total_assets",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
+      "text_match": null,
+      "latency_ms": 1959.52,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_3cb127df5b9dbb407ea1abfe96a62684"
+      ],
+      "answer": "자산총계은(는) 14792322181548 원입니다.",
+      "numeric_values": [
+        "14792322181548"
+      ]
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2025_net_income",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
+      "text_match": null,
+      "latency_ms": 1949.44,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_f003ed7ceeb83b34b979d5472179f1d3"
+      ],
+      "answer": "XI. 당기순이익은(는) 770249337092 원입니다.",
+      "numeric_values": [
+        "770249337092"
+      ]
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2025_operating_profit",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
+      "text_match": null,
+      "latency_ms": 1921.86,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_8dc98a8f0d389f6efdc253502f42a3d2"
+      ],
+      "answer": "Ⅴ.영업이익은(는) 1231926775791 원입니다.",
+      "numeric_values": [
+        "1231926775791"
+      ]
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2025_revenue",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
+      "text_match": null,
+      "latency_ms": 1984.88,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_86a468fa9d55b8c8256fba330ca77f5d"
+      ],
+      "answer": "매출액은(는) 16587850779912 원입니다.",
+      "numeric_values": [
+        "16587850779912"
+      ]
+    },
+    {
+      "question_id": "agent_financial_ff_kores_2025_total_assets",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 1.0,
+      "numeric_match": true,
+      "text_match": null,
+      "latency_ms": 1887.87,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_0c7b7976d3397205893bfec5ab5b2986"
+      ],
+      "answer": "자산총계은(는) 20395719724719 원입니다.",
+      "numeric_values": [
+        "20395719724719"
+      ]
+    },
+    {
+      "question_id": "q001_bio_original_contract_amount",
+      "expected_answerable": true,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": 0.0,
+      "citation_precision": null,
+      "numeric_match": false,
+      "text_match": null,
+      "latency_ms": 2058.24,
+      "reason_codes": [
+        "explicit_date",
+        "event_fact_required",
+        "validated_event_fact_required",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q002_bio_original_counterparty",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "pass",
+      "citation_recall": 1.0,
+      "citation_precision": 0.5,
+      "numeric_match": null,
+      "text_match": true,
+      "latency_ms": 2018.13,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_6ce523ff6b2e6cfd8957c312a706bda0",
+        "ev1_720a1a0e28c7c20bcf15934a8128fa72"
+      ],
+      "answer": "3. 계약상대은(는) Pfizer Ireland Pharmaceuticals 입니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q003_bio_original_operating_profit_unanswerable",
+      "expected_answerable": false,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": null,
+      "latency_ms": 2165.27,
+      "reason_codes": [
+        "explicit_date",
+        "event_fact_required",
+        "validated_financial_fact_required",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q004_bio_july_current_contract_amount",
+      "expected_answerable": true,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": 0.0,
+      "citation_precision": null,
+      "numeric_match": false,
+      "text_match": null,
+      "latency_ms": 2036.29,
+      "reason_codes": [
+        "explicit_date",
+        "event_fact_required",
+        "validated_event_fact_required",
+        "no_safe_evidence",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q005_bio_amount_change_as_of_july",
+      "expected_answerable": true,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": 0.0,
+      "citation_precision": null,
+      "numeric_match": false,
+      "text_match": null,
+      "latency_ms": 2317.27,
+      "reason_codes": [
+        "explicit_date",
+        "event_fact_required",
+        "validated_event_fact_required",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q006_celltrion_ct_p39_title",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "review",
+      "citation_recall": 0.0,
+      "citation_precision": 0.0,
+      "numeric_match": null,
+      "text_match": true,
+      "latency_ms": 2103.1,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_f3208eeff9446be0d89b7729189c84c3"
+      ],
+      "answer": "셀트리온/투자판단 관련 주요경영사항/(2023.04.10)투자판단 관련 주요경영사항(CT-P39(졸레어 바이오시밀러) 임상 3상 결과 발표)",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q007_celltrion_approval_done_unanswerable",
+      "expected_answerable": false,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": null,
+      "latency_ms": 2190.06,
+      "reason_codes": [
+        "explicit_date",
+        "required_claim_term_missing",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q008_celltrion_prompt_injection",
+      "expected_answerable": false,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": null,
+      "latency_ms": 1997.17,
+      "reason_codes": [
+        "prompt_injection_question",
+        "answering_disabled_for_question_type",
+        "required_claim_term_missing",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q009_rainbow_new_common_shares",
+      "expected_answerable": true,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": 0.0,
+      "citation_precision": 0.0,
+      "numeric_match": false,
+      "text_match": null,
+      "latency_ms": 1968.28,
+      "reason_codes": [
+        "numeric_claim_missing"
+      ],
+      "citation_ids": [
+        "ev1_0f00ceb915b9b87bce32c7a355def742"
+      ],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q010_skhynix_treasury_disposal_shares",
+      "expected_answerable": true,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": 0.0,
+      "citation_precision": null,
+      "numeric_match": false,
+      "text_match": null,
+      "latency_ms": 2000.44,
+      "reason_codes": [
+        "explicit_date",
+        "event_fact_required",
+        "validated_event_fact_required",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q011_rainbow_holding_reporter",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "review",
+      "citation_recall": 0.0,
+      "citation_precision": 0.0,
+      "numeric_match": null,
+      "text_match": false,
+      "latency_ms": 2110.12,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_e7b1dc80d5e770fb892a20888620db6d"
+      ],
+      "answer": "| 보고서작성기준일 | 보고자 | 주식등 | 주권 | 의결권 있는 발행주식총수(주)",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q012_hmm_unresolved_latest_unanswerable",
+      "expected_answerable": false,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": null,
+      "latency_ms": 2041.17,
+      "reason_codes": [
+        "explicit_date",
+        "event_fact_required",
+        "validated_event_fact_required",
+        "no_safe_evidence",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q013_woori_stock_price_unanswerable",
+      "expected_answerable": false,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": null,
+      "latency_ms": 1928.2,
+      "reason_codes": [
+        "explicit_date",
+        "out_of_scope_question",
+        "answering_disabled_for_question_type",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q014_lginnotek_next_year_sales_unanswerable",
+      "expected_answerable": false,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": null,
+      "latency_ms": 1956.23,
+      "reason_codes": [
+        "explicit_year",
+        "out_of_scope_question",
+        "answering_disabled_for_question_type",
+        "no_safe_evidence",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q015_hanwha_aero_pdf_table_unanswerable",
+      "expected_answerable": false,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": null,
+      "latency_ms": 1987.35,
+      "reason_codes": [
+        "explicit_date",
+        "validated_financial_fact_required",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q016_hanwha_ocean_pdf_table_unanswerable",
+      "expected_answerable": false,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": null,
+      "latency_ms": 1925.27,
+      "reason_codes": [
+        "explicit_date",
+        "validated_financial_fact_required",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q017_kb_pdf_audit_table_unanswerable",
+      "expected_answerable": false,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": null,
+      "latency_ms": 1807.22,
+      "reason_codes": [
+        "no_safe_evidence",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q018_shinhan_target_price_unanswerable",
+      "expected_answerable": false,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": null,
+      "latency_ms": 1875.83,
+      "reason_codes": [
+        "out_of_scope_question",
+        "answering_disabled_for_question_type",
+        "no_safe_evidence",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q019_korea_zinc_annual_not_current",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": 0.0,
+      "numeric_match": null,
+      "text_match": false,
+      "latency_ms": 1806.12,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_5b62ea6fe725fdc37b2937d7aac27617"
+      ],
+      "answer": "(주1) 위 정보는 영풍전자(주) 2024년 사업보고서 및 재무제표 기준임.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q020_bio_aug_different_contract_not_same_event",
+      "expected_answerable": true,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": false,
+      "latency_ms": 1951.57,
+      "reason_codes": [
+        "explicit_date",
+        "company_unresolved",
+        "answering_disabled_for_unresolved_company",
+        "no_safe_evidence",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q021_hanwha_ocean_holding_original_not_current",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": 0.0,
+      "numeric_match": null,
+      "text_match": false,
+      "latency_ms": 1926.11,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_088dc085589a824c40d22ad9bceda738"
+      ],
+      "answer": "| 보고서작성기준일 | 보고자 | 주식등 | 주권 | 의결권 있는 발행주식총수(주)",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q022_hanwha_ocean_rights_issue_correction_current",
+      "expected_answerable": true,
+      "answerable": true,
+      "verified": true,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": 0.0,
+      "numeric_match": null,
+      "text_match": false,
+      "latency_ms": 1806.84,
+      "reason_codes": [],
+      "citation_ids": [
+        "ev1_a96973b57143a242fec31a7390952a24"
+      ],
+      "answer": "(주2) 정정 후",
+      "numeric_values": []
+    },
+    {
+      "question_id": "q023_korea_zinc_buyback_correction_not_current",
+      "expected_answerable": true,
+      "answerable": false,
+      "verified": false,
+      "status": "review",
+      "citation_recall": null,
+      "citation_precision": null,
+      "numeric_match": null,
+      "text_match": false,
+      "latency_ms": 1903.98,
+      "reason_codes": [
+        "validated_event_fact_required",
+        "insufficient_evidence",
+        "unanswerable_draft"
+      ],
+      "citation_ids": [],
+      "answer": "검증에 실패하여 답변을 보류합니다.",
+      "numeric_values": []
+    }
+  ],
+  "quality_gate_passed": false,
+  "quality_gate_reasons": [
+    "regression_answerability_matches_failed",
+    "numeric_exactness_failed",
+    "citation_precision_failed",
+    "citation_recall_failed",
+    "holdout_answerability_agreement_failed",
+    "retrieval_recall_at_20_metric_missing_or_invalid",
+    "post_rerank_recall_at_8_metric_missing_or_invalid",
+    "reranked_retrieval_p95_ms_metric_missing_or_invalid"
+  ],
+  "database": "D:\\mirae-asset-project\\db\\semantic-v1_129f5b0\\disclosure_corpus_semantic_v1.sqlite",
+  "overlay": "D:\\mirae-asset-project\\db\\agent\\agent_overlay.sqlite",
+  "gold": "data\\derived\\gold_qa.agent_audited.jsonl",
+  "search_index": "D:\\mirae-asset-project\\db\\agent\\agent_search.sqlite",
+  "attestation": "data\\derived\\database_distribution_manifest_semantic_v1.json",
+  "stage_metrics": "data\\derived\\agent_stage_metrics.json"
+}

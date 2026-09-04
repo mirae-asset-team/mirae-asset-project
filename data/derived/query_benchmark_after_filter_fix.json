@@ -1,0 +1,42 @@
+[
+  {
+    "text": "계약금액",
+    "company": "삼성전자",
+    "latency_ms": 84.687,
+    "result_count": 10,
+    "top_evidence_id": "ev1_dcf5fd2b01bb809797fd78d0f8053e75",
+    "top_filing_id": "20241115000375"
+  },
+  {
+    "text": "감사의견",
+    "company": "005930",
+    "latency_ms": 97.634,
+    "result_count": 10,
+    "top_evidence_id": "ev1_081ddf46d4cb835317339b44a687c79b",
+    "top_filing_id": "20240312000736"
+  },
+  {
+    "text": "자기주식취득결정",
+    "company": null,
+    "latency_ms": 501.63,
+    "result_count": 10,
+    "top_evidence_id": "ev1_f226b70758f82c6a330d8336eea9f657",
+    "top_filing_id": "20241118000171"
+  },
+  {
+    "text": "보유주식등의 수",
+    "company": null,
+    "latency_ms": 112.202,
+    "result_count": 10,
+    "top_evidence_id": "ev1_704e2cd99b5e80c8211701cb41167b97",
+    "top_filing_id": "20250905000381"
+  },
+  {
+    "text": "매출액",
+    "company": "현대자동차",
+    "latency_ms": 212.773,
+    "result_count": 10,
+    "top_evidence_id": "ev1_25a6dcd308839ef42d738de7408d2768",
+    "top_filing_id": "20240313001451"
+  }
+]

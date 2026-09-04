@@ -1,0 +1,6 @@
+{
+  "schema_version": "deprecated-financial-account-aliases-v1",
+  "deprecated": true,
+  "replacement": "financial_account_catalog.json",
+  "note": "Runtime financial aliases are generated from the central catalog."
+}

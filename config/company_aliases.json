@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "companies": [
+    {
+      "canonical": "에스엠",
+      "aliases": ["SM", "SM엔터테인먼트", "에스엠엔터테인먼트"]
+    },
+    {
+      "canonical": "하이브",
+      "aliases": ["HYBE", "하이브엔터테인먼트"]
+    },
+    {
+      "canonical": "삼성전자",
+      "aliases": ["Samsung Electronics"]
+    }
+  ]
+}

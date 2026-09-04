@@ -1,0 +1,254 @@
+{
+  "summary": {
+    "sample_count": 12,
+    "sampling": "min_median_max_main_source_per_doc_group",
+    "lxml_total_seconds": 2.505398699999205,
+    "beautifulsoup_total_seconds": 10.639705499997945,
+    "beautifulsoup_over_lxml_ratio": 4.2467115114258345,
+    "structure_count_mismatches": 2,
+    "decision": "lxml_direct",
+    "reason": "동일 libxml2 계열 복구 결과를 더 직접적으로 제어하며, 좌표/오류 로그를 보존하고 중간 객체 비용을 줄인다."
+  },
+  "samples": [
+    {
+      "filing_id": "20230512001368",
+      "doc_group": "periodic",
+      "bytes": 788329,
+      "detected_format": "dart_xml",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 0.0817380000007688,
+          "table_count": 326,
+          "row_count": 1520,
+          "text_chars": 128707
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 0.08653310000227066,
+          "table_count": 57,
+          "row_count": 212,
+          "text_chars": 22334
+        }
+      }
+    },
+    {
+      "filing_id": "20241113000731",
+      "doc_group": "periodic",
+      "bytes": 3910000,
+      "detected_format": "dart_xml",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 0.38912880000134464,
+          "table_count": 1784,
+          "row_count": 7367,
+          "text_chars": 566604
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 3.5786345999949845,
+          "table_count": 1784,
+          "row_count": 7367,
+          "text_chars": 534749
+        }
+      }
+    },
+    {
+      "filing_id": "20260331004244",
+      "doc_group": "periodic",
+      "bytes": 32199881,
+      "detected_format": "dart_xml",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 1.278410500002792,
+          "table_count": 3918,
+          "row_count": 16624,
+          "text_chars": 1424115
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 0.24487460000091232,
+          "table_count": 21,
+          "row_count": 68,
+          "text_chars": 5999
+        }
+      }
+    },
+    {
+      "filing_id": "20240320001544",
+      "doc_group": "major",
+      "bytes": 5651,
+      "detected_format": "dart_xml",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 0.0005381999944802374,
+          "table_count": 2,
+          "row_count": 22,
+          "text_chars": 1204
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 0.005572199996095151,
+          "table_count": 2,
+          "row_count": 22,
+          "text_chars": 1165
+        }
+      }
+    },
+    {
+      "filing_id": "20230208000115",
+      "doc_group": "major",
+      "bytes": 30633,
+      "detected_format": "dart_xml",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 0.001958499997272156,
+          "table_count": 8,
+          "row_count": 72,
+          "text_chars": 4084
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 0.015085499995620921,
+          "table_count": 8,
+          "row_count": 72,
+          "text_chars": 3977
+        }
+      }
+    },
+    {
+      "filing_id": "20240829001253",
+      "doc_group": "major",
+      "bytes": 265866,
+      "detected_format": "dart_xml",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 0.03432499999325955,
+          "table_count": 21,
+          "row_count": 247,
+          "text_chars": 48304
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 0.30522950000158744,
+          "table_count": 21,
+          "row_count": 247,
+          "text_chars": 47560
+        }
+      }
+    },
+    {
+      "filing_id": "20230920800479",
+      "doc_group": "exchange",
+      "bytes": 5225,
+      "detected_format": "exchange_html",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 0.0011402999953133985,
+          "table_count": 1,
+          "row_count": 9,
+          "text_chars": 2225
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 0.003873000001476612,
+          "table_count": 1,
+          "row_count": 9,
+          "text_chars": 596
+        }
+      }
+    },
+    {
+      "filing_id": "20240617800002",
+      "doc_group": "exchange",
+      "bytes": 10056,
+      "detected_format": "exchange_html",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 0.0013652000052388757,
+          "table_count": 1,
+          "row_count": 9,
+          "text_chars": 3458
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 0.00559380000049714,
+          "table_count": 1,
+          "row_count": 9,
+          "text_chars": 1577
+        }
+      }
+    },
+    {
+      "filing_id": "20250929800639",
+      "doc_group": "exchange",
+      "bytes": 21699,
+      "detected_format": "exchange_html",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 0.001972100006241817,
+          "table_count": 4,
+          "row_count": 33,
+          "text_chars": 5486
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 0.2811227999991388,
+          "table_count": 4,
+          "row_count": 33,
+          "text_chars": 2592
+        }
+      }
+    },
+    {
+      "filing_id": "20240314001102",
+      "doc_group": "holding",
+      "bytes": 54747,
+      "detected_format": "dart_xml",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 0.005371400002331939,
+          "table_count": 19,
+          "row_count": 85,
+          "text_chars": 6141
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 0.04085340000165161,
+          "table_count": 19,
+          "row_count": 85,
+          "text_chars": 5858
+        }
+      }
+    },
+    {
+      "filing_id": "20250509000794",
+      "doc_group": "holding",
+      "bytes": 114645,
+      "detected_format": "dart_xml",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 0.009344799997052178,
+          "table_count": 30,
+          "row_count": 139,
+          "text_chars": 11270
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 0.06930350000038743,
+          "table_count": 30,
+          "row_count": 139,
+          "text_chars": 10964
+        }
+      }
+    },
+    {
+      "filing_id": "20250110000695",
+      "doc_group": "holding",
+      "bytes": 9568282,
+      "detected_format": "dart_xml",
+      "candidates": {
+        "lxml_direct": {
+          "seconds": 0.7001059000031091,
+          "table_count": 64,
+          "row_count": 7783,
+          "text_chars": 1055194
+        },
+        "beautifulsoup_lxml": {
+          "seconds": 6.003029500003322,
+          "table_count": 64,
+          "row_count": 7783,
+          "text_chars": 1046912
+        }
+      }
+    }
+  ]
+}

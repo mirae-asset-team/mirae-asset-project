@@ -1,0 +1,46 @@
+{
+  "measured_at": "2026-08-14",
+  "database": "data/derived/disclosure_corpus.sqlite",
+  "database_size_bytes": 38481072128,
+  "method": {
+    "safe_filter": "root/resolved current version; unresolved and missing_original excluded",
+    "limit": 10,
+    "warmup_runs": 1,
+    "measured_runs": 3,
+    "statistic": "median_ms"
+  },
+  "database_unchanged": true,
+  "results": [
+    {
+      "query": "계약금액",
+      "company": "삼성전자",
+      "samples_ms": [286.423, 272.603, 284.983],
+      "median_before_execution_order_fix_ms": 284.983,
+      "samples_after_fix_ms": [63.044, 63.855, 63.37],
+      "median_ms": 63.37,
+      "result_count": 10,
+      "top_filing_id": "20241118000328"
+    },
+    {
+      "query": "감사의견",
+      "company": "005930",
+      "samples_ms": [301.163, 297.493, 314.573],
+      "median_before_execution_order_fix_ms": 301.163,
+      "samples_after_fix_ms": [66.383, 64.113, 66.314],
+      "median_ms": 66.314,
+      "result_count": 10,
+      "top_filing_id": "20240312000736"
+    },
+    {
+      "query": "매출액",
+      "company": "현대자동차",
+      "samples_ms": [414.338, 440.331, 448.954],
+      "median_before_execution_order_fix_ms": 440.331,
+      "samples_after_fix_ms": [112.273, 116.538, 116.283],
+      "median_ms": 116.283,
+      "result_count": 10,
+      "top_filing_id": "20240313001451"
+    }
+  ],
+  "scope_warning": "검색 지연 smoke이며 관련성·정답성·p95 평가가 아니다."
+}

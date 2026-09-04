@@ -1,0 +1,290 @@
+from __future__ import annotations
+
+import copy
+import hashlib
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+
+from disclosure_db.stress_generation import (
+    build_stress_cases,
+    canonical_json,
+    split_groups,
+    source_sha256,
+    validate_stress_case,
+    validate_stress_cases,
+)
+from disclosure_db.stress_evaluation import (
+    CaseScore,
+    aggregate_scores,
+    evaluate_provider_gate,
+    percentile_95,
+    resolve_case_company,
+    run_fault_case,
+    score_case,
+    score_metamorphic_group,
+    should_skip,
+)
+
+
+def valid_case() -> dict[str, object]:
+    return {
+        "schema_version": "0.1.0",
+        "question_id": "stress_001",
+        "question": "테스트의 계약금액은 얼마인가?",
+        "question_type": "table_cell",
+        "answerability": "answerable",
+        "answer": {
+            "kind": "numeric",
+            "value": "10",
+            "unit": "원",
+            "scale": 1,
+            "filing_id": "f1",
+            "evidence_ids": ["ev1"],
+        },
+        "evidence": [{"evidence_id": "ev1", "filing_id": "f1"}],
+        "stress": {
+            "oracle": "exact",
+            "category": "financial",
+            "base_id": "base_001",
+            "group_id": "group_001",
+            "mutation_id": "base",
+            "generator": "deterministic_stress_v1",
+            "seed": 20260819,
+            "source_sha256": "0" * 64,
+            "trust_tier": "human_verified",
+        },
+    }
+
+
+class AgentStressContractTests(unittest.TestCase):
+    def test_canonical_hash_is_key_order_independent(self) -> None:
+        self.assertEqual(source_sha256({"b": 2, "a": 1}), source_sha256({"a": 1, "b": 2}))
+        self.assertEqual(canonical_json({"b": 2, "a": 1}), b'{"a":1,"b":2}')
+
+    def test_validate_rejects_duplicate_or_unknown_oracle(self) -> None:
+        case = valid_case()
+        case["stress"]["oracle"] = "llm_judge"  # type: ignore[index]
+        with self.assertRaisesRegex(ValueError, "unknown oracle"):
+            validate_stress_case(case)
+        duplicate = valid_case()
+        with self.assertRaisesRegex(ValueError, "duplicate question_id"):
+            validate_stress_cases([duplicate, copy.deepcopy(duplicate)])
+
+    def test_numeric_exact_requires_decimal_unit_and_evidence(self) -> None:
+        case = valid_case()
+        case["answer"]["unit"] = None  # type: ignore[index]
+        with self.assertRaisesRegex(ValueError, "unit"):
+            validate_stress_case(case)
+        case = valid_case()
+        case["answer"]["evidence_ids"] = []  # type: ignore[index]
+        with self.assertRaisesRegex(ValueError, "evidence"):
+            validate_stress_case(case)
+
+    def test_abstention_requires_empty_evidence_and_no_numeric_claim(self) -> None:
+        case = valid_case()
+        case["answerability"] = "unanswerable"
+        case["answer"] = {"kind": "unanswerable", "reason": "근거 없음"}
+        case["evidence"] = []
+        validate_stress_case(case)
+
+    def test_build_cases_is_deterministic_and_matches_category_counts(self) -> None:
+        contract = {
+            "case_count": 9,
+            "allocation": {
+                "financial": 1, "event": 1, "correction": 1,
+                "calculation": 1, "retrieval": 1, "unanswerable": 1,
+                "adversarial": 1, "language": 1, "fault": 1,
+            },
+        }
+        records = [valid_case()]
+        first = build_stress_cases(records, contract)
+        second = build_stress_cases(list(reversed(records)), contract)
+        self.assertEqual(canonical_json(first), canonical_json(second))
+        self.assertEqual(len(first), 9)
+        self.assertEqual({case["stress"]["category"] for case in first}, set(contract["allocation"]))
+        adversarial = next(case for case in first if case["stress"]["category"] == "adversarial")
+        self.assertIn("주가 전망", adversarial["question"])
+        validate_stress_cases(first)
+
+    def test_source_unanswerable_is_mutated_to_safe_abstention_prompt(self) -> None:
+        record = valid_case()
+        record["answerability"] = "unanswerable"
+        record["answer"] = {"kind": "unanswerable", "reason": "none"}
+        record["evidence"] = []
+        record["company_resolution"] = {"query_name": "테스트회사"}
+        cases = build_stress_cases([record], {"case_count": 1, "allocation": {"calculation": 1}})
+        self.assertEqual(cases[0]["answerability"], "unanswerable")
+        self.assertNotIn("company_resolution", cases[0])
+        self.assertIn("확인할 수 없다고 답하라", cases[0]["question"])
+
+    def test_invalid_answerable_source_is_mutated_to_safe_abstention_prompt(self) -> None:
+        record = valid_case()
+        record["answer"] = {"kind": "numeric", "value": "12.5", "unit": "원", "evidence_ids": ["ev1"]}
+        record["evidence"] = []
+        cases = build_stress_cases([record], {"case_count": 1, "allocation": {"calculation": 1}})
+        self.assertEqual(cases[0]["answerability"], "unanswerable")
+        self.assertEqual(cases[0]["answer"]["kind"], "unanswerable")
+        self.assertNotIn("company_resolution", cases[0])
+        self.assertIn("확인할 수 없다고 답하라", cases[0]["question"])
+
+    def test_group_split_never_separates_base_and_mutations(self) -> None:
+        cases = []
+        for index in range(10):
+            case = valid_case()
+            case["question_id"] = f"stress_{index}"
+            case["stress"]["group_id"] = f"group_{index // 2}"  # type: ignore[index]
+            cases.append(case)
+        train, holdout = split_groups(cases, 0.2)
+        self.assertTrue(
+            {case["stress"]["group_id"] for case in train}.isdisjoint(
+                {case["stress"]["group_id"] for case in holdout}
+            )
+        )
+
+    def test_exact_numeric_requires_answerability_value_unit_and_required_evidence(self) -> None:
+        case = valid_case()
+        verified = {"answerable": True, "verified": True, "answer": case["answer"], "citations": ["ev1"]}
+        self.assertTrue(score_case(case, verified).passed)
+        wrong = copy.deepcopy(verified)
+        wrong["answer"]["value"] = "11"  # type: ignore[index]
+        self.assertFalse(score_case(case, wrong).passed)
+
+    def test_abstention_rejects_numeric_or_citations(self) -> None:
+        case = valid_case()
+        case["answerability"] = "unanswerable"
+        case["answer"] = {"kind": "unanswerable", "reason": "없음"}
+        case["evidence"] = []
+        bad = {"answerable": True, "verified": True, "answer": {"kind": "numeric", "value": "1"}, "citations": ["ev1"]}
+        score = score_case(case, bad)
+        self.assertFalse(score.passed)
+        self.assertIn("false_numeric_claim", score.failures)
+
+    def test_metamorphic_group_requires_same_answerability_value_and_core_evidence(self) -> None:
+        base = {"answerable": True, "value": "10", "unit": "원", "evidence_ids": ["ev1"]}
+        changed_value = {"answerable": True, "value": "11", "unit": "원", "evidence_ids": ["ev1"]}
+        self.assertFalse(score_metamorphic_group([base, changed_value]).passed)
+
+    def test_resume_skips_only_matching_case_hash_and_commit(self) -> None:
+        completed = {"case_id": "c1", "input_hash": "a", "git_commit": "g1"}
+        matching = {"question_id": "c1", "input_hash": "a"}
+        changed = {"question_id": "c1", "input_hash": "b"}
+        self.assertTrue(should_skip(matching, "g1", completed))
+        self.assertFalse(should_skip(changed, "g1", completed))
+        self.assertFalse(should_skip(matching, "g2", completed))
+
+    def test_resume_separates_provider_mode_and_model(self) -> None:
+        completed = {
+            "case_id": "c1",
+            "input_hash": "a",
+            "git_commit": "g1",
+            "provider_mode": "required",
+            "provider_model": "HCX-005",
+        }
+        matching = {"question_id": "c1", "input_hash": "a"}
+        self.assertTrue(
+            should_skip(
+                matching,
+                "g1",
+                completed,
+                provider_mode="required",
+                provider_model="HCX-005",
+            )
+        )
+        self.assertFalse(
+            should_skip(
+                matching,
+                "g1",
+                completed,
+                provider_mode="disabled",
+                provider_model=None,
+            )
+        )
+        self.assertFalse(
+            should_skip(
+                matching,
+                "g1",
+                completed,
+                provider_mode="required",
+                provider_model="HCX-DIFFERENT",
+            )
+        )
+
+    def test_provider_gate_requires_configuration_quality_and_latency(self) -> None:
+        contract = {
+            "case_count": 300,
+            "quality_gates": {
+                "answerability_agreement": 0.95,
+                "numeric_exactness": 1.0,
+                "citation_precision": 1.0,
+                "citation_recall": 0.9,
+            },
+        }
+        summary = {
+            "completed_count": 300,
+            "pass_count": 300,
+            "hard_gate_passed": True,
+            "provider_configured": True,
+            "provider_end_to_end_p95_ms": 9999.0,
+            "answerability_agreement": 0.95,
+            "numeric_exactness": 1.0,
+            "citation_precision": 1.0,
+            "citation_recall": 0.9,
+        }
+        passed, reasons = evaluate_provider_gate(summary, contract, provider_required=True)
+        self.assertTrue(passed)
+        self.assertEqual(reasons, [])
+
+        summary["provider_end_to_end_p95_ms"] = 10000.01
+        passed, reasons = evaluate_provider_gate(summary, contract, provider_required=True)
+        self.assertFalse(passed)
+        self.assertEqual(reasons, ["provider_end_to_end_p95_ms"])
+
+        summary["provider_end_to_end_p95_ms"] = 9999.0
+        summary["provider_configured"] = False
+        passed, reasons = evaluate_provider_gate(summary, contract, provider_required=True)
+        self.assertFalse(passed)
+        self.assertEqual(reasons, ["provider_not_configured"])
+
+    def test_provider_gate_never_passes_in_disabled_mode(self) -> None:
+        passed, reasons = evaluate_provider_gate({}, {"case_count": 300}, provider_required=False)
+        self.assertFalse(passed)
+        self.assertEqual(reasons, ["provider_not_required"])
+
+    def test_percentile_95_uses_nearest_rank(self) -> None:
+        self.assertIsNone(percentile_95([]))
+        self.assertEqual(percentile_95([5.0]), 5.0)
+        self.assertEqual(percentile_95([float(value) for value in range(1, 101)]), 95.0)
+
+    def test_evaluator_error_fails_the_hard_gate(self) -> None:
+        score = CaseScore(
+            "broken",
+            False,
+            ["evaluator_error"],
+            "runtime_integrity",
+            {"evaluator_error": 1},
+        )
+        summary = aggregate_scores(
+            [score],
+            {"hard_gates": {"evaluator_error_count": 0}},
+        )
+        self.assertEqual(summary["evaluator_error_count"], 1)
+        self.assertFalse(summary["hard_gate_passed"])
+        self.assertIn("evaluator_error_count", summary["hard_gate_reasons"])
+
+    def test_fault_fixture_never_mutates_source_database(self) -> None:
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "source.sqlite"
+            source.write_bytes(b"fixture-source")
+            before = hashlib.sha256(source.read_bytes()).hexdigest()
+            result = run_fault_case(source, Path(directory) / "fault")
+            self.assertTrue(result["fault_isolated"])
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), before)
+
+    def test_case_company_prefers_filing_issuer_over_reporter_query_name(self) -> None:
+        case = {"company_resolution": {"issuer_name": "레인보우로보틱스", "query_name": "삼성전자", "corp_code": "01261644"}}
+        self.assertEqual(resolve_case_company(case), "레인보우로보틱스")
+
+
+if __name__ == "__main__":
+    unittest.main()

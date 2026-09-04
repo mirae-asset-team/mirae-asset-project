@@ -1,0 +1,14 @@
+{
+  "schema_version": "financial-review-decisions-v1",
+  "decisions": [
+    {
+      "filing_id": "20260318000532",
+      "account_id": "revenue",
+      "action": "prefer_raw_label",
+      "account_name_raw": "영업수익 (주4,36)",
+      "review_status": "agent_audited",
+      "human_confirmed": false,
+      "rationale": "연결 손익계산서의 영업수익과 매출액 행이 최근 3개년 모두 동일한 값을 공시한다. 최상위 총계이자 금융·통신 매출 계열 원문을 보존하는 영업수익 행을 선택한다."
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "records": 23,
+  "candidate_documents": 19,
+  "covered_candidate_documents": 19,
+  "missing_candidate_filings": [],
+  "status_counts": {
+    "approved": 23
+  },
+  "answer_origin_counts": {
+    "human_verified": 23
+  },
+  "issue_count": 0,
+  "issues": [],
+  "candidate_review_ready": true,
+  "gold_release_gate_passed": true,
+  "gold": "C:\\Users\\ddolm\\orca\\projects\\미래에셋AI공모전\\data\\derived\\gold_qa.jsonl",
+  "rows": 23,
+  "by_type": {
+    "table_cell": 7,
+    "single_filing_fact": 3,
+    "unanswerable": 5,
+    "correction_aware": 7,
+    "adversarial": 1
+  },
+  "errors": [],
+  "ok": true,
+  "release_ok": true
+}
