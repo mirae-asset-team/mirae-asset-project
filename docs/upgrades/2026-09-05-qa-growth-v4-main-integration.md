@@ -48,6 +48,8 @@
 
 코드 통합과 로컬 회귀 통과는 Judge Stress V2 운영 승격 허가가 아니다. tracked release summary는 여전히 `BLOCKED_HARD_GATE`이며 private holdout, 실제 staging/provider 관측, 신뢰 identity 및 Recall@20 기준이 해결되지 않았다. 따라서 임계값을 완화하거나 보고서를 PASS로 바꾸지 않는다. 8000 교체는 동일-image staging과 통합 release gate가 실제 PASS한 경우에만 수행한다.
 
+PR #5는 GitHub Actions 통과 후 `main` merge commit `076ca73b2e9bb920debc2558583e9d4254fdac74`로 병합됐다. 병합 직후 gate 재실행도 종료코드 `1`과 34개 차단 사유를 반환했으므로 새 이미지는 8000에 승격하지 않았다. 기존 공개 서비스의 `/`와 `/health` HTTP 200은 유지된다.
+
 ## 다음 실행
 
 1. PR CI와 변경 리뷰를 통과시켜 이 후보를 `main`에 병합한다.
