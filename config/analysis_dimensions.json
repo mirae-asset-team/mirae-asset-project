@@ -112,7 +112,7 @@
       "allowed_conclusions": ["improved", "deteriorated", "mixed", "stable", "insufficient_evidence"],
       "max_evidence": 8,
       "slots": [
-        {"slot_id": "management_discussion_text", "domain": "text", "search_concepts": ["경영진", "사업의 내용", "전망"], "min_evidence": 1, "max_evidence": 4, "mandatory": true, "absence_reason_code": "management_discussion_missing"},
+        {"slot_id": "management_discussion_text", "domain": "text", "search_concepts": ["사업의 내용", "사업경쟁력", "주력 사업", "경영 효율성"], "min_evidence": 1, "max_evidence": 4, "mandatory": true, "absence_reason_code": "management_discussion_missing"},
         {"slot_id": "reported_outcomes", "domain": "financial", "search_concepts": ["매출액", "영업이익", "당기순이익"], "min_evidence": 1, "max_evidence": 4, "mandatory": true, "absence_reason_code": "reported_outcomes_missing"}
       ]
     },

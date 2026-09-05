@@ -18,6 +18,7 @@ from disclosure_db.freeform_evaluation import (
     derive_freeform_source_records,
     evaluation_exclusion_reason,
     score_freeform_case,
+    select_financial_period_relevance_sets,
     select_period_covered_financial_candidates,
     semantic_summary_sha256,
     text_candidate_version_is_admitted,
@@ -734,6 +735,206 @@ def test_gold_preserves_serving_admitted_multislot_targets_and_derives_mixed_rou
     ]
 
 
+def test_v2_gold_preserves_bounded_slot_relevance_sets() -> None:
+    contract = _business_contract(minimum_cases=1)
+    contract.update({
+        "schema_version": "2.0.0",
+        "target_selection": "slot_relevance_sets_v2",
+    })
+    record = _audited_business_record(1)
+    record["filing_ids"] = ["20240101000001", "20240101000002"]
+    record["target_evidence_ids"] = ["evidence-1", "evidence-alternative"]
+    record["slot_targets"][0].update({
+        "filing_ids": ["20240101000001", "20240101000002"],
+        "target_evidence_ids": ["evidence-1", "evidence-alternative"],
+        "relevance_sets": [{
+            "set_id": "disclosed_risk_factors:any-current-risk",
+            "minimum_hits": 1,
+            "evidence_ids": ["evidence-1", "evidence-alternative"],
+        }],
+    })
+
+    rows = build_freeform_gold([record], contract, _business_templates())
+
+    assert rows[0]["schema_version"] == "2.0.0"
+    assert rows[0]["relevance_sets"] == [{
+        "set_id": "disclosed_risk_factors:any-current-risk",
+        "slot_id": "disclosed_risk_factors",
+        "domain": "text",
+        "minimum_hits": 1,
+        "evidence_ids": ["evidence-1", "evidence-alternative"],
+    }]
+
+    manifest = build_freeform_manifest(
+        rows,
+        source_gold_sha256="a" * 64,
+        contract_sha256="b" * 64,
+        templates_sha256="c" * 64,
+        database_sha256="d" * 64,
+        overlay_sha256="e" * 64,
+        search_index_sha256="f" * 64,
+    )
+    assert manifest["schema_version"] == "2.0.0"
+    assert manifest["artifact"] == "freeform_gold_v2.agent_audited.jsonl"
+    assert manifest["target_selection"] == "slot_relevance_sets_v2"
+    assert manifest["required_target_count"] == 2
+    assert manifest["alternative_evidence_count"] == 4
+
+
+def test_v2_gold_validation_rejects_relevance_union_drift() -> None:
+    contract = _business_contract(minimum_cases=1)
+    contract.update({"schema_version": "2.0.0", "target_selection": "slot_relevance_sets_v2"})
+    record = _audited_business_record(1)
+    record["slot_targets"][0]["relevance_sets"] = [{
+        "set_id": "risk:any",
+        "minimum_hits": 1,
+        "evidence_ids": ["evidence-1"],
+    }]
+    rows = build_freeform_gold([record], contract, _business_templates())
+    rows[0]["relevance_sets"][0]["evidence_ids"] = ["untracked-alternative"]
+
+    with pytest.raises(ValueError, match="case_relevance_evidence_mismatch"):
+        validate_freeform_gold(rows, contract)
+
+
+def test_v2_scoring_counts_required_relevance_hits_not_every_alternative_id() -> None:
+    case = {
+        "case_id": "v2-case",
+        "route": "mixed",
+        "issuer_corp_code": "00000001",
+        "filing_ids": ["filing-1"],
+        "target_evidence_ids": ["risk-a", "risk-b", "event-a", "event-b", "event-c"],
+        "correction_policy": "current",
+        "relevance_sets": [
+            {
+                "set_id": "risk:any",
+                "slot_id": "risk",
+                "domain": "text",
+                "minimum_hits": 1,
+                "evidence_ids": ["risk-a", "risk-b"],
+            },
+            {
+                "set_id": "events:two-distinct",
+                "slot_id": "events",
+                "domain": "event",
+                "minimum_hits": 2,
+                "evidence_ids": ["event-a", "event-b", "event-c"],
+            },
+        ],
+    }
+    selected = [
+        {"evidence_id": "risk-b", "issuer_corp_code": "00000001", "is_current": True},
+        {"evidence_id": "event-a", "issuer_corp_code": "00000001", "is_current": True},
+        {"evidence_id": "event-c", "issuer_corp_code": "00000001", "is_current": True},
+    ]
+
+    score = score_freeform_case(case, selected, slot_complete=True)
+
+    assert score["target_count"] == 3
+    assert score["target_hits_at_20"] == 3
+    assert score["recall_at_20"] == 1.0
+    assert score["missing_relevance_set_ids"] == []
+
+
+def test_v2_aggregate_reports_an_unsatisfied_relevance_requirement() -> None:
+    score = score_freeform_case({
+        "case_id": "v2-partial",
+        "route": "mixed",
+        "issuer_corp_code": "00000001",
+        "filing_ids": ["filing-1"],
+        "target_evidence_ids": ["risk-a", "risk-b", "event-a", "event-b", "event-c"],
+        "correction_policy": "current",
+        "relevance_sets": [
+            {
+                "set_id": "risk:any", "slot_id": "risk", "domain": "text",
+                "minimum_hits": 1, "evidence_ids": ["risk-a", "risk-b"],
+            },
+            {
+                "set_id": "events:two-distinct", "slot_id": "events", "domain": "event",
+                "minimum_hits": 2, "evidence_ids": ["event-a", "event-b", "event-c"],
+            },
+        ],
+    }, [
+        {"evidence_id": "risk-a", "issuer_corp_code": "00000001", "is_current": True},
+        {"evidence_id": "event-a", "issuer_corp_code": "00000001", "is_current": True},
+    ])
+
+    summary = aggregate_freeform_scores([score])
+
+    assert summary["target_count"] == 3
+    assert summary["target_hits_at_20"] == 2
+    assert summary["target_recall_at_20"] == pytest.approx(2 / 3)
+    assert summary["residual_misses"] == [{
+        "case_id": "v2-partial",
+        "route": "mixed",
+        "relevance_set_ids": ["events:two-distinct"],
+        "selected_evidence_ids": ["risk-a", "event-a"],
+        "exclusion_boundary": "not_retrieved_at_20",
+    }]
+
+
+def test_v2_financial_relevance_sets_require_each_account_and_latest_period() -> None:
+    candidates = [
+        {
+            "evidence_id": "rev-2025-a", "filing_id": "filing-2025",
+            "financial_points": [{"account_id": "revenue", "period": ("2025-01-01", "2025-12-31", None)}],
+        },
+        {
+            "evidence_id": "rev-2025-b", "filing_id": "filing-2025",
+            "financial_points": [{"account_id": "revenue", "period": ("2025-01-01", "2025-12-31", None)}],
+        },
+        {
+            "evidence_id": "rev-2024", "filing_id": "filing-2025",
+            "financial_points": [{"account_id": "revenue", "period": ("2024-01-01", "2024-12-31", None)}],
+        },
+        {
+            "evidence_id": "rev-2023", "filing_id": "filing-2025",
+            "financial_points": [{"account_id": "revenue", "period": ("2023-01-01", "2023-12-31", None)}],
+        },
+        {
+            "evidence_id": "op-2025", "filing_id": "filing-2025",
+            "financial_points": [{"account_id": "operating_income", "period": ("2025-01-01", "2025-12-31", None)}],
+        },
+        {
+            "evidence_id": "op-2024", "filing_id": "filing-2025",
+            "financial_points": [{"account_id": "operating_income", "period": ("2024-01-01", "2024-12-31", None)}],
+        },
+    ]
+
+    selected, relevance_sets = select_financial_period_relevance_sets(
+        candidates,
+        slot_id="income_trend",
+        expected_account_ids=("revenue", "operating_income"),
+        minimum_periods=2,
+    )
+
+    assert {item["evidence_id"] for item in selected} == {
+        "rev-2025-a", "rev-2025-b", "rev-2024", "op-2025", "op-2024",
+    }
+    assert relevance_sets == [
+        {
+            "set_id": "income_trend:operating_income:period-1",
+            "minimum_hits": 1,
+            "evidence_ids": ["op-2025"],
+        },
+        {
+            "set_id": "income_trend:operating_income:period-2",
+            "minimum_hits": 1,
+            "evidence_ids": ["op-2024"],
+        },
+        {
+            "set_id": "income_trend:revenue:period-1",
+            "minimum_hits": 1,
+            "evidence_ids": ["rev-2025-a", "rev-2025-b"],
+        },
+        {
+            "set_id": "income_trend:revenue:period-2",
+            "minimum_hits": 1,
+            "evidence_ids": ["rev-2024"],
+        },
+    ]
+
+
 def test_gold_rejects_untrusted_serving_path_before_case_generation() -> None:
     contract = _contract(minimum_cases=1)
     contract["dimensions"] = ["business_risk"]
@@ -821,3 +1022,29 @@ def test_text_answerability_rejects_headings_labels_and_marker_free_content(
     fragment_type: str, text: str, markers: tuple[str, ...], expected: bool,
 ) -> None:
     assert text_target_is_answer_safe(fragment_type, text, markers=markers, minimum_characters=80) is expected
+
+
+def test_v2_semantic_markers_reject_financial_legal_substring_collisions() -> None:
+    contract = json.loads(Path("config/freeform_gold_v2_contract.json").read_text(encoding="utf-8"))
+    markers = contract["text_markers"]
+
+    assert not text_target_is_answer_safe(
+        "table_row",
+        "일반공모청약(고위험고수익투자신탁 청약 포함) 관련 청약처와 청약 기간을 안내하는 표입니다. " * 3,
+        markers=markers["disclosed_risk_factors"],
+    )
+    assert not text_target_is_answer_safe(
+        "paragraph",
+        "자본시장법에 따라 경영권에 영향을 주기 위한 목적의 주식 보유 여부를 보고하는 법정 서식 문구입니다. " * 3,
+        markers=markers["management_discussion_text"],
+    )
+    assert not text_target_is_answer_safe(
+        "paragraph",
+        "합병계약에 따라 합병 이전에 취임한 이사의 임기를 적용하므로 경영진의 변동은 발생하지 않습니다. " * 3,
+        markers=markers["management_discussion_text"],
+    )
+    assert text_target_is_answer_safe(
+        "paragraph",
+        "회사는 원재료 가격 상승과 지정학적 갈등으로 공급망이 중단될 리스크와 수요 불확실성을 설명했습니다. " * 3,
+        markers=markers["disclosed_risk_factors"],
+    )

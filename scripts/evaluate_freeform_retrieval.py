@@ -163,13 +163,26 @@ def main(argv: list[str] | None = None) -> int:
             candidate_count=candidate_count,
             latency_ms=elapsed_ms,
         )
-        if score["missing_target_evidence_ids"]:
+        missing_targets = list(score["missing_target_evidence_ids"])
+        missing_relevance_sets = list(score.get("missing_relevance_set_ids", ()))
+        if missing_targets or missing_relevance_sets:
             target_domains = case.get("target_domains", {})
             missing_domains = {
                 str(target_domains.get(item, ""))
-                for item in score["missing_target_evidence_ids"]
+                for item in missing_targets
                 if isinstance(target_domains, dict)
             }
+            if missing_relevance_sets:
+                relevance_domains = {
+                    str(item.get("set_id")): str(item.get("domain", ""))
+                    for item in case.get("relevance_sets", ())
+                    if isinstance(item, dict)
+                }
+                missing_domains.update(
+                    relevance_domains.get(str(set_id), "")
+                    for set_id in missing_relevance_sets
+                )
+            missing_domains.discard("")
             residual_route = next(iter(missing_domains)) if len(missing_domains) == 1 else "mixed"
             score["route"] = residual_route
             score["exclusion_boundary"] = (
@@ -178,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             if residual_route != "text":
                 score["hypothesis"] = "structured_target_not_returned_by_audited_route"
-            elif any(item not in indexed_targets for item in score["missing_target_evidence_ids"]):
+            elif missing_targets and any(item not in indexed_targets for item in missing_targets):
                 score["hypothesis"] = "target_absent_from_search_index"
             else:
                 score["hypothesis"] = "target_outside_expanded_top20"

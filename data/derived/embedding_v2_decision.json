@@ -1,0 +1,10 @@
+{
+  "eligible": false,
+  "minimum_gain": 0.05,
+  "minimum_recall": 0.95,
+  "reason": "sparse_recall_gate_met",
+  "sparse_recall_at_20": 1.0,
+  "status": "DEFERRED_NO_EVIDENCE",
+  "summary_semantic_sha256": "561b5a45b0a9cffc3e6304010cb8d5642f8aba300903181348b8b3283bd302b3",
+  "target_count": 378
+}

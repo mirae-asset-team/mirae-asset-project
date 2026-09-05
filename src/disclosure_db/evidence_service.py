@@ -42,6 +42,12 @@ _INSTRUCTION_LIKE_EVIDENCE_MARKERS = (
     "<system>", "[system]", "이전 지시를 무시", "지시를 무시",
     "시스템 프롬프트", "개발자 메시지", "개발자 지침",
 )
+_SEMANTIC_TEXT_SLOT_IDS = frozenset({
+    "disclosed_risk_factors",
+    "governance_events",
+    "management_discussion_text",
+})
+_MIN_SEMANTIC_EVIDENCE_CHARACTERS = 80
 
 
 def evidence_text_is_admitted(text: object) -> bool:
@@ -58,6 +64,25 @@ def evidence_text_is_admitted(text: object) -> bool:
     return not any(
         marker in normalized or "".join(marker.split()) in compact
         for marker in _INSTRUCTION_LIKE_EVIDENCE_MARKERS
+    )
+
+
+def semantic_text_evidence_is_answer_capable(text: object, slot: EvidenceSlot) -> bool:
+    """Reject short keyword collisions for broad semantic analysis slots."""
+
+    slot_id = slot.slot_id.split("__i", 1)[0]
+    if slot_id not in _SEMANTIC_TEXT_SLOT_IDS:
+        return True
+    normalized = " ".join(unicodedata.normalize("NFKC", str(text or "")).split()).casefold()
+    concepts = tuple(
+        " ".join(unicodedata.normalize("NFKC", concept).split()).casefold()
+        for concept in slot.search_concepts
+        if concept.strip()
+    )
+    return bool(
+        len(normalized) >= _MIN_SEMANTIC_EVIDENCE_CHARACTERS
+        and concepts
+        and any(concept in normalized for concept in concepts)
     )
 
 
@@ -376,6 +401,7 @@ class EvidenceService:
             "wrong_issuer_count": 0,
             "wrong_version_count": 0,
             "excluded_prompt_injection_count": 0,
+            "excluded_unanswerable_count": 0,
             "sparse_ranks": [],
         }
         if not variants or self._search_index is None:
@@ -423,6 +449,9 @@ class EvidenceService:
                     if not evidence_text_is_admitted(ref.text):
                         diagnostics["excluded_prompt_injection_count"] = int(diagnostics["excluded_prompt_injection_count"]) + 1
                         continue
+                    if not semantic_text_evidence_is_answer_capable(ref.text, slot):
+                        diagnostics["excluded_unanswerable_count"] = int(diagnostics["excluded_unanswerable_count"]) + 1
+                        continue
                     safe_refs.append(ref)
                 rankings.append(safe_refs)
             dense_refs, dense_diagnostics = self._search_dense(
@@ -437,8 +466,16 @@ class EvidenceService:
             for ref in dense_refs:
                 ref.locator["analysis_issuer"] = slot.issuer or plan.base_plan.company
                 ref.locator["analysis_version_admitted"] = True
-            if dense_refs:
-                rankings.append(dense_refs)
+            answer_capable_dense_refs = [
+                ref for ref in dense_refs
+                if semantic_text_evidence_is_answer_capable(ref.text, slot)
+            ]
+            diagnostics["excluded_unanswerable_count"] = (
+                int(diagnostics["excluded_unanswerable_count"])
+                + len(dense_refs) - len(answer_capable_dense_refs)
+            )
+            if answer_capable_dense_refs:
+                rankings.append(answer_capable_dense_refs)
             diagnostics.update(dense_diagnostics)
             result = fuse_slot_results(rankings, limit=min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT))
         except ValueError:

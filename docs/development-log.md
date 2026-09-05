@@ -1052,3 +1052,23 @@
 - 검증: 관련 분석·retrieval·claim·HCX 회귀 `206 passed, 6 warnings, 6 subtests passed`, 전체 Python `946 passed, 2 skipped, 98 warnings, 264 subtests passed`, Team QA Node `1 passed`.
 - D read-only 재평가: Recall@20이 `114/234 (48.72%)`에서 `132/234 (56.41%)`로 상승했고 wrong issuer/version `0`, p50 `64.62ms`, p95 `103.65ms`, slot completeness `1.0`이었다. semantic SHA는 `e3719d...bfa2`다.
 - 판정: 성능 gate는 충분히 개선됐지만 legacy exact-target Recall은 여전히 95% 미만이다. broad 질문에 정렬상 첫 evidence ID 하나만 정답으로 고른 기존 Gold를 제품 검색에 맞춰 억지로 과적합하지 않고, 다음 Task에서 버전된 relevance-set 평가로 교정한다. 상세 기록은 `docs/operations/2026-09-05-structured-slot-completeness.md`다.
+
+## 2026-09-05T09:29:51+09:00 / 2026-09-05T00:29:51Z — Free-form Gold V2와 의미 근거 필터
+
+- V1 exact-target은 legacy 회귀로 보존하고, V2는 슬롯별 대체 evidence set과 최소 적중 수를
+  명시한다. 재무 슬롯은 모든 선언 계정×최신 기간 요구를 분리하고 broad 슬롯은 bounded 대체 근거를
+  유지한다.
+- TDD RED로 relevance set 합집합/중복/최소 적중, 계정별 기간, residual 분류, manifest schema를
+  고정했다. 실제 검색 RED에서는 짧은 `사업 소득` 행이 위험 설명보다 앞서는 keyword collision을
+  재현했다.
+- 제품 경로는 위험·지배구조·경영설명 슬롯에 80자 이상과 선언된 concept을 요구한다. Gold에서는
+  `고위험고수익`의 `위험`, 법정서식의 `경영권/경영진 변동`을 정답으로 보던 부분 문자열 오염을
+  제거하고, 경영 설명을 실제 공시된 사업전략·경쟁력 문구로 좁혔다.
+- 단계별 D read-only 평가는 Recall@20 `90.48% → 93.65% → 96.83% → 100%`였다. 최종은 120
+  cases, 378/378 hits, slot completeness 1.0, wrong issuer/version/hard failure 0, p50 61.99ms,
+  p95 103.07ms다. Gold SHA는 `2b020d...78de5`, summary semantic SHA는 `561b5a...302b3`다.
+- Sparse gate가 충족돼 embedding 결정은 `DEFERRED_NO_EVIDENCE`다. private holdout/provider/security/
+  staging image gate는 별도이며 이 결과로 전체 배포 PASS를 주장하지 않는다. 상세 기록은
+  `docs/operations/2026-09-05-freeform-gold-v2.md`다.
+- 검증: 관련 free-form/planner 회귀 `127 passed`; 최종 Python `954 passed, 2 skipped, 98 warnings,
+  264 subtests passed` (`83.81s`); Team QA Node `1 passed`; `compileall`과 `git diff --check` 통과.

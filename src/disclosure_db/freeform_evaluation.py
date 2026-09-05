@@ -12,6 +12,7 @@ import sqlite3
 from typing import Iterable, Mapping, Sequence
 
 from .analysis_planner import plan_analysis
+from .financial_accounts import resolve_financial_account
 from .financial_overlay import overlay_matches_base
 from .search_index import SafeSearchIndex
 
@@ -139,6 +140,66 @@ def select_period_covered_financial_candidates(
     return []
 
 
+def select_financial_period_relevance_sets(
+    candidates: Sequence[Mapping[str, object]],
+    *,
+    slot_id: str,
+    expected_account_ids: Sequence[str],
+    minimum_periods: int,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Select latest account-period groups while retaining equivalent evidence alternatives."""
+
+    normalized = [dict(candidate) for candidate in candidates]
+    selected_by_id: dict[str, dict[str, object]] = {}
+    relevance_sets: list[dict[str, object]] = []
+    assigned_evidence: set[str] = set()
+    for account_id in sorted(set(str(item) for item in expected_account_ids if str(item))):
+        evidence_by_period: dict[tuple[object, object, object], list[dict[str, object]]] = defaultdict(list)
+        for candidate in normalized:
+            for point in candidate.get("financial_points", ()):
+                if not isinstance(point, Mapping) or str(point.get("account_id") or "") != account_id:
+                    continue
+                raw_period = point.get("period")
+                if not isinstance(raw_period, (list, tuple)) or len(raw_period) != 3 or not any(
+                    value is not None for value in raw_period
+                ):
+                    continue
+                evidence_by_period[tuple(raw_period)].append(candidate)
+        ordered_periods = sorted(
+            evidence_by_period,
+            key=lambda period: tuple(str(value or "") for value in period),
+            reverse=True,
+        )
+        if len(ordered_periods) < minimum_periods:
+            return [], []
+        for period_index, period in enumerate(ordered_periods[:minimum_periods], start=1):
+            period_candidates = sorted(
+                evidence_by_period[period],
+                key=lambda candidate: str(candidate.get("evidence_id") or ""),
+            )
+            evidence_ids = [
+                str(candidate["evidence_id"])
+                for candidate in period_candidates
+                if str(candidate.get("evidence_id") or "") not in assigned_evidence
+            ]
+            if not evidence_ids:
+                return [], []
+            for candidate in period_candidates:
+                evidence_id = str(candidate.get("evidence_id") or "")
+                if evidence_id in evidence_ids:
+                    selected_by_id[evidence_id] = candidate
+                    assigned_evidence.add(evidence_id)
+            relevance_sets.append({
+                "set_id": f"{slot_id}:{account_id}:period-{period_index}",
+                "minimum_hits": 1,
+                "evidence_ids": evidence_ids,
+            })
+    return (
+        [selected_by_id[evidence_id] for evidence_id in sorted(selected_by_id)],
+        sorted(relevance_sets, key=lambda item: str(item["set_id"])),
+    )
+
+
 def validate_case_plan(case: Mapping[str, object], plan: object) -> tuple[tuple[str, str], ...]:
     """Require a generated case to execute the declared judgment slot contract."""
 
@@ -194,6 +255,48 @@ def _string_list(value: object, field: str) -> list[str]:
     return sorted(set(value))
 
 
+def _normalized_relevance_sets(
+    value: object,
+    *,
+    default_slot_id: str | None = None,
+    default_domain: str | None = None,
+) -> list[dict[str, object]]:
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ValueError("relevance_sets_invalid")
+    normalized: list[dict[str, object]] = []
+    set_ids: set[str] = set()
+    admitted_evidence: set[str] = set()
+    for raw_set in value:
+        if not isinstance(raw_set, Mapping):
+            raise ValueError("relevance_set_invalid")
+        set_id = str(raw_set.get("set_id") or "")
+        slot_id = str(raw_set.get("slot_id") or default_slot_id or "")
+        domain = str(raw_set.get("domain") or default_domain or "")
+        if not set_id or set_id in set_ids or not slot_id or domain not in {"text", "financial", "event"}:
+            raise ValueError("relevance_set_identity_invalid")
+        evidence_ids = _string_list(raw_set.get("evidence_ids"), "relevance_evidence_ids")
+        minimum_hits = raw_set.get("minimum_hits")
+        if (
+            isinstance(minimum_hits, bool)
+            or not isinstance(minimum_hits, int)
+            or minimum_hits < 1
+            or minimum_hits > len(evidence_ids)
+        ):
+            raise ValueError("relevance_set_minimum_hits_invalid")
+        if admitted_evidence.intersection(evidence_ids):
+            raise ValueError("relevance_set_evidence_overlap")
+        admitted_evidence.update(evidence_ids)
+        set_ids.add(set_id)
+        normalized.append({
+            "set_id": set_id,
+            "slot_id": slot_id,
+            "domain": domain,
+            "minimum_hits": minimum_hits,
+            "evidence_ids": evidence_ids,
+        })
+    return sorted(normalized, key=lambda item: str(item["set_id"]))
+
+
 def _admit_source_record(record: Mapping[str, object], contract: Mapping[str, object]) -> None:
     if record.get("lineage_status") in {"unresolved", "missing_original", None}:
         raise ValueError("unresolved_lineage")
@@ -228,8 +331,22 @@ def _admit_source_record(record: Mapping[str, object], contract: Mapping[str, ob
         domain = str(raw_slot.get("domain", ""))
         if raw_slot.get("serving_path") != path_by_domain.get(domain):
             raise ValueError("serving_path_invalid")
-        admitted_evidence.update(_string_list(raw_slot.get("target_evidence_ids"), "slot_target_evidence_ids"))
+        slot_evidence = _string_list(raw_slot.get("target_evidence_ids"), "slot_target_evidence_ids")
+        admitted_evidence.update(slot_evidence)
         admitted_filings.update(_string_list(raw_slot.get("filing_ids"), "slot_target_filing_ids"))
+        if contract.get("target_selection") == "slot_relevance_sets_v2":
+            relevance_sets = _normalized_relevance_sets(
+                raw_slot.get("relevance_sets"),
+                default_slot_id=str(raw_slot.get("slot_id") or ""),
+                default_domain=domain,
+            )
+            relevance_evidence = {
+                evidence_id
+                for relevance_set in relevance_sets
+                for evidence_id in relevance_set["evidence_ids"]
+            }
+            if relevance_evidence != set(slot_evidence):
+                raise ValueError("slot_relevance_evidence_mismatch")
         if domain in {"financial", "event"}:
             _string_list(raw_slot.get("fact_ids"), "slot_fact_ids")
         elif domain == "text":
@@ -362,6 +479,23 @@ def build_freeform_gold(
         policy = str(record.get("correction_policy", "current"))
         if policy not in allowed_policies:
             raise ValueError("correction_policy_invalid")
+        relevance_mode = contract.get("target_selection") == "slot_relevance_sets_v2"
+        case_relevance_sets: list[dict[str, object]] = []
+        if relevance_mode:
+            for raw_slot in record["slot_targets"]:
+                if not isinstance(raw_slot, Mapping):
+                    raise ValueError("slot_target_invalid")
+                case_relevance_sets.extend(_normalized_relevance_sets(
+                    raw_slot.get("relevance_sets"),
+                    default_slot_id=str(raw_slot.get("slot_id") or ""),
+                    default_domain=str(raw_slot.get("domain") or ""),
+                ))
+            if {
+                evidence_id
+                for relevance_set in case_relevance_sets
+                for evidence_id in relevance_set["evidence_ids"]
+            } != set(evidence_ids):
+                raise ValueError("case_relevance_evidence_mismatch")
         for template in normalized_templates:
             dimension = str(template["dimension_id"])
             if dimension not in supported:
@@ -386,6 +520,8 @@ def build_freeform_gold(
                 "filing_ids": filing_ids,
                 "target_evidence_ids": evidence_ids,
             }
+            if relevance_mode:
+                identity["relevance_sets"] = case_relevance_sets
             question = str(template["template"]).format(
                 issuer_name=record["issuer_name"],
                 dimension_label=dimension,
@@ -415,6 +551,8 @@ def build_freeform_gold(
                 "paraphrase_template_id": template_id,
                 "review": {"status": "agent_audited"},
             }
+            if relevance_mode:
+                case["relevance_sets"] = case_relevance_sets
             validate_case_plan(
                 case,
                 plan_analysis(
@@ -478,6 +616,10 @@ def derive_freeform_source_records(
     per_dimension_overrides = contract.get("source_records_by_dimension", {})
     if not isinstance(per_dimension_overrides, Mapping):
         raise ValueError("source_records_by_dimension_invalid")
+    relevance_mode = contract.get("target_selection") == "slot_relevance_sets_v2"
+    max_relevance_candidates = int(contract.get("max_relevance_candidates_per_slot", 100))
+    if relevance_mode and max_relevance_candidates < 1:
+        raise ValueError("max_relevance_candidates_per_slot_invalid")
 
     base = sqlite3.connect(f"{Path(database).resolve().as_uri()}?mode=ro&immutable=1", uri=True)
     overlay = sqlite3.connect(f"{Path(overlay_database).resolve().as_uri()}?mode=ro&immutable=1", uri=True)
@@ -682,8 +824,58 @@ def derive_freeform_source_records(
                         )
 
                 chosen: dict[str, list[dict[str, object]]] = {}
+                relevance_sets_by_slot: dict[str, list[dict[str, object]]] = {}
                 version_pair: dict[str, object] | None = None
-                if dimension == "profitability_financial_health":
+                if relevance_mode and dimension != "correction_materiality":
+                    for slot in plan.required_evidence_slots:
+                        if not slot.mandatory:
+                            continue
+                        candidates = candidates_by_slot[slot.slot_id]
+                        selected_items: list[dict[str, object]] = []
+                        relevance_sets: list[dict[str, object]] = []
+                        if slot.domain == "financial" and slot.min_periods > 1:
+                            expected_accounts: list[str] = []
+                            for concept in slot.search_concepts:
+                                resolution = resolve_financial_account(
+                                    concept,
+                                    catalog=service.financial_account_catalog,
+                                )
+                                if (
+                                    resolution.status == "resolved"
+                                    and resolution.support_level == "structured"
+                                    and resolution.canonical_id is not None
+                                ):
+                                    expected_accounts.append(resolution.canonical_id)
+                            selected_items, relevance_sets = select_financial_period_relevance_sets(
+                                candidates,
+                                slot_id=slot.slot_id,
+                                expected_account_ids=expected_accounts,
+                                minimum_periods=slot.min_periods,
+                            )
+                        else:
+                            selected_items = sorted(
+                                candidates,
+                                key=lambda item: (
+                                    str(item.get("filing_id") or ""),
+                                    str(item.get("evidence_id") or ""),
+                                ),
+                                reverse=True,
+                            )[:max_relevance_candidates]
+                            minimum_hits = 2 if dimension == "contract_change" else max(1, slot.min_evidence)
+                            if len(selected_items) >= minimum_hits:
+                                relevance_sets = [{
+                                    "set_id": f"{slot.slot_id}:admitted-current",
+                                    "minimum_hits": minimum_hits,
+                                    "evidence_ids": sorted({
+                                        str(item["evidence_id"]) for item in selected_items
+                                    }),
+                                }]
+                            else:
+                                selected_items = []
+                        if selected_items and relevance_sets:
+                            chosen[slot.slot_id] = selected_items
+                            relevance_sets_by_slot[slot.slot_id] = relevance_sets
+                elif dimension == "profitability_financial_health":
                     for slot_id in ("income_trend", "balance_sheet"):
                         eligible = select_period_covered_financial_candidates(
                             candidates_by_slot[slot_id],
@@ -742,6 +934,14 @@ def derive_freeform_source_records(
                         if candidates_by_slot[slot.slot_id]:
                             chosen[slot.slot_id] = candidates_by_slot[slot.slot_id][:1]
 
+                if relevance_mode and version_pair is not None:
+                    for slot_id, items in chosen.items():
+                        relevance_sets_by_slot[slot_id] = [{
+                            "set_id": f"{slot_id}:exact-version",
+                            "minimum_hits": 1,
+                            "evidence_ids": sorted({str(item["evidence_id"]) for item in items}),
+                        }]
+
                 mandatory_slots = {slot.slot_id for slot in plan.required_evidence_slots if slot.mandatory}
                 if not mandatory_slots.issubset(chosen):
                     continue
@@ -765,6 +965,8 @@ def derive_freeform_source_records(
                         "target_evidence_ids": evidence_ids,
                         "filing_ids": slot_filings,
                     }
+                    if relevance_mode:
+                        target["relevance_sets"] = relevance_sets_by_slot[slot.slot_id]
                     if slot.domain == "text":
                         target["content_features"] = items[0]["content_features"]
                     else:
@@ -796,6 +998,11 @@ def derive_freeform_source_records(
                         "status": "proved",
                         "requirement_count": len(mandatory_slots),
                         "target_count": len(set(target_ids)),
+                        "required_hit_count": sum(
+                            int(relevance_set["minimum_hits"])
+                            for relevance_sets in relevance_sets_by_slot.values()
+                            for relevance_set in relevance_sets
+                        ) if relevance_mode else len(set(target_ids)),
                         "filing_count": len(set(filing_ids)),
                     },
                 }
@@ -826,6 +1033,8 @@ def validate_freeform_gold(rows: Sequence[Mapping[str, object]], contract: Mappi
     allowed_routes = set(contract.get("allowed_routes", ()))
     case_ids: set[str] = set()
     dimensions: set[str] = set()
+    expected_schema = str(contract.get("schema_version", "1.0.0"))
+    relevance_mode = contract.get("target_selection") == "slot_relevance_sets_v2"
     required = {
         "case_id", "dimension_id", "question", "issuer_name", "issuer_corp_code",
         "filing_ids", "target_evidence_ids", "correction_policy", "route",
@@ -849,8 +1058,10 @@ def validate_freeform_gold(rows: Sequence[Mapping[str, object]], contract: Mappi
             raise ValueError(f"dimension_invalid:{dimension}")
         if row["route"] not in allowed_routes:
             raise ValueError(f"route_invalid:{row['route']}")
+        if str(row.get("schema_version")) != expected_schema:
+            raise ValueError("schema_version_mismatch")
         _string_list(row["filing_ids"], "filing_ids")
-        _string_list(row["target_evidence_ids"], "target_evidence_ids")
+        target_evidence_ids = _string_list(row["target_evidence_ids"], "target_evidence_ids")
         target_domains = row.get("target_domains")
         if (
             not isinstance(target_domains, Mapping)
@@ -860,6 +1071,25 @@ def validate_freeform_gold(rows: Sequence[Mapping[str, object]], contract: Mappi
             raise ValueError("target_domains_invalid")
         if len(str(row["source_sha256"])) != 64:
             raise ValueError("invalid_source_hash")
+        if relevance_mode:
+            relevance_sets = _normalized_relevance_sets(row.get("relevance_sets"))
+            relevance_evidence = {
+                evidence_id
+                for relevance_set in relevance_sets
+                for evidence_id in relevance_set["evidence_ids"]
+            }
+            if relevance_evidence != set(target_evidence_ids):
+                raise ValueError("case_relevance_evidence_mismatch")
+            expected_slots = {
+                (str(slot.get("slot_id") or ""), str(slot.get("domain") or ""))
+                for slot in row.get("expected_slots", ())
+                if isinstance(slot, Mapping)
+            }
+            if any(
+                (str(item["slot_id"]), str(item["domain"])) not in expected_slots
+                for item in relevance_sets
+            ):
+                raise ValueError("relevance_set_slot_mismatch")
     if rows and dimensions != allowed_dimensions:
         missing_dimensions = sorted(allowed_dimensions - dimensions)
         raise ValueError(f"dimension_coverage_missing:{','.join(missing_dimensions)}")
@@ -890,11 +1120,16 @@ def build_freeform_manifest(
 ) -> dict[str, object]:
     """Build a content-free manifest for a canonical Gold artifact."""
 
+    schema_versions = {str(row.get("schema_version", "1.0.0")) for row in rows}
+    if len(schema_versions) > 1:
+        raise ValueError("mixed_gold_schema_versions")
+    schema_version = next(iter(schema_versions), "1.0.0")
+    relevance_mode = schema_version == "2.0.0"
     manifest: dict[str, object] = {
-        "schema_version": "1.0.0",
-        "artifact": "freeform_gold.agent_audited.jsonl",
+        "schema_version": schema_version,
+        "artifact": "freeform_gold_v2.agent_audited.jsonl" if relevance_mode else "freeform_gold.agent_audited.jsonl",
         "review_status": "agent_audited",
-        "target_selection": "independent_ledger_enumeration",
+        "target_selection": "slot_relevance_sets_v2" if relevance_mode else "independent_ledger_enumeration",
         "case_count": len(rows),
         "target_count": sum(len(row.get("target_evidence_ids", ())) for row in rows),
         "unique_target_count": len({
@@ -912,6 +1147,19 @@ def build_freeform_manifest(
         "search_index_sha256": search_index_sha256,
         "content_sha256": canonical_sha256(rows),
     }
+    if relevance_mode:
+        manifest["required_target_count"] = sum(
+            int(relevance_set["minimum_hits"])
+            for row in rows
+            for relevance_set in row.get("relevance_sets", ())
+            if isinstance(relevance_set, Mapping)
+        )
+        manifest["alternative_evidence_count"] = sum(
+            len(relevance_set.get("evidence_ids", ()))
+            for row in rows
+            for relevance_set in row.get("relevance_sets", ())
+            if isinstance(relevance_set, Mapping)
+        )
     if not _manifest_is_safe(manifest):
         raise ValueError("manifest_content_leak")
     return manifest
@@ -959,18 +1207,52 @@ def score_freeform_case(
         if policy_mismatch:
             wrong_version += 1
     target_set = set(target_ids)
-    hits_at_5 = len(target_set.intersection(selected_ids[:5]))
-    hits_at_20 = len(target_set.intersection(selected_ids[:20]))
-    first_rank = next((rank for rank, evidence_id in enumerate(selected_ids, 1) if evidence_id in target_set), None)
-    missing = sorted(target_set - set(selected_ids[:20]))
+    raw_relevance_sets = case.get("relevance_sets")
+    relevance_sets = _normalized_relevance_sets(raw_relevance_sets) if raw_relevance_sets is not None else []
+    if relevance_sets:
+        relevance_evidence = {
+            evidence_id
+            for relevance_set in relevance_sets
+            for evidence_id in relevance_set["evidence_ids"]
+        }
+        if relevance_evidence != target_set:
+            raise ValueError("case_relevance_evidence_mismatch")
+        target_count = sum(int(item["minimum_hits"]) for item in relevance_sets)
+        selected_at_5 = set(selected_ids[:5])
+        selected_at_20 = set(selected_ids[:20])
+        hits_at_5 = sum(min(
+            int(item["minimum_hits"]),
+            len(selected_at_5.intersection(item["evidence_ids"])),
+        ) for item in relevance_sets)
+        hits_at_20 = sum(min(
+            int(item["minimum_hits"]),
+            len(selected_at_20.intersection(item["evidence_ids"])),
+        ) for item in relevance_sets)
+        missing_relevance_sets = sorted(
+            str(item["set_id"])
+            for item in relevance_sets
+            if len(selected_at_20.intersection(item["evidence_ids"])) < int(item["minimum_hits"])
+        )
+        first_rank = next((
+            rank for rank, evidence_id in enumerate(selected_ids, 1)
+            if evidence_id in relevance_evidence
+        ), None)
+        missing: list[str] = []
+    else:
+        target_count = len(target_ids)
+        hits_at_5 = len(target_set.intersection(selected_ids[:5]))
+        hits_at_20 = len(target_set.intersection(selected_ids[:20]))
+        first_rank = next((rank for rank, evidence_id in enumerate(selected_ids, 1) if evidence_id in target_set), None)
+        missing = sorted(target_set - set(selected_ids[:20]))
+        missing_relevance_sets = []
     return {
         "case_id": str(case.get("case_id", "")),
         "route": str(case.get("route", "")),
-        "target_count": len(target_ids),
+        "target_count": target_count,
         "target_hits_at_5": hits_at_5,
         "target_hits_at_20": hits_at_20,
-        "recall_at_5": hits_at_5 / len(target_ids),
-        "recall_at_20": hits_at_20 / len(target_ids),
+        "recall_at_5": hits_at_5 / target_count,
+        "recall_at_20": hits_at_20 / target_count,
         "mrr": 0.0 if first_rank is None else 1.0 / first_rank,
         "slot_complete": bool(slot_complete),
         "wrong_issuer_count": wrong_issuer,
@@ -980,6 +1262,7 @@ def score_freeform_case(
         "candidate_count": int(candidate_count),
         "latency_ms": float(latency_ms),
         "missing_target_evidence_ids": missing,
+        "missing_relevance_set_ids": missing_relevance_sets,
         "selected_evidence_ids": selected_ids,
         "exclusion_boundary": "not_retrieved_at_20" if missing else None,
     }
@@ -1008,14 +1291,18 @@ def aggregate_freeform_scores(scores: Iterable[Mapping[str, object]]) -> dict[st
     residuals = []
     for row in rows:
         missing = list(row.get("missing_target_evidence_ids", ()))
-        if missing:
+        missing_relevance_sets = list(row.get("missing_relevance_set_ids", ()))
+        if missing or missing_relevance_sets:
             residual = {
                 "case_id": str(row.get("case_id", "")),
                 "route": str(row.get("route", "")),
-                "target_evidence_ids": sorted(str(item) for item in missing),
                 "selected_evidence_ids": list(row.get("selected_evidence_ids", ()))[:20],
                 "exclusion_boundary": str(row.get("exclusion_boundary") or "not_retrieved_at_20"),
             }
+            if missing:
+                residual["target_evidence_ids"] = sorted(str(item) for item in missing)
+            if missing_relevance_sets:
+                residual["relevance_set_ids"] = sorted(str(item) for item in missing_relevance_sets)
             if row.get("hypothesis"):
                 residual["hypothesis"] = str(row["hypothesis"])
             residuals.append(residual)
