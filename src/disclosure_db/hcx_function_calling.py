@@ -839,6 +839,33 @@ class HcxFunctionCallingService:
         return ()
 
     @staticmethod
+    def _deterministic_bounded_analysis_answer(
+        execution: BoundedAnalysisExecution,
+        available_evidence_ids: Sequence[str],
+    ) -> HcxGeneratedAnswer | None:
+        if execution.plan.judgment_dimension != "profitability":
+            return None
+        labels = {
+            "improved": "개선",
+            "deteriorated": "악화",
+            "mixed": "혼재",
+            "stable": "안정",
+        }
+        label = labels.get(str(execution.conclusion or ""))
+        company = execution.plan.base_plan.company
+        if label is None or not company or not available_evidence_ids:
+            return None
+        answer = (
+            f"{company}의 공시된 최근 두 회계연도 매출액 대비 영업이익과 "
+            f"당기순이익 흐름을 비교한 결과, 수익성은 {label}으로 판단됩니다."
+        )
+        return HcxGeneratedAnswer(
+            answer,
+            tuple(available_evidence_ids),
+            conclusion=str(execution.conclusion),
+        )
+
+    @staticmethod
     def _fact_row_admitted(
         row: Mapping[str, object], admission: ClaimAdmission,
     ) -> bool:
@@ -975,6 +1002,7 @@ class HcxFunctionCallingService:
         limitation_code: str,
         fallback_override: HcxGeneratedAnswer | None = None,
         metadata_updates: Mapping[str, object] | None = None,
+        execution_mode: str = "deterministic",
     ) -> FunctionCallingResult:
         result_common = dict(common)
         result_common["metadata"] = dict(
@@ -1073,7 +1101,7 @@ class HcxFunctionCallingService:
                 **result_common,
             )
         result_common["metadata"].update({  # type: ignore[union-attr]
-            "execution_mode": "deterministic",
+            "execution_mode": execution_mode,
             **self._claim_metadata(
                 verification.claims,
                 verification.limitations,
@@ -2424,6 +2452,24 @@ class HcxFunctionCallingService:
                 "abstained", UNANSWERABLE_TEXT,
                 warnings=["answer_generation_blocked_by_incomplete_correction_receipts"], **common,
             )
+
+        if analysis_execution is not None:
+            deterministic_analysis = self._deterministic_bounded_analysis_answer(
+                analysis_execution,
+                tuple(available_citations),
+            )
+            if deterministic_analysis is not None:
+                return self._verified_deterministic_fallback_result(
+                    tool_call=tool_call,
+                    tool_response=tool_response,
+                    route=None,
+                    available_citations=available_citations,
+                    common=common,
+                    warning_codes=("deterministic_bounded_analysis",),
+                    limitation_code="deterministic_bounded_analysis",
+                    fallback_override=deterministic_analysis,
+                    execution_mode="deterministic_bounded_analysis",
+                )
 
         if (
             route is not None
