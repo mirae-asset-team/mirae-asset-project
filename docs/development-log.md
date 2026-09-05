@@ -1072,3 +1072,10 @@
   `docs/operations/2026-09-05-freeform-gold-v2.md`다.
 - 검증: 관련 free-form/planner 회귀 `127 passed`; 최종 Python `954 passed, 2 skipped, 98 warnings,
   264 subtests passed` (`83.81s`); Team QA Node `1 passed`; `compileall`과 `git diff --check` 통과.
+
+## 2026-09-05T09:37:31+09:00 / 2026-09-05T00:37:31Z — 최신 재무 평가와 배포 판정
+
+- 실제 D 드라이브 base/overlay/search를 read-only로 열어 `evaluate_financial_release.py`를 다시 실행했다. 76개 검색 대상, 1,191개 검증 fact에서 856/856 회귀가 통과했고 삼성전자 최신 매출, 124개 정정, 83개 금융업 매출 별칭, 불완전 모집단 집계 거절을 확인했다. 허위 숫자와 근거 없는 검증 답변은 각 0건이다.
+- 20개 동시 구조화 요청은 오류 0건, p95 `125.713ms`로 SQLite 유지 gate를 통과했다. base/overlay/search SHA-256은 각각 `b8fb3b...6563`, `a4491f...b55`, `e223a1...8793`이며 입력 파일은 변경하지 않았다.
+- 최신 재무 보고서와 Gold V2 검색 보고서를 통합 release gate에 넣자 과거 stale financial 및 검색 Recall 차단은 사라졌다. 최종 판정은 31개 사유의 `BLOCKED_HARD_GATE`다. 남은 사유는 private holdout을 포함한 실제 Judge 결과·provider/보안/latency 관측, deployment timestamp, trusted commit/image 및 base/overlay/search identity다.
+- 비공개 문항이나 외부 관측을 합성하지 않았고 임계값도 낮추지 않았다. 따라서 8001 pre-stage와 8000 승격을 실행하지 않았으며 기존 공개 8000과 rollback 자산을 그대로 유지했다.
