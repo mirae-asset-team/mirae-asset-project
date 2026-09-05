@@ -613,8 +613,20 @@ class EvidenceService:
                     period = (fact.get("period_start"), fact.get("period_end"), fact.get("instant_date"))
                     if account_id and any(value is not None for value in period):
                         periods_by_account.setdefault(account_id, set()).add(period)
-                period_complete = any(
-                    len(periods) >= slot.min_periods for periods in periods_by_account.values()
+                expected_accounts = {
+                    resolution.canonical_id
+                    for concept in slot.search_concepts
+                    for resolution in [resolve_financial_account(
+                        concept,
+                        catalog=self.financial_account_catalog,
+                    )]
+                    if resolution.status == "resolved"
+                    and resolution.support_level == "structured"
+                    and resolution.canonical_id is not None
+                }
+                period_complete = bool(expected_accounts) and all(
+                    len(periods_by_account.get(account_id, set())) >= slot.min_periods
+                    for account_id in expected_accounts
                 )
             complete = len(fused) >= slot.min_evidence and period_complete
             slot_reasons: tuple[str, ...] = () if complete or not slot.mandatory else (f"required_slot_missing:{slot.slot_id}",)

@@ -1044,3 +1044,11 @@
 - 최소 구현: `EvidenceService` 시작 시 인덱스를 1회 검증해 재사용하고, 시작 시 실패 사유를 캐시해 기존 `search_index_unavailable`/`search_index_attestation_mismatch`/`search_index_sqlite_error`와 SSOT fallback을 유지했다. `/health`도 같은 readiness를 사용한다.
 - 실측: read-only D 인덱스의 cold startup 검증은 `6486.30ms`, 이후 동일 프로세스 검색 3회는 `1.50/1.13/1.09ms`였다. 관련 회귀는 `180 passed, 24 warnings, 10 subtests passed`, 전체 Python은 `944 passed, 2 skipped, 98 warnings, 264 subtests passed`, Team QA Node는 `1 passed`다.
 - 경계: base/search SHA는 각각 `b8fb3b...6563`, `e223a1...8793`이며 파일은 변경하지 않았다. 이 최적화만으로 Recall@20·private holdout·provider·trusted image gate 통과를 주장하지 않는다. 상세 판단은 `docs/operations/2026-09-05-search-index-validation.md`에 기록했다.
+
+## 2026-09-05T09:08:00+09:00 / 2026-09-05T00:08:00Z — 구조화 다중근거 슬롯 완전성 수정
+
+- 원인: 수익성·재무건전성 슬롯은 각각 `3계정 × 2기간 = 6근거`가 필요한데 cap이 4였고, 완료 판정도 계정 하나만 2기간이면 `any(...)`로 통과했다. 실제 legacy Gold에서 구조화 target 84건이 이 경로에 묶여 있었다.
+- TDD RED: 6근거가 4개로 잘리는 회귀와 한 계정만 완전해도 슬롯이 완료되는 회귀가 각각 실패했다. 최소 수정으로 두 슬롯의 min/max evidence를 6으로 맞추고 선언된 모든 structured canonical account에 `min_periods`를 요구했다.
+- 검증: 관련 분석·retrieval·claim·HCX 회귀 `206 passed, 6 warnings, 6 subtests passed`, 전체 Python `946 passed, 2 skipped, 98 warnings, 264 subtests passed`, Team QA Node `1 passed`.
+- D read-only 재평가: Recall@20이 `114/234 (48.72%)`에서 `132/234 (56.41%)`로 상승했고 wrong issuer/version `0`, p50 `64.62ms`, p95 `103.65ms`, slot completeness `1.0`이었다. semantic SHA는 `e3719d...bfa2`다.
+- 판정: 성능 gate는 충분히 개선됐지만 legacy exact-target Recall은 여전히 95% 미만이다. broad 질문에 정렬상 첫 evidence ID 하나만 정답으로 고른 기존 Gold를 제품 검색에 맞춰 억지로 과적합하지 않고, 다음 Task에서 버전된 relevance-set 평가로 교정한다. 상세 기록은 `docs/operations/2026-09-05-structured-slot-completeness.md`다.
