@@ -1150,3 +1150,12 @@
 - 구조화 `/v1/answer`는 `claim_support` 대신 top-level `verified`, `numeric_values`, `citation_ids`, `financial_facts`를 반환한다. 서버가 이미 검증한 이 legacy 계약만 검사기 형태로 변환하되, 숫자·citation·filing은 별도 oracle과 다시 대조한다. audited source의 canonical record SHA-256에서 공시번호를 독립적으로 복원해 case hash나 공개 문항을 바꾸지 않고 cross-filing 검사를 활성화했다.
 - 표 주석 `(주30)`과 질문에 명시된 회계연도는 주장 숫자가 아니며, `100 백만원`의 단위어를 별도 한국어 숫자로 중복 해석하지 않도록 숫자 검사 규칙을 보강했다. 임계값, provider 호출 수, private/hidden 독립성 계약은 변경하지 않았다.
 - 관련 Judge·release·staging 회귀는 `214 passed, 94 subtests passed` (`164.69s`)다. 이 단계에서는 코드 평가기만 변경했고 D 드라이브 및 NCP 데이터, `.env`, credential, PEM, ACG와 운영 8000은 변경하지 않았다.
+
+## 2026-09-05T15:43:14+09:00 / 2026-09-05T06:43:14Z — 독립 hidden 검색 평가 PASS
+
+- 제품 출력이 아닌 read-only 공시 evidence ledger를 직접 대조해 Git에서 무시되는 private 검색 Gold 120건을 작성했다. provenance는 `independent_direct_corpus_annotation`, 검수 등급은 `agent_audited`이며 사람 검수로 표시하지 않았다. 질문 원문·답변·provider body·credential은 추적 산출물에 넣지 않았다.
+- 독립성 profile은 19개 기업, 98개 공시, 7개 판단 차원, 120개 고유 question hash이며 `product_output_used=false`, `target_selection=direct_evidence_ledger`다. private Gold SHA-256은 `52d4e76173f7541aaa281bf0435f4be73e79ed8539a65031f933625ee60e9525`다.
+- TDD RED는 공시번호 문맥 추출, 숫자 금액 오인 방지, exact filing scope, 정정 전후 slot version policy, event 공시 filter, 독립 profile의 Git ignore·다양성·provenance 조건으로 고정했다. 최소 구현은 `QueryPlan.filing_ids`, slot별 correction policy와 exact filing 검색, event filing filter, release-eligible profile 검증을 추가했다.
+- D read-only 최종 평가는 120 cases, 373 required target 중 357 hit, Recall@20 `0.9571045576`, slot completeness `0.95`, wrong issuer/version/hard failure 각 `0`, p50 `338.23ms`, p95 `1421.31ms`다. summary semantic SHA-256은 `a7c12747416850100ba6b23793d8530f4a959cb9979ed037b68ecf854676daf0`이다.
+- Sparse gate가 95%를 넘었으므로 embedding은 `DEFERRED_NO_EVIDENCE (sparse_recall_gate_met)`다. 검색 gate만 PASS이며 실제 600건 staging Judge/provider와 exact-image 배포 gate는 아직 별도다. 관련 회귀 최초 실행은 오래된 `retrieval.recall_at_20` 미달 가정 때문에 `1 failed, 425 passed`였고, 현재 추적 보고서가 검색 gate만 통과하되 Judge·deployment 사유로 전체 release를 계속 차단한다는 계약으로 수정해 단독 `1 passed`를 확인했다.
+- 최종 로컬 검증은 Python `981 passed, 2 skipped, 104 warnings, 266 subtests` (`288.05s`), Web `13/13`, `compileall`, `git diff --check`, tracked credential/secret scan을 통과했다. 첫 위생 명령은 안전한 `.env.example` 두 개를 실제 `.env`로 오인해 종료코드 1을 냈고, exact filename 경계로 고친 재검사에서 금지 파일·값은 0건이었다.

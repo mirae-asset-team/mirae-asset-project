@@ -8,6 +8,8 @@
 
 ## 현재 개발 상태와 인수인계
 
+> **2026-09-05 독립 hidden 검색 gate 통과:** Git에서 무시되는 private evaluator 입력 120건을 제품 출력이 아닌 read-only 공시 evidence ledger에서 직접 표기했다. 19개 기업·98개 공시·7개 판단 차원, 373개 필수 근거에서 Sparse Recall@20은 `357/373 = 95.71%`, wrong issuer/version과 hard failure는 각 `0`, p95는 `1.42초`다. 보고서는 질문 원문 없이 입력 hash·provenance·case별 근거 ID와 집계만 추적하며 `agent_audited`이지 `human_verified`가 아니다. 독립 Sparse gate가 95%를 넘었으므로 Dense/embedding은 `DEFERRED_NO_EVIDENCE`다. 이는 검색 gate만 통과한 결과이며, 실제 600건 staging Judge/provider와 동일-image 배포 gate를 통과하기 전까지 운영 8000은 교체하지 않는다. 상세 근거는 [독립 hidden 검색 평가 기록](docs/operations/2026-09-05-independent-hidden-retrieval.md)에 있다.
+
 > **2026-09-05 결정론적 수익성 분석 보완:** 실제 NCP 8001에서 삼성전자 2개년 수익성 분석은 근거 6건 조회 후 HCX-005 최종 생성이 20초 timeout이었다. 단일 재무값은 7.2초였지만 비교 질문도 17.6초여서 provider p95 10초 gate를 만족하지 못했다. 이제 검증된 최근 두 회계연도의 매출액 대비 영업이익·당기순이익률 방향이 모두 확정되는 `profitability` 질문은 SQLite fact로 `개선/악화/혼재/안정`을 결정론적으로 판정하고, 동일 근거의 claim verification을 통과한 문장을 HCX 호출 없이 반환한다. 사업위험 등 정형 계산할 수 없는 판단은 기존 HCX/안전 보류 경로를 유지한다. release identity 보완까지 포함한 로컬 회귀는 Python `970 passed, 2 skipped, 266 subtests`, Web `13/13`, release/staging `168 passed, 94 subtests`다. 서버에는 독립 private holdout 120건과 독립 hidden 검색 Gold가 없으므로 8000 승격 hard gate는 계속 차단한다.
 
 > **2026-09-05 release identity 보완:** 공식 staging 스크립트가 요구하는 commit·image·base·overlay·search 신뢰값을 Compose가 runtime에 전달하지 않았고 `/health`도 노출하지 않아, 평가 입력이 준비돼도 exact-image 검증이 불가능한 결함을 TDD로 수정했다. 다섯 값이 모두 형식에 맞을 때만 `/health.identity`에 고정된 allowlist로 노출하고 일부 누락·형식 오류는 identity 전체를 생략한다. 이는 credential을 노출하지 않으며 production 승격 기준을 낮추지 않는다.
@@ -49,15 +51,15 @@
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
 | HCX Function Calling | V1.2, providerless 정형 fallback, 분석 provider 장애 시 근거 보존 보류 구현 | provider timeout 원인·p95를 실제 hidden 평가에서 해소 |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료; 최신 diagnostic image는 8001 내부 health 통과 | ACG를 바꾸지 않고 공식 staging identity·팀 접근 경로 확인 |
-| 테스트 | 전체 Python `967 passed, 2 skipped, 264 subtests`; Web JS `13 passed`; compileall/diff 통과 | private/provider 600건과 실제 staging identity 평가 |
-| Release gate | `BLOCKED_HARD_GATE` (33개 사유) | 독립 hidden 검색 Gold, private Judge/provider와 commit/image/data 신뢰 앵커를 실제 staging에서 생성; 임계값 완화 금지 |
+| 테스트 | 독립 hidden 검색 120건 PASS; Python `981 passed, 2 skipped, 266 subtests`; Web `13/13`; compileall/diff/secret scan PASS | private 600건을 실제 staging에서 실행하고 동일-image 검증 |
+| Release gate | 검색 gate만 PASS, 전체는 `BLOCKED_HARD_GATE` | private Judge/provider와 commit/image/data 신뢰 앵커를 실제 staging에서 생성; 임계값 완화 금지 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
 ### 현재 품질 경계
 
-- 기존 exact-ID Gold V1의 Sparse Recall@20 `0.487179...`는 broad 질문의 유효한 대체 근거를 오답 처리하던 legacy 기준선으로 보존합니다. relevance-set Gold V2의 최신 read-only 개발 실측은 120 cases, 402 required hits, Recall@20 `1.0`, slot completeness `1.0`, wrong issuer/version `0`, p95 `97.38ms`입니다. 다만 V2는 공개 자동 생성 개발셋으로 독립 hidden 평가가 아니므로 release gate 통과 근거로 쓰지 않습니다.
+- 기존 exact-ID Gold V1의 Sparse Recall@20 `0.487179...`는 broad 질문의 유효한 대체 근거를 오답 처리하던 legacy 기준선으로 보존합니다. 공개 relevance-set Gold V2 개발 실측은 120 cases, 402/402이지만 release 근거로 쓰지 않습니다. 별도 private 독립 hidden 120건은 19개 기업·98개 공시·373개 필수 근거에서 Recall@20 `95.71%`, wrong issuer/version `0`, p95 `1.42초`로 실제 검색 gate를 통과했습니다.
 - Compose/NCP 관측에는 full-corpus Dense가 연결되어 있지만, 새 identity contract가 포함된 image는 아직 build/deploy되지 않았습니다.
-- 공개 개발 Gold V2의 높은 점수만으로 embedding을 보류하지 않도록 현재 결정은 `BLOCKED_INDEPENDENT_GOLD`입니다. 독립 hidden Gold에서 Sparse Recall@20과 Dense 개선폭 `+5%p`, wrong issuer/version `0`, p95 `2초` 이하를 측정한 뒤에만 Dense 채택 여부를 결정합니다.
+- 독립 hidden Gold의 Sparse Recall@20이 `95.71%`이고 wrong issuer/version `0`, p95 `1.42초`이므로 현재 embedding 결정은 `DEFERRED_NO_EVIDENCE`입니다. Dense는 Sparse가 95% 미만이고 bounded pilot이 `+5%p` 이상 개선할 때만 다시 검토합니다.
 - missing/invalid/empty Dense 결과와 sidecar 통신 실패는 로컬 회귀에서 Sparse로 fallback합니다. release Compose의 agent 기동도 Dense `service_healthy`에 의존하지 않도록 수정됐지만, 실제 NCP cold-start/restart fallback은 새 이미지로 아직 검증하지 않았습니다.
 - 배포는 두 단계입니다. pre-stage는 정확한 Git commit archive와 별도 hash-trusted retrieval 보고서로 후보 이미지를 한 번 build해 8001에만 올립니다. 실제 `/health.identity`, read-only mount와 600-case/provider 평가를 거쳐 최종 release gate가 PASS한 경우에만 별도 스크립트가 같은 image를 8000에 승격합니다. 현재 8001은 오류 진단용 `dev-only` image이며 공식 pre-stage/PASS가 아니고, 통합 보고서가 BLOCKED이므로 8000 승격은 실행하지 않았습니다.
 - `[agent]` extra와 기본 `Dockerfile`에는 NumPy를 선언하지 않고, `Dockerfile.dense`가 설치하는 `[dense]` extra에만 `numpy==2.5.2`를 고정했습니다. 로컬 Docker engine 문제는 남아 있지만 NCP에서 diagnostic agent image build와 package 설치는 성공했습니다. Dense image package inventory와 채택 품질은 여전히 별도 release evidence가 필요합니다.

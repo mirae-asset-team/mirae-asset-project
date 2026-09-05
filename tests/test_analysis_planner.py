@@ -63,6 +63,22 @@ def test_all_nine_public_judgment_dimensions_have_bounded_mandatory_slots(questi
     assert all(slot.issuer is not None for slot in plan.required_evidence_slots)
 
 
+def test_plan_captures_only_contextual_dart_filing_ids_without_treating_large_values_as_ids() -> None:
+    plan = plan_analysis(
+        "삼성전자 최초 공시 20240301000001와 정정 공시번호 20240402000002를 비교 분석해줘",
+        company_candidates=["삼성전자"],
+    )
+
+    assert plan.base_plan.filing_ids == ("20240301000001", "20240402000002")
+    assert "explicit_filing_id" in plan.base_plan.reason_codes
+
+    numeric = plan_analysis(
+        "삼성전자 매출액 20240301000001원이 맞는지 공시로 분석해줘",
+        company_candidates=["삼성전자"],
+    )
+    assert numeric.base_plan.filing_ids == ()
+
+
 def test_future_forecast_request_is_prohibited_but_historical_forecast_text_analysis_is_allowed():
     forecast = plan_analysis(
         "삼성전자 공시를 바탕으로 내년 매출을 전망해줘",

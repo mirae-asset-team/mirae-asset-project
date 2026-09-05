@@ -741,7 +741,9 @@ def test_current_tracked_artifacts_are_blocked() -> None:
     assert result.release_state == "BLOCKED_HARD_GATE"
     assert result.hard_gate_passed is False
     assert any("judge.results" in reason for reason in result.hard_gate_reasons)
-    assert any("retrieval.recall_at_20" in reason for reason in result.hard_gate_reasons)
+    assert not any(
+        "retrieval.recall_at_20" in reason for reason in result.hard_gate_reasons
+    )
     assert any("deployment" in reason for reason in result.hard_gate_reasons)
 
 

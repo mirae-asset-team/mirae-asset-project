@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -1011,6 +1012,126 @@ def test_retrieval_v2_profile_is_explicitly_development_only() -> None:
         "evaluation_scope": "development_public_agent_audited",
         "release_eligible": False,
     }
+
+
+def test_independent_hidden_profile_requires_private_diverse_direct_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dimensions = tuple(DIMENSIONS)
+    rows = []
+    for index in range(120):
+        question = f"비공개 평가 질문 {index}"
+        rows.append(
+            {
+                "schema_version": "2.0.0",
+                "case_id": f"hidden-{index:03d}",
+                "question": question,
+                "question_sha256": hashlib.sha256(
+                    question.encode("utf-8")
+                ).hexdigest(),
+                "dimension_id": dimensions[index % len(dimensions)],
+                "issuer_corp_code": f"{index % 12:08d}",
+                "filing_ids": [f"2026{index % 12:02d}01000001"],
+                "target_evidence_ids": [f"ev-hidden-{index:03d}"],
+                "source_record_id": f"ledger-{index:03d}",
+                "source_sha256": hashlib.sha256(
+                    f"source-{index}".encode("utf-8")
+                ).hexdigest(),
+                "review": {
+                    "status": "agent_audited",
+                    "provenance": "independent_direct_corpus_annotation",
+                    "target_selection": "direct_evidence_ledger",
+                    "product_output_used": False,
+                },
+            }
+        )
+    gold = tmp_path / "hidden.jsonl"
+    gold.write_text("private", encoding="utf-8")
+    monkeypatch.setattr(
+        "scripts.evaluate_freeform_retrieval.is_git_ignored",
+        lambda repository_root, path: True,
+    )
+
+    profile = _evaluation_profile(
+        rows,
+        evaluation_scope="independent_hidden",
+        gold_path=gold,
+        repository_root=tmp_path,
+    )
+
+    assert profile["schema_version"] == "freeform-retrieval-evaluation-v2"
+    assert profile["evaluation_scope"] == "independent_hidden"
+    assert profile["release_eligible"] is True
+    assert profile["independence"]["issuer_count"] == 12
+    assert profile["independence"]["case_count"] == 120
+    assert profile["independence"]["product_output_used"] is False
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda rows: rows.pop(), "case_count"),
+        (
+            lambda rows: rows[0]["review"].__setitem__(
+                "product_output_used", True
+            ),
+            "product_output_used",
+        ),
+        (
+            lambda rows: rows[0].__setitem__("question_sha256", "0" * 64),
+            "question_sha256",
+        ),
+    ],
+)
+def test_independent_hidden_profile_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation,
+    message: str,
+) -> None:
+    dimensions = tuple(DIMENSIONS)
+    rows = []
+    for index in range(120):
+        question = f"숨은 평가 {index}"
+        rows.append(
+            {
+                "schema_version": "2.0.0",
+                "case_id": f"hidden-{index:03d}",
+                "question": question,
+                "question_sha256": hashlib.sha256(
+                    question.encode("utf-8")
+                ).hexdigest(),
+                "dimension_id": dimensions[index % len(dimensions)],
+                "issuer_corp_code": f"{index % 12:08d}",
+                "filing_ids": [f"2026{index % 12:02d}01000001"],
+                "target_evidence_ids": [f"ev-hidden-{index:03d}"],
+                "source_record_id": f"ledger-{index:03d}",
+                "source_sha256": hashlib.sha256(
+                    f"source-{index}".encode("utf-8")
+                ).hexdigest(),
+                "review": {
+                    "status": "agent_audited",
+                    "provenance": "independent_direct_corpus_annotation",
+                    "target_selection": "direct_evidence_ledger",
+                    "product_output_used": False,
+                },
+            }
+        )
+    mutation(rows)
+    gold = tmp_path / "hidden.jsonl"
+    gold.write_text("private", encoding="utf-8")
+    monkeypatch.setattr(
+        "scripts.evaluate_freeform_retrieval.is_git_ignored",
+        lambda repository_root, path: True,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        _evaluation_profile(
+            rows,
+            evaluation_scope="independent_hidden",
+            gold_path=gold,
+            repository_root=tmp_path,
+        )
 
 
 def test_gold_rejects_untrusted_serving_path_before_case_generation() -> None:

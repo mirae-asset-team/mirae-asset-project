@@ -1087,6 +1087,7 @@ def fetch_event_facts(
     base_database: Path,
     overlay_database: Path,
     *,
+    filing_id: str | None = None,
     company: str | None = None,
     predicate_terms: Iterable[str] = (),
     as_of: str | None = None,
@@ -1121,6 +1122,9 @@ def fetch_event_facts(
     with closing(_read_base(Path(base_database))) as schema_connection:
         filing_columns = {str(row[1]) for row in schema_connection.execute("PRAGMA table_info(filing)")}
     reporter_select = "f.reporter_name" if "reporter_name" in filing_columns else "NULL AS reporter_name"
+    if filing_id is not None:
+        where.append("ef.filing_id=?")
+        params.append(filing_id)
     if company is not None:
         company_fields = ["f.issuer_name=?", "f.listed_name=?", "f.stock_code=?", "f.issuer_corp_code=?"]
         if "reporter_name" in filing_columns:

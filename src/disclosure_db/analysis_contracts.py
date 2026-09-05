@@ -93,6 +93,7 @@ class QueryPlanSnapshot:
     target_periods: tuple[Mapping[str, str | None], ...] = ()
     requires_complete_evidence_set: bool = False
     filing_date: str | None = None
+    filing_ids: tuple[str, ...] = ()
     account_id: str | None = None
     account_status: str = "unknown"
     account_match_type: str | None = None
@@ -114,6 +115,7 @@ class QueryPlanSnapshot:
         object.__setattr__(self, "target_periods", _normalized_target_periods(self.target_periods))
         object.__setattr__(self, "account_candidates", _normalized_string_tuple(self.account_candidates, "account_candidates"))
         object.__setattr__(self, "required_account_ids", _normalized_string_tuple(self.required_account_ids, "required_account_ids"))
+        object.__setattr__(self, "filing_ids", _normalized_string_tuple(self.filing_ids, "filing_ids"))
         if self.account_formula is not None:
             if not isinstance(self.account_formula, Mapping):
                 raise ValueError("account_formula must be a mapping or None")
@@ -144,6 +146,7 @@ class QueryPlanSnapshot:
             ),
             requires_complete_evidence_set=plan.requires_complete_evidence_set,
             filing_date=plan.filing_date,
+            filing_ids=tuple(plan.filing_ids),
             account_id=plan.account_id,
             account_status=plan.account_status,
             account_match_type=plan.account_match_type,

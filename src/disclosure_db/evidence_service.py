@@ -50,6 +50,15 @@ _SEMANTIC_TEXT_SLOT_IDS = frozenset({
 _MIN_SEMANTIC_EVIDENCE_CHARACTERS = 80
 
 
+def _slot_correction_policy(plan: AnalysisPlan, slot: EvidenceSlot) -> str:
+    slot_id = slot.slot_id.split("__i", 1)[0]
+    if plan.base_plan.correction_policy == "both" and slot_id == "original_disclosure":
+        return "original"
+    if plan.base_plan.correction_policy == "both" and slot_id == "effective_correction":
+        return "corrected"
+    return plan.base_plan.correction_policy
+
+
 def evidence_text_is_admitted(text: object) -> bool:
     """Reject instruction-like corpus text before it reaches any public model context."""
 
@@ -411,17 +420,28 @@ class EvidenceService:
         try:
             rankings: list[list[EvidenceRef]] = []
             version_as_of = self._slot_version_as_of(plan)
-            for variant_id, variant in enumerate(variants):
-                rows = self._search_index.search(
-                    variant,
-                    company=slot.issuer or plan.base_plan.company,
-                    as_of=version_as_of,
-                    filed_at=slot.filing_date,
-                    start_date=slot.period_start,
-                    end_date=slot.period_end,
-                    limit=MAX_CANDIDATES_PER_VARIANT,
-                    correction_policy=plan.base_plan.correction_policy,
-                )
+            filing_ids: tuple[str | None, ...] = plan.base_plan.filing_ids or (None,)
+            correction_policy = _slot_correction_policy(plan, slot)
+            search_variants = (
+                tuple(dict.fromkeys((plan.question, *variants)))[:4]
+                if plan.base_plan.filing_ids
+                else variants
+            )
+            diagnostics["variant_ids"] = list(range(len(search_variants)))
+            for variant_id, variant in enumerate(search_variants):
+                rows = []
+                for filing_id in filing_ids:
+                    rows.extend(self._search_index.search(
+                        variant,
+                        company=slot.issuer or plan.base_plan.company,
+                        filing_id=filing_id,
+                        as_of=version_as_of,
+                        filed_at=slot.filing_date,
+                        start_date=slot.period_start,
+                        end_date=slot.period_end,
+                        limit=MAX_CANDIDATES_PER_VARIANT,
+                        correction_policy=correction_policy,
+                    ))
                 diagnostics["candidate_count"] = int(diagnostics["candidate_count"]) + len(rows)
                 sparse_ranks = diagnostics["sparse_ranks"]
                 assert isinstance(sparse_ranks, list)
@@ -438,7 +458,7 @@ class EvidenceService:
                 hydrated = self._hydrate_ids(
                     (str(row["evidence_id"]) for row in rows),
                     as_of=version_as_of,
-                    correction_policy=plan.base_plan.correction_policy,
+                    correction_policy=correction_policy,
                 )
                 by_id = {ref.evidence_id: ref for ref in hydrated}
                 refs = [by_id[str(row["evidence_id"])] for row in rows if str(row["evidence_id"]) in by_id]
@@ -455,13 +475,14 @@ class EvidenceService:
                     safe_refs.append(ref)
                 rankings.append(safe_refs)
             dense_refs, dense_diagnostics = self._search_dense(
-                variants[0],
+                search_variants[0],
                 company=slot.issuer or plan.base_plan.company,
+                filing_id=plan.base_plan.filing_ids[0] if len(plan.base_plan.filing_ids) == 1 else None,
                 as_of=version_as_of,
                 filed_at=slot.filing_date,
                 start_date=slot.period_start,
                 end_date=slot.period_end,
-                correction_policy=plan.base_plan.correction_policy,
+                correction_policy=correction_policy,
             )
             for ref in dense_refs:
                 ref.locator["analysis_issuer"] = slot.issuer or plan.base_plan.company
@@ -538,6 +559,7 @@ class EvidenceService:
                 statement_type=None if slot.domain == "financial" else base.statement_type,
                 correction_policy=base.correction_policy,
                 filing_date=slot.filing_date,
+                filing_ids=list(base.filing_ids) if slot.domain == "event" else [],
                 fact_domain=slot_domain,
                 account_terms=[concept] if concept is not None else [],
                 predicate_terms=list(slot.search_concepts) if slot.domain == "event" else [],
@@ -868,6 +890,7 @@ class EvidenceService:
             None if plan.period_start or plan.period_end or plan.instant_date else plan.as_of
         )
         filing_date = plan.filing_date
+        filing_id = plan.filing_ids[0] if len(plan.filing_ids) == 1 else None
         structured_domain = plan.fact_domain in {"financial", "event"}
         if self.overlay_database and self.overlay_database.exists() and structured_domain:
             overlay_attested = overlay_matches_base(self.base_database, self.overlay_database, attestation=self.attestation)
@@ -890,6 +913,7 @@ class EvidenceService:
             financial_facts = fetch_overlay_facts(
                 self.base_database,
                 self.overlay_database,
+                filing_id=filing_id,
                 company=plan.company,
                 as_of=version_as_of,
                 period_start=plan.period_start if exact_duration else None,
@@ -912,6 +936,7 @@ class EvidenceService:
             event_facts = fetch_event_facts(
                 self.base_database,
                 self.overlay_database,
+                filing_id=filing_id,
                 company=plan.company,
                 predicate_terms=self._expand_event_terms(plan.predicate_terms),
                 as_of=version_as_of,
@@ -942,6 +967,7 @@ class EvidenceService:
                         rows = self._search_index.search(
                             plan.question,
                             company=plan.company,
+                            filing_id=filing_id,
                             as_of=version_as_of,
                             filed_at=filing_date,
                             limit=max(1, limit - len(refs)),
@@ -961,6 +987,7 @@ class EvidenceService:
                                 dense_refs, dense_diagnostics = self._search_dense(
                                     plan.question,
                                     company=plan.company,
+                                    filing_id=filing_id,
                                     as_of=version_as_of,
                                     filed_at=filing_date,
                                     correction_policy=plan.correction_policy,

@@ -110,6 +110,55 @@ def test_text_slot_diagnostics_record_variant_and_sparse_rank_without_query_text
     assert "bounded catalog query" not in repr(diagnostics)
 
 
+def test_text_slot_limits_each_search_to_explicit_filing_ids_and_slot_version() -> None:
+    plan = plan_analysis(
+        "삼성전자 최초 공시 20240301000001와 정정 공시 20240402000002를 각각 비교해 중요성을 분석해줘",
+        company_candidates=["삼성전자"],
+    )
+    original = next(slot for slot in plan.required_evidence_slots if slot.slot_id == "original_disclosure")
+    corrected = next(slot for slot in plan.required_evidence_slots if slot.slot_id == "effective_correction")
+    with TemporaryDirectory() as directory:
+        index_path = Path(directory) / "search.sqlite"
+        index_path.touch()
+        with patch("disclosure_db.search_index.SafeSearchIndex") as search_index:
+            search_index.return_value.search.return_value = []
+            service = EvidenceService(
+                Path(directory) / "base.sqlite",
+                attestation=SimpleNamespace(sha256="a" * 64, size_bytes=1),
+                search_database=index_path,
+            )
+            service._search_text_slot(plan, original, ("최초 공시",))
+            original_calls = list(search_index.return_value.search.call_args_list)
+            search_index.return_value.search.reset_mock()
+            service._search_text_slot(plan, corrected, ("정정 공시",))
+            corrected_calls = list(search_index.return_value.search.call_args_list)
+
+    assert {call.kwargs["filing_id"] for call in original_calls} == {
+        "20240301000001", "20240402000002",
+    }
+    assert {call.kwargs["correction_policy"] for call in original_calls} == {"original"}
+    assert {call.kwargs["filing_id"] for call in corrected_calls} == {
+        "20240301000001", "20240402000002",
+    }
+    assert {call.kwargs["correction_policy"] for call in corrected_calls} == {"corrected"}
+    assert plan.question in {call.args[0] for call in original_calls}
+    assert len({call.args[0] for call in original_calls}) <= 4
+
+
+def test_structured_event_slot_preserves_single_explicit_filing_filter() -> None:
+    plan = plan_analysis(
+        "삼성전자 공시 20240301000001 계약 조건을 분석해줘",
+        company_candidates=["삼성전자"],
+    )
+    slot = plan.required_evidence_slots[0]
+    service = EvidenceService(Path("base.sqlite"))
+
+    with patch.object(service, "search", return_value=EvidenceBundle(question="q")) as search:
+        service._search_structured_slot(plan, slot, ("계약금액 계약기간",))
+
+    assert search.call_args.args[0].filing_ids == ["20240301000001"]
+
+
 def test_semantic_text_slot_excludes_short_keyword_collision_before_fusion() -> None:
     plan = _business_risk_plan()
     slot = plan.required_evidence_slots[0]
