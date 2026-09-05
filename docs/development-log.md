@@ -1110,3 +1110,10 @@
 - 수익성 다중근거 분석은 근거 slot 수집 이후 HCX 최종 생성 요청이 약 20초에 실패했고 기존 코드는 공시 근거까지 사용자 응답에서 버린 채 `status=error`를 반환했다. 외부 provider 장애가 검증된 evidence를 훼손하지 않도록, `HcxFunctionCallingError`일 때는 결론을 생성하지 않고 `status=abstained`, `answer_allowed=false`로 전환하며 기존 tool response와 공시 citation을 보존하는 것이 fail-closed 계약에 맞다고 판단했다.
 - TDD RED는 완전한 bounded evidence 뒤 provider 생성 실패가 `error`가 되는 현상을 `1 failed`로 재현했다. 최소 수정 후에는 명시적 `provider_failure_analysis_abstention` 경고·한계와 근거 citation을 보존한 보류 응답이 되며 focused `12 passed`, 확대 HCX 회귀 `88 passed, 6 warnings, 6 subtests passed`를 통과했다.
 - 새 보류 경로는 아직 다음 image로 8001 재배포하기 전이다. 실제 provider 지연·실패가 있었고 독립 hidden/Judge/provider release evidence와 p95 기준이 충족되지 않았으므로 8000 승격은 계속 차단한다. credential, `.env`, PEM, NCP 보안 설정과 read-only 데이터는 변경하지 않았다.
+
+## 2026-09-05T12:55:21+09:00 / 2026-09-05T03:55:21Z — 최신 8001 진단 image 검증과 8000 차단
+
+- commit `16b811e31cbeaa4ed45474bf6eb3da6916ac9d87`의 tracked archive SHA-256은 `e45681d9c3912e732f591c60c5383615d9433b15c5a50840506ec085ba283c2b`, NCP image는 `sha256:0d5b8cb4aa882e053e8ff8d756f2464e17a2274df3e9823a148a83bb3ffd23a8`다. 8001은 이 image로 기동됐고 ready, 76개 기업, provider/function calling configured, restart count 0이며 base·overlay·search·attestation mount는 모두 read-only다. 이전 8001 candidate와 최초 rollback 컨테이너·image는 중지 상태로 보존했다.
+- 실제 8001 재검증에서 삼성전자 최신 매출은 7.69초에 검증 답변과 citation 1건을 반환했다. 같은 수익성 분석은 provider가 다시 정확히 약 20.03초에 실패했지만 새 계약대로 `status=abstained`, `answer_allowed=false`, `provider_failure_analysis_abstention`과 기존 공시 citation 6건을 보존했다. 직접 prompt injection은 2.2ms에 provider 없이 보류됐다.
+- NCP 내부 8001 health는 통과하지만 현재 작업 호스트에서 공인 `101.79.31.221:8001`의 `/`와 `/health`는 각각 15초 timeout이다. ACG·보안 설정을 변경하지 않는 범위에서 이는 공개 staging smoke 통과가 아니다. 공인 8000의 `/`와 `/health`는 각각 HTTP 200이며 기존 운영 컨테이너를 변경하지 않았다.
+- 최종 로컬 검증은 Python `967 passed, 2 skipped, 98 warnings, 264 subtests passed` (`71.96s`), Web `13 passed`, `compileall`, `git diff --check`다. provider 포함 분석 p95 10초 기준, private holdout, 독립 hidden 검색 Gold와 trusted release identity가 미충족이므로 정확한 동일 image 8000 승격 조건은 성립하지 않았다. hard gate를 낮추거나 결과를 합성하지 않았다.

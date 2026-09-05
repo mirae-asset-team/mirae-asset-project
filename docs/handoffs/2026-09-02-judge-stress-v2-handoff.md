@@ -2,7 +2,9 @@
 
 ## 결론
 
-`agent/judge-stress-v2`의 Task 1~8 구현을 바탕으로 `perf/search-index-validation-v2`에서 검색 인덱스 수명, 구조화 슬롯 완전성, relevance-set Gold V2를 보완했다. 실제 600건 앱/provider 평가와 운영 승격은 완료된 것으로 주장하지 않는다. 2026-09-05 최신 통합 release gate는 `BLOCKED_HARD_GATE`이며 33개 차단 사유가 남아 있어 8001/8000 및 NCP 배포를 실행하지 않았다. 다음 작업은 독립 hidden 검색 Gold, private holdout 120건과 실제 staging provider/identity를 준비해 같은 gate를 재실행하는 것이다.
+`agent/judge-stress-v2`의 Task 1~8 구현을 바탕으로 `perf/search-index-validation-v2`에서 검색 인덱스 수명, 구조화 슬롯 완전성, relevance-set Gold V2를 보완했다. 실제 600건 앱/provider 평가와 운영 승격은 완료된 것으로 주장하지 않는다. 2026-09-05 최신 통합 release gate는 `BLOCKED_HARD_GATE`이며 33개 차단 사유가 남아 있다. `16b811e`의 dev-only image를 NCP 8001에 진단 배포했지만 공식 pre-stage/PASS가 아니며 8000은 기존 image 그대로다. 다음 작업은 독립 hidden 검색 Gold, private holdout 120건과 실제 staging provider/identity를 준비해 같은 gate를 재실행하는 것이다.
+
+> 2026-09-05 NCP 진단 갱신: 설치형 package가 `analysis_dimensions.json`을 `/usr/local/lib/python3.11/config`에서 찾던 결함을 runtime `DISCLOSURE_CONFIG_DIR` 우선으로 수정했다. 최신 8001 image는 `sha256:0d5b8cb4aa882e053e8ff8d756f2464e17a2274df3e9823a148a83bb3ffd23a8`; health ready와 네 read-only 데이터 mount를 확인했다. 삼성전자 최신 매출은 검증된 2025 연결 수치와 citation으로 답했다. 수익성 bounded analysis는 근거 6건을 찾았지만 HCX 생성이 20초 timeout이어서, `error` 대신 근거를 보존한 `abstained`로 fail-close하도록 수정했다. 외부 8001은 timeout, 공개 8000은 HTTP 200이다. 전체 Python `967 passed, 2 skipped, 264 subtests`, Web `13 passed`; provider latency와 독립 hidden/private gate가 남아 8000 승격은 금지다.
 
 > 2026-09-05 검색·재무 최종 갱신: 검색 인덱스는 프로세스 시작 시 한 번만 무결성 검증하도록 변경했고, 모든 구조화 슬롯은 `min_periods=1`인 경우도 선언된 canonical account 전부를 요구한다. 공개 자동 생성 Gold V2의 개발 실측은 120 cases, 402/402 required hits, Recall@20 `100%`, slot completeness `100%`, wrong issuer/version `0`, p95 `97.38ms`다. 그러나 19 source record·7 issuer에 한정되고 product filter와 생성 규칙을 공유하므로 `release_eligible=false`, embedding 판정 `BLOCKED_INDEPENDENT_GOLD`로 고정했다. 최신 재무 회귀는 856/856, 삼성전자 최신 매출 회귀 통과, 허위 수치·근거 없는 검증 답변 `0`, 20동시 요청 오류 `0`, p95 `125.71ms`다. 이 결과는 독립 hidden 검색 Gold와 private 600건/provider/staging identity를 대체하지 않는다.
 
