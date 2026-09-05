@@ -1134,3 +1134,11 @@
 - TDD RED는 완전한 유효 환경에서도 `/health.identity`가 없고 release Compose/스크립트에도 네 신뢰값이 없는 현상을 `2 failed`로 고정했다. 최소 구현은 다섯 외부 신뢰 앵커를 Compose에 추가하고 staging·promotion 스크립트가 전달하도록 했으며, API가 전부 유효한 경우에만 소문자 정규화된 정확한 다섯 필드를 노출한다. 일부 누락·형식 오류는 identity 전체를 생략하므로 공식 gate가 계속 fail-close한다.
 - 이 identity는 공개 가능한 commit·image/DB digest만 포함하며 credential·환경의 다른 값은 노출하지 않는다. `.env`, API key, PEM, NCP 보안 설정과 read-only 데이터는 읽거나 변경하지 않았다. RED 후 focused 결과는 `2 passed, 2 subtests`다.
 - 최종 회귀: 전체 Python `970 passed, 2 skipped, 104 warnings, 266 subtests` (`76.79s`), Web `13/13`, release/staging `168 passed, 94 subtests` (`55.24s`), `compileall`과 `git diff --check`를 통과했다.
+
+## 2026-09-05 — commit `7cb6bbf` NCP 8001 diagnostic staging
+
+- Git archive SHA-256 `404fe48b71a1ea81c22847cb9268147b0d176fc258ba90138372e2f992303076`을 `/srv/mirae/staging/diagnostic-7cb6bbf`에 풀어 image `sha256:9f0e3ae4fe854ad1a6379e887134040606dd492358668906b824b504b5458e15`를 한 번 build했다. 원격 Docker의 BuildKit component가 없어 첫 명령은 image 생성 전에 실패했고, 서버 패키지를 추가하지 않고 같은 source로 legacy builder를 사용했다.
+- 첫 기동에서 사람이 전체 commit을 추정 입력한 오류를 발견했다. 그 실행은 release identity로 인정하지 않고 해당 후보 컨테이너만 제거했으며, `git rev-parse`로 확인한 exact commit `7cb6bbf2e805855f4daba0be630e4b87178a1518`로 동일 image를 재기동했다. 기존 `mirae-16b811e-staging`은 중지 상태로 보존했고 실패 시 자동 복원하도록 했다.
+- 최신 8001 내부 health는 ready, eval/provider/function calling configured, 76개사이며 commit·image·base·overlay·search identity가 외부 신뢰값과 정확히 일치한다. base·overlay·search·attestation 네 data mount는 모두 read-only다. `.env`는 읽지 않고 기존 `/srv/mirae/app/.env`를 Docker `--env-file`로만 사용했으며 credential 값은 출력·기록하지 않았다.
+- 삼성전자 최근 2개년 수익성 질문은 `status=answered`, `execution_mode=deterministic_bounded_analysis`, `conclusion=improved`, citation 6건, `final_generation_called=false`, 50.99ms였다. 동일 질문 20동시 요청은 오류 0, p95 958.35ms, max 960.96ms였다. 삼성전자 최신 매출은 citation 1건과 검증 답변을 6,698.35ms에 반환했고 직접 prompt injection은 차단했다.
+- 현재 작업 호스트에서 공개 8000 health는 HTTP 200이고 기존 `qa-growth-v4-qa-agent:latest` image가 그대로다. 공개 8001은 curl exit 28·HTTP 000으로 timeout이며 NCP ACG는 변경하지 않았다. local 원본 저장소·작업 worktree·`/srv/mirae` inventory에서 V2 private holdout 120건과 release-eligible independent hidden retrieval Gold를 찾지 못했으므로 공식 600건·provider release gate와 8000 promotion은 계속 blocked다.
