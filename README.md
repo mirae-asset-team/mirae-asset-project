@@ -328,7 +328,7 @@ uvicorn은 선택 의존성으로 지연 로딩되며, 핵심 CLI·테스트에�
 서버 readiness만 의미하며, 정확도·provider·외부 endpoint gate 통과를 의미하지 않습니다.
 
 제출 산출물은 [기술제안서 원고](docs/submission/technical-proposal.md),
-[기술제안서 PDF](output/pdf/mirae-disclosure-agent-technical-proposal.pdf),
+[기술제안서 PDF](docs/submission/technical-proposal.pdf),
 [평가 API 서버 명세](docs/submission/api-server-spec.md)에 정리했습니다.
 
 공식 과제자료의 평가 API 예시와 호환되는 `GET /answer`도 제공합니다.

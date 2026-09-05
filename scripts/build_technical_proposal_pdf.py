@@ -451,7 +451,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("output/pdf/mirae-disclosure-agent-technical-proposal.pdf"),
+        default=Path("docs/submission/technical-proposal.pdf"),
     )
     args = parser.parse_args()
     build_pdf(args.source, args.output)
