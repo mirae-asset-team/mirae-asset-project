@@ -382,6 +382,119 @@ class AgentRuntimeTests(unittest.TestCase):
         self.assertIn("정보한계 판정", body["think_trace"])
         self.assertEqual(body["answer"], UNANSWERABLE_TEXT)
 
+    def test_official_answer_get_answers_through_function_calling_pipeline(self):
+        """The judged endpoint must answer from the same pipeline as the public UI.
+
+        Unit rendering, derived ratios and document-topic routing live in the
+        function-calling service. Falling straight through to the deterministic
+        agent path served the weaker answer on the one endpoint the evaluation
+        calls, so lock the routing and the fallback boundary here.
+        """
+        from types import SimpleNamespace
+
+        from fastapi.testclient import TestClient
+
+        answered = SimpleNamespace(
+            status="answered",
+            answer="삼성전자의 매출액은 333,605,938,000,000원입니다.",
+            answer_allowed=True,
+            citations=[
+                {
+                    "evidence_id": "ev1",
+                    "rcept_no": "20260310002820",
+                    "report_name": "사업보고서 (2025.12)",
+                    "filed_at": "2026-03-10",
+                }
+            ],
+        )
+        abstained = SimpleNamespace(
+            status="abstained",
+            answer="질문에 실행 지시 변경 요청이 포함되어 처리할 수 없습니다.",
+            answer_allowed=False,
+            citations=[],
+        )
+        failed = SimpleNamespace(
+            status="hcx_final_generation_failed", answer="", answer_allowed=False, citations=[],
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".sqlite") as base:
+            def build(function_result):
+                class ReadyService:
+                    base_database = Path(base.name)
+                    overlay_database = None
+                    search_database = None
+                    attestation = None
+                    corpus_revision = "test-revision"
+
+                    def company_candidates(self):
+                        return ["테스트"]
+
+                calls: list[str] = []
+
+                class FakeAgent:
+                    evidence_service = ReadyService()
+                    provider_configured = False
+
+                    def answer(self, question, **kwargs):
+                        calls.append(question)
+                        return VerifiedAnswer(
+                            answer="결정론 폴백 답변",
+                            citation_ids=["ev-fallback"],
+                            verified=True,
+                            answerable=True,
+                            citations=[
+                                CitationRef(
+                                    "ev-fallback",
+                                    "20250318000002",
+                                    report_name="분기보고서",
+                                    filed_at="2025-05-15",
+                                )
+                            ],
+                        )
+
+                class FakeFunctionService:
+                    client = SimpleNamespace(configured=True)
+
+                    def answer(self, question):
+                        return function_result
+
+                app = create_app(FakeAgent(), function_calling_service=FakeFunctionService())
+                return calls, TestClient(app)
+
+            with self.subTest(branch="answered"):
+                calls, client = build(answered)
+                body = client.get(
+                    "/answer", params={"question_id": "Q-1", "question": "테스트 질문"},
+                ).json()
+                self.assertEqual(body["answer"], answered.answer)
+                self.assertIn("20260310002820", body["retrieved_context"])
+                self.assertIn("사업보고서 (2025.12)", body["retrieved_context"])
+                self.assertIn("검증된 근거로 답변 생성", body["think_trace"])
+                self.assertEqual(calls, [])
+
+            with self.subTest(branch="deliberate_abstention_is_not_retried"):
+                calls, client = build(abstained)
+                body = client.get(
+                    "/answer", params={"question_id": "Q-2", "question": "테스트 질문"},
+                ).json()
+                self.assertEqual(body["answer"], abstained.answer)
+                self.assertEqual(body["retrieved_context"], "")
+                self.assertIn("정보한계 판정", body["think_trace"])
+                self.assertEqual(calls, [])
+
+            with self.subTest(branch="provider_failure_falls_back"):
+                calls, client = build(failed)
+                body = client.get(
+                    "/answer", params={"question_id": "Q-3", "question": "테스트 질문"},
+                ).json()
+                self.assertEqual(body["answer"], "결정론 폴백 답변")
+                self.assertIn("20250318000002", body["retrieved_context"])
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(
+                    set(body),
+                    {"question_id", "question", "retrieved_context", "think_trace", "answer"},
+                )
+
     def test_contest_query_returns_503_when_runtime_is_not_ready(self):
         from fastapi.testclient import TestClient
 
