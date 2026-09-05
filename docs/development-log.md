@@ -1102,3 +1102,11 @@
 - TDD RED는 package 기본 config 경로가 없고 runtime config directory만 존재하는 설치형 조건을 추가해 `1 failed`로 재현했다. 최소 수정은 명시적 `path`를 최우선으로 유지하고, 기본 호출일 때 `DISCLOSURE_CONFIG_DIR/analysis_dimensions.json`을 사용하며, 환경변수가 없을 때만 기존 source-tree 기본값으로 fallback한다.
 - 관련 분석·실행기·HCX runtime 회귀는 `66 passed, 6 warnings`; 전체 Python은 `966 passed, 2 skipped, 98 warnings, 264 subtests passed` (`76.48s`), Web은 `13 passed`다. 경고는 기존 FastAPI/Starlette `on_event` deprecation이다.
 - 이 수정은 아직 새 image로 NCP 8001에서 재검증되지 않았고 독립 hidden/Judge/provider release evidence도 계속 미충족이다. 따라서 hard gate를 낮추지 않았으며 8000 승격은 금지 상태다. credential, `.env`, PEM, NCP 보안 설정과 live 데이터 파일은 읽거나 변경하지 않았다.
+
+## 2026-09-05T12:47:51+09:00 / 2026-09-05T03:47:51Z — 8001 재검증과 HCX 분석 장애 보류 경로
+
+- 수정 commit `9d9916b9d13cb3a3654039dee5b8a6e4e75330c1`의 tracked archive SHA-256은 `a239d28cf8e65ed3915a66306badc3ea4a9be21b24b14af8e05a5ce5bfa7048b`, NCP candidate image는 `sha256:591bf5d359a31351f4cfeef7283a0840f2f678f1f87eb6d8ad387c0bedf82f6b`다. 8001 health는 ready, base/overlay/search attested, 76개 기업, provider/function calling configured이며 네 데이터 mount는 모두 read-only다. 8000은 계속 기존 정상 image로 유지했다.
+- 실제 8001 smoke에서 삼성전자 최신 사업보고서 매출은 2025 연결 `333조 6,059억 3,800만 원`, 공시 `20260310002820`으로 정상 답변했다(7.34초). `SM엔터테인먼트` 별칭 비교도 에스엠 15.58%, 삼성전자 13.07%로 답했고 검증 실패한 provider 문장은 폐기한 뒤 구조화 deterministic fallback을 사용했다. 직접 prompt injection은 provider 호출 없이 정상 보류했으며, 사업위험은 필수 공시 근거가 없어 `insufficient_evidence`로 정상 보류했다.
+- 수익성 다중근거 분석은 근거 slot 수집 이후 HCX 최종 생성 요청이 약 20초에 실패했고 기존 코드는 공시 근거까지 사용자 응답에서 버린 채 `status=error`를 반환했다. 외부 provider 장애가 검증된 evidence를 훼손하지 않도록, `HcxFunctionCallingError`일 때는 결론을 생성하지 않고 `status=abstained`, `answer_allowed=false`로 전환하며 기존 tool response와 공시 citation을 보존하는 것이 fail-closed 계약에 맞다고 판단했다.
+- TDD RED는 완전한 bounded evidence 뒤 provider 생성 실패가 `error`가 되는 현상을 `1 failed`로 재현했다. 최소 수정 후에는 명시적 `provider_failure_analysis_abstention` 경고·한계와 근거 citation을 보존한 보류 응답이 되며 focused `12 passed`, 확대 HCX 회귀 `88 passed, 6 warnings, 6 subtests passed`를 통과했다.
+- 새 보류 경로는 아직 다음 image로 8001 재배포하기 전이다. 실제 provider 지연·실패가 있었고 독립 hidden/Judge/provider release evidence와 p95 기준이 충족되지 않았으므로 8000 승격은 계속 차단한다. credential, `.env`, PEM, NCP 보안 설정과 read-only 데이터는 변경하지 않았다.

@@ -6,6 +6,7 @@ from disclosure_db.freeform_retrieval import AnalysisRetrieval, SlotRetrieval
 from disclosure_db.hcx_function_calling import (
     HcxFunctionCallingService,
     HcxAnswerClaim,
+    HcxFunctionCallingError,
     HcxGeneratedAnswer,
 )
 
@@ -289,6 +290,15 @@ class JudgmentClient:
         raise AssertionError("bounded analysis must use the constrained conclusion contract")
 
 
+class FailingJudgmentClient(JudgmentClient):
+    def generate_answer(self, question, tool_call, tool_response):
+        self.generation_calls.append((question, tool_call, tool_response))
+        raise HcxFunctionCallingError(
+            "hcx_request_failed",
+            stage="final_generation_request",
+        )
+
+
 def _public_service(
     retrieval: AnalysisRetrieval,
     *,
@@ -352,6 +362,28 @@ def test_public_hcx_missing_mandatory_slot_abstains_without_provider_generation(
     assert result.tool_response["data"]["conclusion"] == "insufficient_evidence"
     assert client.selection_calls == []
     assert client.generation_calls == []
+
+
+def test_public_hcx_provider_failure_preserves_bounded_evidence_and_abstains() -> None:
+    service, _source, _registry, client = _public_service(
+        _complete_retrieval(_evidence()),
+        client=FailingJudgmentClient(),
+    )
+
+    result = service.answer("삼성전자 공시의 사업위험을 분석해줘")
+
+    assert result.status == "abstained"
+    assert result.answer_allowed is False
+    assert result.recommended_action == "abstain"
+    assert result.tool_name == "build_summary_context"
+    assert result.tool_response["data"]["execution_mode"] == "bounded_analysis"
+    assert result.citation_ids == ["ev-risk"]
+    assert result.citations[0]["rcept_no"] == "20240301000001"
+    assert "hcx_final_generation_failed" in result.warnings
+    assert "provider_failure_analysis_abstention" in result.warnings
+    assert result.metadata["error_stage"] == "final_generation_request"
+    assert result.metadata["final_generation_called"] is True
+    assert len(client.generation_calls) == 1
 
 
 def test_public_hcx_refuses_recommendations_and_forecasts_before_retrieval_or_provider() -> None:

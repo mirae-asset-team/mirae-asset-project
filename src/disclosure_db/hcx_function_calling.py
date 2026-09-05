@@ -2499,6 +2499,24 @@ class HcxFunctionCallingService:
             common["metadata"].update(  # type: ignore[union-attr]
                 self._record_failure(failure_stage, exc, tool_name=tool_call.name)
             )
+            if isinstance(exc, HcxFunctionCallingError) and analysis_execution is not None:
+                citations = list(available_citations.values())
+                common["recommended_action"] = "abstain"
+                common["metadata"]["limitations"] = [  # type: ignore[index]
+                    "historical_disclosure_only",
+                    "provider_failure_analysis_abstention",
+                ]
+                return self._result(
+                    "abstained",
+                    "공시 근거는 확인했지만 설명 생성에 실패해 판단을 보류합니다.",
+                    citation_ids=[item.evidence_id for item in citations],
+                    citations=[item.to_dict() for item in citations],
+                    warnings=[
+                        "hcx_final_generation_failed",
+                        "provider_failure_analysis_abstention",
+                    ],
+                    **common,
+                )
             if (
                 isinstance(exc, HcxFunctionCallingError)
                 and analysis_execution is None
