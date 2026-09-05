@@ -69,12 +69,14 @@ manifest는 base·overlay·search index SHA-256을 모두 기록하고, 생성 �
 
 - `freeform_gold_v2.agent_audited.jsonl`은 슬롯별 대체 근거 집합과 `minimum_hits`를 보존하는
   schema `2.0.0`의 120건 재현 Gold다. V1 exact-target 산출물은 legacy 회귀로 그대로 유지한다.
-- `freeform_gold_v2_manifest.json`은 19개 source record, 378개 required hit, 2,682개 대체 evidence
-  occurrence와 base/overlay/search identity를 기록한다.
+- `freeform_gold_v2_manifest.json`은 19개 source record·7개 issuer, 402개 required hit, 2,574개
+  대체 evidence occurrence와 base/overlay/search identity를 기록한다. product filter와 같은 규칙으로
+  자동 생성된 공개 개발셋이므로 `release_eligible=false`다.
 - `freeform_retrieval_v2_summary.json`은 Recall@20 `1.0`, 필수 슬롯 완전성 `1.0`, wrong issuer/version
-  `0`, p95 `103.0709ms`의 read-only 실측 결과다.
-- `embedding_v2_decision.json`은 Sparse gate 충족으로 `DEFERRED_NO_EVIDENCE`다. hidden Gold에서
-  Sparse 대비 5%p 이상 개선을 입증하기 전에는 Dense를 운영 필수 경로로 승격하지 않는다.
+  `0`, p95 `97.3764ms`의 read-only 개발 실측 결과다. 출시에는 별도 `independent_hidden` 평가가 필요하다.
+- `embedding_v2_decision.json`은 독립 Gold 부재로 `BLOCKED_INDEPENDENT_GOLD`다. hidden Gold에서
+  Sparse 대비 5%p 이상 개선을 입증하기 전에는 Dense를 운영 필수 경로로 승격하거나 불필요하다고
+  결론내리지 않는다.
 
 세부 설계·오염 제거 근거와 재현 명령은
 `docs/operations/2026-09-05-freeform-gold-v2.md`에 기록한다.

@@ -318,7 +318,19 @@ def test_structured_slot_forwards_its_filing_date_to_the_audited_route() -> None
     plan = _structured_plan(correction_policy="current", as_of="2024-06-30", filing_date="2024-05-15")
     evidence = _ref("ev-dated")
     service = EvidenceService(Path("base.sqlite"))
-    service.search = Mock(return_value=EvidenceBundle(question="route", evidence=[evidence], answerable=True))
+    service.search = Mock(return_value=EvidenceBundle(
+        question="route",
+        evidence=[evidence],
+        financial_facts=[{
+            "financial_fact_id": "ff-dated",
+            "account_id": "revenue",
+            "period_start": "2024-01-01",
+            "period_end": "2024-12-31",
+            "instant_date": None,
+            "evidence_ids": [evidence.evidence_id],
+        }],
+        answerable=True,
+    ))
 
     result = service.search_analysis(plan)
 
@@ -554,6 +566,46 @@ def test_financial_slot_requires_minimum_periods_for_every_declared_account() ->
     assert result.complete is False
     assert result.slots[0].complete is False
     assert result.reason_codes == ("required_slot_missing:income_trend",)
+
+
+def test_one_period_financial_slot_requires_every_declared_structured_account() -> None:
+    slot = EvidenceSlot(
+        "reported_outcomes", "financial", issuer="삼성전자",
+        search_concepts=("매출액", "영업이익", "당기순이익"), min_periods=1,
+        min_evidence=1, max_evidence=4,
+    )
+    plan = AnalysisPlan(
+        question="삼성전자 경영진 설명과 실적 분석", analysis_mode="judgment",
+        policy=PolicyDecision("allow_analysis"),
+        base_plan=QueryPlanSnapshot("삼성전자 경영진 설명과 실적 분석", company="삼성전자"),
+        required_evidence_slots=(slot,), max_evidence=4,
+    )
+    service = EvidenceService(Path("base.sqlite"))
+
+    def audited_search(query, *, limit):
+        if str(query.account_id) != "revenue":
+            return EvidenceBundle(question=query.question, answerable=False)
+        evidence = [_ref("revenue-2025")]
+        return EvidenceBundle(
+            question=query.question,
+            evidence=evidence,
+            financial_facts=({
+                "financial_fact_id": "ff-revenue",
+                "account_id": "revenue",
+                "period_start": "2025-01-01",
+                "period_end": "2025-12-31",
+                "instant_date": None,
+                "evidence_ids": ["revenue-2025"],
+            },),
+            answerable=True,
+        )
+
+    service.search = Mock(side_effect=audited_search)
+    result = service.search_analysis(plan)
+
+    assert result.complete is False
+    assert result.slots[0].complete is False
+    assert result.reason_codes == ("required_slot_missing:reported_outcomes",)
 
 
 def test_structured_financial_slots_do_not_inherit_cross_slot_statement_type() -> None:

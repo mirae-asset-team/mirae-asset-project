@@ -1077,5 +1077,20 @@
 
 - 실제 D 드라이브 base/overlay/search를 read-only로 열어 `evaluate_financial_release.py`를 다시 실행했다. 76개 검색 대상, 1,191개 검증 fact에서 856/856 회귀가 통과했고 삼성전자 최신 매출, 124개 정정, 83개 금융업 매출 별칭, 불완전 모집단 집계 거절을 확인했다. 허위 숫자와 근거 없는 검증 답변은 각 0건이다.
 - 20개 동시 구조화 요청은 오류 0건, p95 `125.713ms`로 SQLite 유지 gate를 통과했다. base/overlay/search SHA-256은 각각 `b8fb3b...6563`, `a4491f...b55`, `e223a1...8793`이며 입력 파일은 변경하지 않았다.
-- 최신 재무 보고서와 Gold V2 검색 보고서를 통합 release gate에 넣자 과거 stale financial 및 검색 Recall 차단은 사라졌다. 최종 판정은 31개 사유의 `BLOCKED_HARD_GATE`다. 남은 사유는 private holdout을 포함한 실제 Judge 결과·provider/보안/latency 관측, deployment timestamp, trusted commit/image 및 base/overlay/search identity다.
+- 최신 재무 보고서와 당시 Gold V2 검색 보고서를 통합 release gate에 넣자 stale financial 차단은 사라졌고 1차 판정은 31개 사유의 `BLOCKED_HARD_GATE`였다. 후속 독립 리뷰에서 공개 자동 생성 Gold의 독립성 부족을 확인해 release 입력으로 사용하는 것을 금지했다.
 - 비공개 문항이나 외부 관측을 합성하지 않았고 임계값도 낮추지 않았다. 따라서 8001 pre-stage와 8000 승격을 실행하지 않았으며 기존 공개 8000과 rollback 자산을 그대로 유지했다.
+
+## 2026-09-05T09:56:21+09:00 / 2026-09-05T00:56:21Z — 독립 리뷰 후 검색 gate·단일기간 슬롯 보강
+
+- 독립 리뷰는 Critical 0건, Important 3건을 보고했다. V2가 V1 report schema를 재사용한 점, 492 query와 pre-stage의 480 exact 계약 충돌, 공개 자동 생성 Gold가 product marker와 규칙을 공유하면서 19 source record·7 issuer만 포함한 점, `min_periods=1` 재무 슬롯이 선언 계정 일부만으로 완료되던 점이다.
+- TDD RED 10건으로 세 문제를 재현했다. 최소 수정 후 focused 16건과 관련 확대 `211 passed, 94 subtests passed`가 통과했다. 모든 financial 슬롯은 선언된 structured canonical account마다 `min_periods`를 요구하며 V2 Gold 생성도 같은 규칙을 사용한다.
+- V2 report schema를 `freeform-retrieval-evaluation-v2`로 분리했다. 공개 자동 생성 산출물은 `development_public_agent_audited`, `release_eligible=false`이고 embedding 판정은 `BLOCKED_INDEPENDENT_GOLD`다. release gate와 pre-stage는 `independent_hidden`, `release_eligible=true`인 V2만 허용하며 query count는 품질 임계값이 아닌 bounded 실행량 `120..960`으로 검증한다.
+- D read-only 재생성 결과는 120 cases, 402/402 required hits, wrong issuer/version 0, p95 `97.3764ms`다. 이 수치는 개발 회귀로만 기록하고 출시 통과로 사용하지 않는다. 통합 release gate는 검색 독립성 2건과 기존 외부 항목을 합친 33개 사유로 계속 차단되며 8000은 변경하지 않았다.
+- 최종 전체 검증은 Python `964 passed, 2 skipped, 98 warnings, 264 subtests passed`, Web `13 passed`, Team QA `1 passed`, `compileall`, `git diff --check` 통과다. 경고는 기존 FastAPI/Starlette deprecation과 Team QA module type 경고다.
+
+## 2026-09-05T10:10:02+09:00 / 2026-09-05T01:10:02Z — 임베딩 채택 판정 fail-closed 보강
+
+- 독립 재리뷰에서 `decide_embedding_pilot()`의 `release_eligible` 기본값이 `true`여서, 개발용 검색 지표를 넘긴 호출자가 명시적 출시 자격 없이도 pilot 채택 판정을 받을 수 있음을 확인했다.
+- TDD RED는 자격 인자를 생략한 개발 지표가 `ELIGIBLE_PILOT`으로 판정되는 실패 1건으로 재현했다. 기본값을 `false`로 바꾸고, 파일·semantic digest와 runtime identity를 모두 검증한 Dense adoption loader만 `release_eligible=true`를 명시하도록 했다.
+- 관련 회귀는 `69 passed, 13 subtests passed`다. 공개 자동 생성 Gold와 이번 V2 산출물은 계속 `BLOCKED_INDEPENDENT_GOLD`이며 독립 hidden Gold 없이는 임베딩 채택이나 배포를 허가하지 않는다.
+- 최종 전체 회귀는 Python `965 passed, 2 skipped, 98 warnings, 264 subtests passed`, Web `13 passed`, Team QA `1 passed`, `compileall`, `git diff --check`와 산출물 스키마 검증을 통과했다. 통합 release gate는 의도대로 33개 사유의 `BLOCKED_HARD_GATE`를 반환했다.

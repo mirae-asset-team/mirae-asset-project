@@ -113,7 +113,9 @@ def _load_adopted_evaluation(
             or dense_pilot.get("runtime_identity") != dict(runtime_identity)
         ):
             return None
-        decision = decide_embedding_pilot(metrics)
+        # File and semantic digests plus runtime identity above form the local
+        # trust boundary. Every less-trusted caller fails closed by default.
+        decision = decide_embedding_pilot(metrics, release_eligible=True)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError, OverflowError):
         return None
     return decision if decision.get("status") == "ADOPTED" else None

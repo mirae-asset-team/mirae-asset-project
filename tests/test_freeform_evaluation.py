@@ -27,6 +27,7 @@ from disclosure_db.freeform_evaluation import (
     validate_case_plan,
     validate_freeform_gold,
 )
+from scripts.evaluate_freeform_retrieval import _evaluation_profile
 
 
 DIMENSIONS = (
@@ -411,8 +412,12 @@ def test_embedding_is_eligible_only_for_residual_text_misses_and_five_point_gain
         }],
     }
 
-    decision = decide_embedding_pilot(summary_with_residual_text_misses)
-    rejected = decide_embedding_pilot(summary_with_only_structured_misses)
+    decision = decide_embedding_pilot(
+        summary_with_residual_text_misses, release_eligible=True,
+    )
+    rejected = decide_embedding_pilot(
+        summary_with_only_structured_misses, release_eligible=True,
+    )
 
     assert decision["eligible"] is True
     assert decision["status"] == "ELIGIBLE_PILOT"
@@ -422,11 +427,29 @@ def test_embedding_is_eligible_only_for_residual_text_misses_and_five_point_gain
     assert rejected["reason"] == "no_residual_text_misses"
 
 
+def test_embedding_decision_fails_closed_without_explicit_release_eligibility() -> None:
+    decision = decide_embedding_pilot({
+        "target_count": 20,
+        "target_recall_at_20": 0.90,
+        "residual_misses": [{
+            "case_id": "text-miss", "route": "text",
+            "target_evidence_ids": ["target"], "selected_evidence_ids": [],
+            "exclusion_boundary": "not_retrieved_at_20",
+        }],
+        "wrong_issuer_count": 0,
+        "wrong_version_count": 0,
+    })
+
+    assert decision["eligible"] is False
+    assert decision["status"] == "BLOCKED_INDEPENDENT_GOLD"
+    assert decision["reason"] == "release_ineligible_evaluation_scope"
+
+
 def test_embedding_is_deferred_when_sparse_recall_passes_or_possible_gain_is_too_small() -> None:
     passed = decide_embedding_pilot({
         "target_count": 100, "target_recall_at_20": 0.95,
         "residual_misses": [], "wrong_issuer_count": 0, "wrong_version_count": 0,
-    })
+    }, release_eligible=True)
     too_small = decide_embedding_pilot({
         "target_count": 100, "target_recall_at_20": 0.94,
         "residual_misses": [{
@@ -434,7 +457,7 @@ def test_embedding_is_deferred_when_sparse_recall_passes_or_possible_gain_is_too
             "selected_evidence_ids": [], "exclusion_boundary": "not_retrieved_at_20",
         }],
         "wrong_issuer_count": 0, "wrong_version_count": 0,
-    })
+    }, release_eligible=True)
 
     assert passed["status"] == "DEFERRED_NO_EVIDENCE"
     assert passed["reason"] == "sparse_recall_gate_met"
@@ -465,7 +488,7 @@ def test_measured_dense_decision_uses_same_denominator_top_level_p95_and_overall
         },
     }
 
-    decision = decide_embedding_pilot(summary)
+    decision = decide_embedding_pilot(summary, release_eligible=True)
 
     assert decision["status"] == "ADOPTED"
     assert decision["measured_gain"] == pytest.approx(0.05)
@@ -474,7 +497,7 @@ def test_measured_dense_decision_uses_same_denominator_top_level_p95_and_overall
         decide_embedding_pilot({
             **summary,
             "dense_pilot": {**summary["dense_pilot"], "target_count": 10},
-        })
+        }, release_eligible=True)
 
 
 @pytest.mark.parametrize(
@@ -509,7 +532,7 @@ def test_dense_decision_rejects_non_finite_or_invalid_adoption_metrics(
     }
 
     with pytest.raises(ValueError, match=error):
-        decide_embedding_pilot(summary)
+        decide_embedding_pilot(summary, release_eligible=True)
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
@@ -777,6 +800,9 @@ def test_v2_gold_preserves_bounded_slot_relevance_sets() -> None:
     assert manifest["schema_version"] == "2.0.0"
     assert manifest["artifact"] == "freeform_gold_v2.agent_audited.jsonl"
     assert manifest["target_selection"] == "slot_relevance_sets_v2"
+    assert manifest["evaluation_scope"] == "development_public_agent_audited"
+    assert manifest["release_eligible"] is False
+    assert manifest["issuer_count"] == 1
     assert manifest["required_target_count"] == 2
     assert manifest["alternative_evidence_count"] == 4
 
@@ -933,6 +959,58 @@ def test_v2_financial_relevance_sets_require_each_account_and_latest_period() ->
             "evidence_ids": ["rev-2024"],
         },
     ]
+
+
+def test_v2_one_period_financial_relevance_sets_require_each_declared_account() -> None:
+    candidates = [
+        {
+            "evidence_id": "rev-2025", "filing_id": "filing-2025",
+            "financial_points": [{"account_id": "revenue", "period": ("2025-01-01", "2025-12-31", None)}],
+        },
+        {
+            "evidence_id": "op-2025", "filing_id": "filing-2025",
+            "financial_points": [{"account_id": "operating_income", "period": ("2025-01-01", "2025-12-31", None)}],
+        },
+    ]
+
+    selected, relevance_sets = select_financial_period_relevance_sets(
+        candidates,
+        slot_id="reported_outcomes",
+        expected_account_ids=("revenue", "operating_income", "net_income"),
+        minimum_periods=1,
+    )
+
+    assert selected == []
+    assert relevance_sets == []
+
+
+def test_embedding_decision_refuses_release_ineligible_development_gold() -> None:
+    decision = decide_embedding_pilot(
+        {
+            "target_count": 3,
+            "target_hits_at_20": 3,
+            "target_recall_at_20": 1.0,
+            "wrong_issuer_count": 0,
+            "wrong_version_count": 0,
+            "residual_misses": [],
+        },
+        release_eligible=False,
+    )
+
+    assert decision["eligible"] is False
+    assert decision["status"] == "BLOCKED_INDEPENDENT_GOLD"
+    assert decision["reason"] == "release_ineligible_evaluation_scope"
+
+
+def test_retrieval_v2_profile_is_explicitly_development_only() -> None:
+    profile = _evaluation_profile([{"schema_version": "2.0.0"}])
+
+    assert profile == {
+        "schema_version": "freeform-retrieval-evaluation-v2",
+        "gold_schema_version": "2.0.0",
+        "evaluation_scope": "development_public_agent_audited",
+        "release_eligible": False,
+    }
 
 
 def test_gold_rejects_untrusted_serving_path_before_case_generation() -> None:

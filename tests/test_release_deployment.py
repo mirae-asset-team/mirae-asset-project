@@ -144,7 +144,9 @@ def passing_financial_report() -> dict[str, object]:
 def passing_retrieval_report() -> dict[str, object]:
     timestamp = datetime.now(UTC).isoformat().replace("+00:00", "Z")
     return {
-        "schema_version": "1.0.0",
+        "schema_version": "freeform-retrieval-evaluation-v2",
+        "evaluation_scope": "independent_hidden",
+        "release_eligible": True,
         "status": "ok",
         "generated_at": timestamp,
         "database_sha256": BASE_SHA256,
@@ -152,7 +154,7 @@ def passing_retrieval_report() -> dict[str, object]:
         "search_index_sha256": SEARCH_SHA256,
         "metrics": {
             "case_count": 120,
-            "query_count": 480,
+            "query_count": 492,
             "target_recall_at_20": 0.95,
             "wrong_issuer_count": 0,
             "wrong_version_count": 0,
@@ -777,6 +779,32 @@ class ReleaseDeploymentAssetTests(unittest.TestCase):
         self.assertEqual(pre_stage["stage_state"], "READY_FOR_STAGING")
         self.assertIs(pre_stage["final_release_passed"], False)
         self.assertFalse(final_gate_exists)
+
+    def test_staging_rejects_release_ineligible_retrieval_before_external_commands(self):
+        hosts = powershell_hosts()
+        if not hosts:
+            self.skipTest("PowerShell is required for deployment execution tests")
+        ignored_root = ROOT / "eval" / "judge_stress_v2"
+        ignored_root.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryDirectory() as temporary_directory, tempfile.TemporaryDirectory(
+            dir=ignored_root
+        ) as private_directory:
+            private_holdout = Path(private_directory) / "holdout.jsonl"
+            private_holdout.write_text("{}\n" * 120, encoding="utf-8")
+            retrieval = passing_retrieval_report()
+            retrieval["release_eligible"] = False
+            completed, calls = run_staging_script(
+                hosts[0],
+                passing_financial_report(),
+                retrieval,
+                Path(temporary_directory),
+                private_holdout,
+            )
+
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("release-eligible", completed.stdout + completed.stderr)
+        self.assertEqual(calls, [])
 
     def test_untracked_src_and_config_files_cannot_enter_staging_build_context(self):
         hosts = powershell_hosts()

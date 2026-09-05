@@ -643,7 +643,7 @@ class EvidenceService:
             final_financial_facts = self._facts_with_final_evidence(financial_facts, final_slot_ids)
             final_event_facts = self._facts_with_final_evidence(event_facts, final_slot_ids)
             period_complete = True
-            if slot.domain == "financial" and slot.min_periods > 1:
+            if slot.domain == "financial":
                 periods_by_account: dict[str, set[tuple[object, object, object]]] = {}
                 for fact in final_financial_facts:
                     account_id = str(fact.get("account_id") or "")

@@ -833,7 +833,7 @@ def derive_freeform_source_records(
                         candidates = candidates_by_slot[slot.slot_id]
                         selected_items: list[dict[str, object]] = []
                         relevance_sets: list[dict[str, object]] = []
-                        if slot.domain == "financial" and slot.min_periods > 1:
+                        if slot.domain == "financial":
                             expected_accounts: list[str] = []
                             for concept in slot.search_concepts:
                                 resolution = resolve_financial_account(
@@ -1148,6 +1148,11 @@ def build_freeform_manifest(
         "content_sha256": canonical_sha256(rows),
     }
     if relevance_mode:
+        manifest["evaluation_scope"] = "development_public_agent_audited"
+        manifest["release_eligible"] = False
+        manifest["issuer_count"] = len({
+            str(row.get("issuer_corp_code")) for row in rows if row.get("issuer_corp_code")
+        })
         manifest["required_target_count"] = sum(
             int(relevance_set["minimum_hits"])
             for row in rows
@@ -1352,6 +1357,7 @@ def decide_embedding_pilot(
     *,
     minimum_recall: float = 0.95,
     minimum_gain: float = 0.05,
+    release_eligible: bool = False,
 ) -> dict[str, object]:
     """Apply the measured residual-text gate without invoking a model."""
 
@@ -1373,6 +1379,13 @@ def decide_embedding_pilot(
         "sparse_recall_at_20": sparse_recall,
         "target_count": target_count,
     }
+    if release_eligible is not True:
+        return {
+            **base,
+            "eligible": False,
+            "status": "BLOCKED_INDEPENDENT_GOLD",
+            "reason": "release_ineligible_evaluation_scope",
+        }
     safety_failures = int(summary.get("wrong_issuer_count", 0)) + int(summary.get("wrong_version_count", 0))
     if safety_failures:
         return {**base, "eligible": False, "status": "BLOCKED_SAFETY", "reason": "sparse_safety_failure"}

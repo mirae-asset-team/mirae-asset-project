@@ -129,7 +129,9 @@ function Assert-FinancialPreStage([object]$Report, [hashtable]$Expected) {
 }
 
 function Assert-RetrievalPreStage([object]$Report, [hashtable]$Expected) {
-    if ($Report.schema_version -isnot [string] -or $Report.schema_version -cne "1.0.0") { throw "Unsupported retrieval pre-stage schema." }
+    if ($Report.schema_version -isnot [string] -or $Report.schema_version -cne "freeform-retrieval-evaluation-v2") { throw "Unsupported retrieval pre-stage schema." }
+    if ($Report.evaluation_scope -isnot [string] -or $Report.evaluation_scope -cne "independent_hidden") { throw "Retrieval evaluation scope is not independent hidden." }
+    if ($Report.release_eligible -isnot [bool] -or $Report.release_eligible -ne $true) { throw "Retrieval report is not release-eligible." }
     if ($Report.status -isnot [string] -or $Report.status -cne "ok") { throw "Retrieval status is not ok." }
     Assert-FreshTimestamp $Report.generated_at "retrieval.generated_at"
     $retrievalIdentity = [PSCustomObject]@{
@@ -139,7 +141,8 @@ function Assert-RetrievalPreStage([object]$Report, [hashtable]$Expected) {
     }
     Assert-DataIdentity $retrievalIdentity $Expected "retrieval"
     Assert-ExactNumber $Report.metrics "case_count" 120 "retrieval.metrics"
-    Assert-ExactNumber $Report.metrics "query_count" 480 "retrieval.metrics"
+    $queryCount = ConvertTo-FiniteNumber $Report.metrics.query_count "retrieval.metrics.query_count"
+    if ($queryCount -ne [math]::Floor($queryCount) -or $queryCount -lt 120 -or $queryCount -gt 960) { throw "Retrieval query_count must be an integer between 120 and 960." }
     foreach ($name in @("wrong_issuer_count", "wrong_version_count", "hard_failure_count")) { Assert-ExactNumber $Report.metrics $name 0 "retrieval.metrics" }
     $recall = ConvertTo-FiniteNumber $Report.metrics.target_recall_at_20 "retrieval.metrics.target_recall_at_20"
     if ($recall -lt 0.95 -or $recall -gt 1) { throw "Retrieval Recall@20 is below the release threshold." }

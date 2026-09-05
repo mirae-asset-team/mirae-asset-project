@@ -92,6 +92,20 @@ def _structured_evidence_ids(overlay: Path, evidence_ids: set[str]) -> set[str]:
         connection.close()
 
 
+def _evaluation_profile(rows: list[dict[str, object]]) -> dict[str, object]:
+    gold_schema_versions = {str(row.get("schema_version", "1.0.0")) for row in rows}
+    if len(gold_schema_versions) != 1:
+        raise ValueError("mixed_gold_schema_versions")
+    gold_schema_version = next(iter(gold_schema_versions))
+    relevance_mode = gold_schema_version == "2.0.0"
+    return {
+        "schema_version": "freeform-retrieval-evaluation-v2" if relevance_mode else "1.0.0",
+        "gold_schema_version": gold_schema_version,
+        "evaluation_scope": "development_public_agent_audited",
+        "release_eligible": False,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", type=Path, required=True)
@@ -198,8 +212,9 @@ def main(argv: list[str] | None = None) -> int:
         scores.append(score)
 
     metrics = aggregate_freeform_scores(scores)
+    profile = _evaluation_profile(rows)
     summary: dict[str, object] = {
-        "schema_version": "1.0.0",
+        **profile,
         "status": "ok",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "database_sha256": attestation.sha256,
@@ -213,7 +228,9 @@ def main(argv: list[str] | None = None) -> int:
         "latency_samples_ms": latency_samples,
     }
     summary["semantic_sha256"] = semantic_summary_sha256(summary)
-    decision = decide_embedding_pilot(metrics)
+    decision = decide_embedding_pilot(
+        metrics, release_eligible=bool(profile["release_eligible"])
+    )
     decision["summary_semantic_sha256"] = summary["semantic_sha256"]
     _write_json(args.summary, summary)
     _write_json(args.embedding_decision, decision)

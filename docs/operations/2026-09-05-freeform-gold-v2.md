@@ -22,25 +22,27 @@ Legacy V1은 폭넓은 질문의 정답을 evidence ID 하나씩 모두 맞혀�
   설명 정답으로 오인된 것을 확인했다. V2 marker를 강한 문구로 한정하고, 경영 설명 검색을
   `사업의 내용/사업경쟁력/주력 사업/경영 효율성` 공시 문맥으로 정렬했다.
 
-## 최종 결과
+## 개발 평가 결과와 독립성 한계
 
-- 실행 시각: `2026-09-05T09:29:51+09:00` / `2026-09-05T00:29:51Z`
-- 사례/요구 적중: 120 cases / 378 required hits
-- Recall@20: `378/378 = 1.0`
-- Recall@5: `240/378 = 0.6349206349`
+- 실행 시각: `2026-09-05T09:56:21+09:00` / `2026-09-05T00:56:21Z`
+- 사례/요구 적중: 120 cases / 402 required hits
+- Recall@20: `402/402 = 1.0`
+- Recall@5: `246/402 = 0.6119402985`
 - 필수 슬롯 완전성: `1.0`
 - wrong issuer / wrong version / hard failure: `0 / 0 / 0`
-- 지연: p50 `61.9949ms`, p95 `103.0709ms`
-- Gold canonical SHA-256: `2b020d6924c1c735732d6abf8913836fd13e09f8487a3896343f5affa1e78de5`
-- summary semantic SHA-256: `561b5a45b0a9cffc3e6304010cb8d5642f8aba300903181348b8b3283bd302b3`
+- 지연: p50 `62.0983ms`, p95 `97.3764ms`
+- Gold canonical SHA-256: `26687e76ca771eb65763e548e92d52b3cb5f734f8a8cae53d9fcaea7fef7c71a`
+- summary semantic SHA-256: `468a647a23f3718a900f178c96bddc139235ca33008f1dbc8caef0ff34c7d60f`
 - base / overlay / search SHA-256:
   `b8fb3be8...6563` / `a4491f20...b55` / `e223a19f...8793`
-- 관련 회귀: `127 passed`; 전체 Python: `954 passed, 2 skipped, 264 subtests passed`; Team QA:
-  `1 passed`; `compileall`과 `git diff --check` 통과
+- 관련 회귀: `212 passed, 94 subtests passed`; 전체 Python: `964 passed, 2 skipped, 264 subtests passed`;
+  Web `13 passed`; Team QA `1 passed`; `compileall`과 `git diff --check` 통과
 
-`embedding_v2_decision.json`은 Sparse Recall gate가 이미 충족됐으므로
-`DEFERRED_NO_EVIDENCE`다. 이는 Dense가 영구 불필요하다는 뜻이 아니라, 독립 hidden Gold에서 5%p
-이상 개선을 입증하기 전 운영 의존성으로 채택하지 않는다는 뜻이다.
+이 V2는 production filter와 같은 marker 규칙으로 자동 생성됐고 19개 source record·7개 issuer만
+포함한다. 따라서 manifest와 report에 `evaluation_scope=development_public_agent_audited`,
+`release_eligible=false`를 기록한다. `embedding_v2_decision.json`은
+`BLOCKED_INDEPENDENT_GOLD`이며, 독립 hidden Gold가 생기기 전에는 Sparse 통과나 embedding 불필요를
+주장하지 않는다.
 
 ## 재현
 
@@ -68,5 +70,6 @@ python scripts/evaluate_freeform_retrieval.py `
 ```
 
 세 D 드라이브 입력은 `mode=ro&immutable=1`과 기존 attestation으로 열며 생성·평가 과정에서 수정하지
-않는다. 이 120건 공개 재현 평가는 전체 출시 gate의 일부다. private holdout, provider, 보안, 동일 이미지
-staging 결과를 대체하지 않는다.
+않는다. 이 120건은 개발 회귀일 뿐 출시 승인 입력이 아니다. release gate는 별도
+`independent_hidden` V2 report만 허용하며 private holdout, provider, 보안, 동일 이미지 staging 결과도
+각각 필요하다.
