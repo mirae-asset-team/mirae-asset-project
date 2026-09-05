@@ -8,6 +8,8 @@
 
 ## 현재 개발 상태와 인수인계
 
+> **2026-09-05 18:10 KST 최신 인수인계:** exact candidate `0f2fb7a` / `sha256:0dfbb950...`는 NCP 8001에서 healthy이지만, 실제 600문항 Judge Stress V2 평가는 사용자 요청으로 `2,644/5,328` 요청에서 중단됐다. 최종 staging artifact와 통합 release PASS가 없으므로 운영 8000은 기존 image 그대로다. 다음 담당자는 [staging → 8000 인수인계](docs/handoffs/2026-09-05-judge-v2-production-handoff.md)의 hash·재실행·rollback 절차를 그대로 따른다.
+
 > **2026-09-05 독립 hidden 검색 gate 통과:** Git에서 무시되는 private evaluator 입력 120건을 제품 출력이 아닌 read-only 공시 evidence ledger에서 직접 표기했다. 19개 기업·98개 공시·7개 판단 차원, 373개 필수 근거에서 Sparse Recall@20은 `357/373 = 95.71%`, wrong issuer/version과 hard failure는 각 `0`, p95는 `1.42초`다. 보고서는 질문 원문 없이 입력 hash·provenance·case별 근거 ID와 집계만 추적하며 `agent_audited`이지 `human_verified`가 아니다. 독립 Sparse gate가 95%를 넘었으므로 Dense/embedding은 `DEFERRED_NO_EVIDENCE`다. 이는 검색 gate만 통과한 결과이며, 실제 600건 staging Judge/provider와 동일-image 배포 gate를 통과하기 전까지 운영 8000은 교체하지 않는다. 상세 근거는 [독립 hidden 검색 평가 기록](docs/operations/2026-09-05-independent-hidden-retrieval.md)에 있다.
 
 > **2026-09-05 결정론적 수익성 분석 보완:** 실제 NCP 8001에서 삼성전자 2개년 수익성 분석은 근거 6건 조회 후 HCX-005 최종 생성이 20초 timeout이었다. 단일 재무값은 7.2초였지만 비교 질문도 17.6초여서 provider p95 10초 gate를 만족하지 못했다. 이제 검증된 최근 두 회계연도의 매출액 대비 영업이익·당기순이익률 방향이 모두 확정되는 `profitability` 질문은 SQLite fact로 `개선/악화/혼재/안정`을 결정론적으로 판정하고, 동일 근거의 claim verification을 통과한 문장을 HCX 호출 없이 반환한다. 사업위험 등 정형 계산할 수 없는 판단은 기존 HCX/안전 보류 경로를 유지한다. release identity 보완까지 포함한 로컬 회귀는 Python `970 passed, 2 skipped, 266 subtests`, Web `13/13`, release/staging `168 passed, 94 subtests`다. 서버에는 독립 private holdout 120건과 독립 hidden 검색 Gold가 없으므로 8000 승격 hard gate는 계속 차단한다.
