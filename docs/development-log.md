@@ -1127,3 +1127,10 @@
 - TDD RED: `profitability`의 두 기간 매출·영업이익·순이익 fact가 모두 있어도 `conclusion=None`이고 provider timeout 시 `abstained`가 되는 두 회귀를 추가해 `2 failed, 12 passed`를 확인했다.
 - 최소 구현: validated finite Decimal fact를 period/account로 유일하게 묶고 최근 두 회계연도의 영업이익률과 순이익률 방향을 비교한다. 두 방향이 모두 상승/하락/동일이면 `improved/deteriorated/stable`, 엇갈리면 `mixed`, 중복·0 매출·필수값 부족은 결정론적 결론을 만들지 않는다. 결론이 완전한 `profitability`만 provider를 호출하지 않고 모든 admitted fact/evidence slot을 가진 claim으로 재검증해 답한다. 다른 판단 차원은 기존 경로를 유지한다.
 - 검증: focused `14 passed`; 확대 HCX/analysis/retrieval `165 passed, 6 subtests`; 전체 Python `969 passed, 2 skipped, 98 warnings, 264 subtests` (`78.25s`); Web `13/13`; release/staging `168 passed, 94 subtests`; `compileall`과 `git diff --check` 통과. 공식 private 600건·독립 hidden 검색 Gold가 없어 production 8000 승격은 계속 `BLOCKED_HARD_GATE`다.
+
+## 2026-09-05 — official staging release identity 전달 복구
+
+- 배포 경로 재검토 중 `deploy_staging.ps1`가 commit·image·base·overlay·search 다섯 값을 `/health.identity`와 정확히 대조하지만, Compose는 `RELEASE_COMMIT`만 전달하고 API는 identity를 생성하지 않는 계약 단절을 확인했다. 실제 진단 8001의 identity가 `null`이었던 원인이다.
+- TDD RED는 완전한 유효 환경에서도 `/health.identity`가 없고 release Compose/스크립트에도 네 신뢰값이 없는 현상을 `2 failed`로 고정했다. 최소 구현은 다섯 외부 신뢰 앵커를 Compose에 추가하고 staging·promotion 스크립트가 전달하도록 했으며, API가 전부 유효한 경우에만 소문자 정규화된 정확한 다섯 필드를 노출한다. 일부 누락·형식 오류는 identity 전체를 생략하므로 공식 gate가 계속 fail-close한다.
+- 이 identity는 공개 가능한 commit·image/DB digest만 포함하며 credential·환경의 다른 값은 노출하지 않는다. `.env`, API key, PEM, NCP 보안 설정과 read-only 데이터는 읽거나 변경하지 않았다. RED 후 focused 결과는 `2 passed, 2 subtests`다.
+- 최종 회귀: 전체 Python `970 passed, 2 skipped, 104 warnings, 266 subtests` (`76.79s`), Web `13/13`, release/staging `168 passed, 94 subtests` (`55.24s`), `compileall`과 `git diff --check`를 통과했다.

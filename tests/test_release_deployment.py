@@ -973,6 +973,7 @@ class ReleaseDeploymentAssetTests(unittest.TestCase):
     def test_staging_uses_actual_health_identity_and_rechecks_it_remotely(self):
         script = read("scripts/deploy_staging.ps1")
         source = extract_staging_evaluator_source()
+        compose = read("compose.release.yaml")
 
         self.assertIn("validate_health_identity(health, identity)", source)
         self.assertIn("validate_health_identity(post_health, identity)", source)
@@ -981,6 +982,23 @@ class ReleaseDeploymentAssetTests(unittest.TestCase):
         self.assertIn('"health_identity_sha256": health_identity_sha256', source)
         self.assertIn("expected_health_identity_sha256", script)
         self.assertIn("post-evaluation staging identity verification", script)
+        for name in (
+            "RELEASE_IMAGE_ID",
+            "RELEASE_BASE_SHA256",
+            "RELEASE_OVERLAY_SHA256",
+            "RELEASE_SEARCH_INDEX_SHA256",
+        ):
+            self.assertIn(name, compose)
+        self.assertIn('DISCLOSURE_EXPECTED_IMAGE_ID="$expected_image"', script)
+        self.assertIn('DISCLOSURE_EXPECTED_BASE_SHA256="$expected_base"', script)
+        self.assertIn('DISCLOSURE_EXPECTED_OVERLAY_SHA256="$expected_overlay"', script)
+        self.assertIn('DISCLOSURE_EXPECTED_SEARCH_INDEX_SHA256="$expected_search"', script)
+
+        release_script = read("scripts/deploy_release.ps1")
+        self.assertIn('DISCLOSURE_EXPECTED_IMAGE_ID="$expected_image"', release_script)
+        self.assertIn('DISCLOSURE_EXPECTED_BASE_SHA256="$expected_base"', release_script)
+        self.assertIn('DISCLOSURE_EXPECTED_OVERLAY_SHA256="$expected_overlay"', release_script)
+        self.assertIn('DISCLOSURE_EXPECTED_SEARCH_INDEX_SHA256="$expected_search"', release_script)
 
     def test_staging_runs_final_gate_only_after_8001_evaluation(self):
         script = read("scripts/deploy_staging.ps1")

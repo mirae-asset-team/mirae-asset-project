@@ -8,7 +8,9 @@
 
 ## 현재 개발 상태와 인수인계
 
-> **2026-09-05 결정론적 수익성 분석 보완:** 실제 NCP 8001에서 삼성전자 2개년 수익성 분석은 근거 6건 조회 후 HCX-005 최종 생성이 20초 timeout이었다. 단일 재무값은 7.2초였지만 비교 질문도 17.6초여서 provider p95 10초 gate를 만족하지 못했다. 이제 검증된 최근 두 회계연도의 매출액 대비 영업이익·당기순이익률 방향이 모두 확정되는 `profitability` 질문은 SQLite fact로 `개선/악화/혼재/안정`을 결정론적으로 판정하고, 동일 근거의 claim verification을 통과한 문장을 HCX 호출 없이 반환한다. 사업위험 등 정형 계산할 수 없는 판단은 기존 HCX/안전 보류 경로를 유지한다. 로컬 회귀는 Python `969 passed, 2 skipped, 264 subtests`, Web `13/13`, release/staging `168 passed, 94 subtests`다. 서버에는 독립 private holdout 120건과 독립 hidden 검색 Gold가 없으므로 8000 승격 hard gate는 계속 차단한다.
+> **2026-09-05 결정론적 수익성 분석 보완:** 실제 NCP 8001에서 삼성전자 2개년 수익성 분석은 근거 6건 조회 후 HCX-005 최종 생성이 20초 timeout이었다. 단일 재무값은 7.2초였지만 비교 질문도 17.6초여서 provider p95 10초 gate를 만족하지 못했다. 이제 검증된 최근 두 회계연도의 매출액 대비 영업이익·당기순이익률 방향이 모두 확정되는 `profitability` 질문은 SQLite fact로 `개선/악화/혼재/안정`을 결정론적으로 판정하고, 동일 근거의 claim verification을 통과한 문장을 HCX 호출 없이 반환한다. 사업위험 등 정형 계산할 수 없는 판단은 기존 HCX/안전 보류 경로를 유지한다. release identity 보완까지 포함한 로컬 회귀는 Python `970 passed, 2 skipped, 266 subtests`, Web `13/13`, release/staging `168 passed, 94 subtests`다. 서버에는 독립 private holdout 120건과 독립 hidden 검색 Gold가 없으므로 8000 승격 hard gate는 계속 차단한다.
+
+> **2026-09-05 release identity 보완:** 공식 staging 스크립트가 요구하는 commit·image·base·overlay·search 신뢰값을 Compose가 runtime에 전달하지 않았고 `/health`도 노출하지 않아, 평가 입력이 준비돼도 exact-image 검증이 불가능한 결함을 TDD로 수정했다. 다섯 값이 모두 형식에 맞을 때만 `/health.identity`에 고정된 allowlist로 노출하고 일부 누락·형식 오류는 identity 전체를 생략한다. 이는 credential을 노출하지 않으며 production 승격 기준을 낮추지 않는다.
 
 > **2026-09-05 NCP 진단 staging:** 브랜치 `perf/search-index-validation-v2`의 `16b811e`를 image `sha256:0d5b8cb4aa882e053e8ff8d756f2464e17a2274df3e9823a148a83bb3ffd23a8`로 한 번 build해 NCP 8001에만 올렸다. base·overlay·search·attestation은 모두 read-only이고 health는 ready, 76개 기업, provider/function calling configured다. 삼성전자 최신 매출은 검증된 2025 연결 수치로 답했고, 설치형 config 경로 오류를 수정했다. 다중근거 분석의 HCX 생성은 20초 timeout이 재현되어 이제 근거 citation을 보존한 채 안전하게 보류하지만 provider p95 gate는 실패 상태다. 외부에서 8001은 timeout이고 공개 8000은 HTTP 200인 기존 image 그대로다. 이 진단 배포는 private holdout·독립 hidden·trusted identity를 갖춘 공식 pre-stage/PASS가 아니므로 8000 승격 근거로 사용하지 않는다.
 

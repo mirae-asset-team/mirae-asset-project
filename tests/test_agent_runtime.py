@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import tempfile
 import unittest
 from decimal import Decimal
@@ -424,6 +425,52 @@ class AgentRuntimeTests(unittest.TestCase):
             body = TestClient(create_app(agent)).get("/health").json()
         self.assertTrue(body["provider_configured"])
         self.assertNotIn("secret", json.dumps(body))
+
+    def test_health_exposes_only_complete_valid_release_identity(self):
+        from fastapi.testclient import TestClient
+
+        class ReadyService:
+            base_database = Path("unused.sqlite")
+            overlay_database = None
+            search_database = None
+            attestation = None
+            corpus_revision = "test-revision"
+
+            def company_candidates(self):
+                return []
+
+        class FakeAgent:
+            evidence_service = ReadyService()
+            provider_configured = False
+
+        identity = {
+            "RELEASE_COMMIT": "a" * 40,
+            "RELEASE_IMAGE_ID": "sha256:" + "b" * 64,
+            "RELEASE_BASE_SHA256": "c" * 64,
+            "RELEASE_OVERLAY_SHA256": "d" * 64,
+            "RELEASE_SEARCH_INDEX_SHA256": "e" * 64,
+        }
+        with patch.dict(os.environ, identity, clear=True):
+            body = TestClient(create_app(FakeAgent())).get("/health").json()
+
+        self.assertEqual(body["identity"], {
+            "commit": identity["RELEASE_COMMIT"],
+            "image_id": identity["RELEASE_IMAGE_ID"],
+            "base_sha256": identity["RELEASE_BASE_SHA256"],
+            "overlay_sha256": identity["RELEASE_OVERLAY_SHA256"],
+            "search_index_sha256": identity["RELEASE_SEARCH_INDEX_SHA256"],
+        })
+
+        invalid = [
+            {key: value for key, value in identity.items() if key != "RELEASE_COMMIT"},
+            {**identity, "RELEASE_IMAGE_ID": "not-an-image-id"},
+        ]
+        for environment in invalid:
+            with self.subTest(environment=environment), patch.dict(
+                os.environ, environment, clear=True
+            ):
+                invalid_body = TestClient(create_app(FakeAgent())).get("/health").json()
+            self.assertNotIn("identity", invalid_body)
 
     def test_health_reuses_startup_runtime_validation(self):
         from fastapi.testclient import TestClient

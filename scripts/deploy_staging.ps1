@@ -300,6 +300,10 @@ test "$(sha256sum /srv/mirae/data/agent/agent_search.sqlite | awk '{print $1}')"
 docker load --input candidate-image.tar >/dev/null
 test "$(docker image inspect --format '{{.Id}}' "$image_ref")" = "$expected_image"
 export DISCLOSURE_RELEASE_IMAGE="$image_ref" DISCLOSURE_EXPECTED_COMMIT="$expected_commit"
+export DISCLOSURE_EXPECTED_IMAGE_ID="$expected_image"
+export DISCLOSURE_EXPECTED_BASE_SHA256="$expected_base"
+export DISCLOSURE_EXPECTED_OVERLAY_SHA256="$expected_overlay"
+export DISCLOSURE_EXPECTED_SEARCH_INDEX_SHA256="$expected_search"
 docker compose -p mirae-release -f compose.release.yaml up -d --no-build dense-retriever disclosure-agent-staging
 staging_container="$(docker compose -p mirae-release -f compose.release.yaml ps -q disclosure-agent-staging)"
 dense_container="$(docker compose -p mirae-release -f compose.release.yaml ps -q dense-retriever)"
