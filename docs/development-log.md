@@ -1159,3 +1159,11 @@
 - D read-only 최종 평가는 120 cases, 373 required target 중 357 hit, Recall@20 `0.9571045576`, slot completeness `0.95`, wrong issuer/version/hard failure 각 `0`, p50 `338.23ms`, p95 `1421.31ms`다. summary semantic SHA-256은 `a7c12747416850100ba6b23793d8530f4a959cb9979ed037b68ecf854676daf0`이다.
 - Sparse gate가 95%를 넘었으므로 embedding은 `DEFERRED_NO_EVIDENCE (sparse_recall_gate_met)`다. 검색 gate만 PASS이며 실제 600건 staging Judge/provider와 exact-image 배포 gate는 아직 별도다. 관련 회귀 최초 실행은 오래된 `retrieval.recall_at_20` 미달 가정 때문에 `1 failed, 425 passed`였고, 현재 추적 보고서가 검색 gate만 통과하되 Judge·deployment 사유로 전체 release를 계속 차단한다는 계약으로 수정해 단독 `1 passed`를 확인했다.
 - 최종 로컬 검증은 Python `981 passed, 2 skipped, 104 warnings, 266 subtests` (`288.05s`), Web `13/13`, `compileall`, `git diff --check`, tracked credential/secret scan을 통과했다. 첫 위생 명령은 안전한 `.env.example` 두 개를 실제 `.env`로 오인해 종료코드 1을 냈고, exact filename 경계로 고친 재검사에서 금지 파일·값은 0건이었다.
+
+## 2026-09-05T16:00+09:00 / 2026-09-05T07:00Z — private Judge 입력 attestation 복구
+
+- 공식 pre-stage 검토에서 `deploy_staging.ps1`가 private holdout의 case count와 SHA-256을 `manifest.raw_artifacts.holdout`에서 검증하지만, 현재 추적 manifest에는 이 content-free attestation이 빠져 있어 Docker build 전 fail-close하는 배선 결함을 발견했다.
+- TDD RED는 현재 추적 manifest가 private 경로나 질문을 노출하지 않으면서 `case_count=120`, 64자리 SHA-256, `git-ignored evaluator artifact` visibility를 가져야 한다는 회귀를 추가해 `KeyError: raw_artifacts`로 재현했다.
+- 기존 공식 builder를 private 입력과 함께 실행해 manifest·NOT_RUN summary를 재생성했다. holdout SHA-256 `475452500d8eec2126bdb198f3343b191267cdb4e6dd6789fce82b4dcf404f1d`와 실제 private 파일 120행이 일치하며, manifest에는 경로·질문·oracle이 없다. 수정 후 attestation 및 현재 release 차단 회귀는 `2 passed`다.
+- NCP 공간 확보를 위해 실행 중인 8000/8001/8002와 rollback image는 보존하고, 종료된 재생성 가능 진단 컨테이너 `mirae-16b811e-staging`과 전용 image tag만 제거했다. 공통 layer 때문에 여유 공간은 543MB로 거의 변하지 않았으며, 제거한 진단 이미지는 Git archive로 재빌드 가능하다.
+- 검증은 attestation/release 단독 `2 passed`, Judge·release·배포 집중 `171 passed, 94 subtests`, 전체 Python `982 passed, 2 skipped, 104 warnings, 266 subtests` (`115.93s`)다.

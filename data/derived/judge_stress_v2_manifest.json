@@ -88,7 +88,7 @@
     "financial_release_856": {
       "path": "data/derived/financial_release_evaluation.json",
       "case_count": 856,
-      "sha256": "7b74c7be525f90e9c34524b25aff15cece30fa94d1fa0b921916aaedf67e2fe8"
+      "sha256": "9e14dbd440ae1978f73aa8036a8e8af802bec06f20a95b2c813d043b67c1d3b5"
     }
   },
   "reproducibility": {
@@ -6701,5 +6701,17 @@
       "source_group_id": "private-source-76a58cc4f6d80c5233254afa"
     }
   ],
-  "suite_sha256": "68e06cf8820bba2c2b47c3ca34fa04e09d549ad204d01d7b8f4cb366cfe13ced"
+  "suite_sha256": "68e06cf8820bba2c2b47c3ca34fa04e09d549ad204d01d7b8f4cb366cfe13ced",
+  "raw_artifacts": {
+    "development": {
+      "sha256": "d7d9ff063fe560bc7fac67656e9eba57cd9c8438e6ad5f8dffe28a7a1778b4f4",
+      "case_count": 480,
+      "visibility": "git-ignored evaluator artifact"
+    },
+    "holdout": {
+      "sha256": "475452500d8eec2126bdb198f3343b191267cdb4e6dd6789fce82b4dcf404f1d",
+      "case_count": 120,
+      "visibility": "git-ignored evaluator artifact"
+    }
+  }
 }

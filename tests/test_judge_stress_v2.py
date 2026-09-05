@@ -373,6 +373,20 @@ def test_full_cli_requires_explicit_ignored_private_holdout(tmp_path: Path) -> N
     assert html_path.read_text(encoding="utf-8").startswith("<!doctype html>")
 
 
+def test_tracked_manifest_attests_private_holdout_without_exposing_its_path() -> None:
+    manifest = json.loads(
+        (REPO_ROOT / "data/derived/judge_stress_v2_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    holdout = manifest["raw_artifacts"]["holdout"]
+    assert holdout["case_count"] == 120
+    assert holdout["visibility"] == "git-ignored evaluator artifact"
+    assert len(holdout["sha256"]) == 64
+    assert set(holdout) == {"case_count", "sha256", "visibility"}
+
+
 def test_tracked_contract_code_and_artifacts_cannot_supply_private_holdout() -> None:
     module = _module()
     contract = json.loads(

@@ -51,7 +51,7 @@
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
 | HCX Function Calling | V1.2, providerless 정형 fallback, 분석 provider 장애 시 근거 보존 보류 구현 | provider timeout 원인·p95를 실제 hidden 평가에서 해소 |
 | FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료; 최신 diagnostic image는 8001 내부 health 통과 | ACG를 바꾸지 않고 공식 staging identity·팀 접근 경로 확인 |
-| 테스트 | 독립 hidden 검색 120건 PASS; Python `981 passed, 2 skipped, 266 subtests`; Web `13/13`; compileall/diff/secret scan PASS | private 600건을 실제 staging에서 실행하고 동일-image 검증 |
+| 테스트 | 독립 hidden 검색 120건 PASS; Python `982 passed, 2 skipped, 266 subtests`; Web `13/13`; compileall/diff/secret scan PASS | private 600건을 실제 staging에서 실행하고 동일-image 검증 |
 | Release gate | 검색 gate만 PASS, 전체는 `BLOCKED_HARD_GATE` | private Judge/provider와 commit/image/data 신뢰 앵커를 실제 staging에서 생성; 임계값 완화 금지 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
