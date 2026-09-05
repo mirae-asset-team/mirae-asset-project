@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import unicodedata
 from collections.abc import Iterable, Mapping
@@ -179,7 +180,12 @@ def _unique_strings(value: object, *, field_name: str) -> tuple[str, ...]:
 
 def load_dimension_catalog(path: str | Path | None = None) -> tuple[Mapping[str, Any], ...]:
     """Load the declarative catalog and reject ambiguous dimension or slot IDs."""
-    catalog_path = Path(path) if path is not None else _DEFAULT_DIMENSIONS_PATH
+    if path is not None:
+        catalog_path = Path(path)
+    elif config_directory := os.environ.get("DISCLOSURE_CONFIG_DIR"):
+        catalog_path = Path(config_directory) / "analysis_dimensions.json"
+    else:
+        catalog_path = _DEFAULT_DIMENSIONS_PATH
     with catalog_path.open(encoding="utf-8") as handle:
         data = json.load(handle)
     dimensions = data.get("dimensions") if isinstance(data, dict) else None

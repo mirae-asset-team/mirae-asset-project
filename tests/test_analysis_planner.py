@@ -132,6 +132,40 @@ def test_dimension_catalog_rejects_invalid_minimum_periods(minimum):
             load_dimension_catalog("unused.json")
 
 
+def test_dimension_catalog_uses_runtime_config_directory_when_package_default_is_missing(
+    tmp_path,
+    monkeypatch,
+):
+    catalog = {
+        "dimensions": [{
+            "dimension_id": "runtime-config",
+            "match_any": ["분석"],
+            "subquestions": ["근거"],
+            "allowed_conclusions": ["insufficient_evidence"],
+            "max_evidence": 2,
+            "slots": [{
+                "slot_id": "runtime-slot", "domain": "text",
+                "search_concepts": ["사업위험"], "min_periods": 1,
+                "min_evidence": 1, "max_evidence": 2, "mandatory": True,
+                "absence_reason_code": "missing",
+            }],
+        }],
+    }
+    (tmp_path / "analysis_dimensions.json").write_text(
+        json.dumps(catalog, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DISCLOSURE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "disclosure_db.analysis_planner._DEFAULT_DIMENSIONS_PATH",
+        tmp_path / "missing-package-config" / "analysis_dimensions.json",
+    )
+
+    loaded = load_dimension_catalog()
+
+    assert loaded[0]["dimension_id"] == "runtime-config"
+
+
 def test_evidence_slot_positional_evidence_bounds_remain_backward_compatible():
     slot = EvidenceSlot(
         "slot", "financial", None, None, None, None, None, (), ("매출액",),

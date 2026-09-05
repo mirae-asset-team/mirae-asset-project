@@ -1094,3 +1094,11 @@
 - TDD RED는 자격 인자를 생략한 개발 지표가 `ELIGIBLE_PILOT`으로 판정되는 실패 1건으로 재현했다. 기본값을 `false`로 바꾸고, 파일·semantic digest와 runtime identity를 모두 검증한 Dense adoption loader만 `release_eligible=true`를 명시하도록 했다.
 - 관련 회귀는 `69 passed, 13 subtests passed`다. 공개 자동 생성 Gold와 이번 V2 산출물은 계속 `BLOCKED_INDEPENDENT_GOLD`이며 독립 hidden Gold 없이는 임베딩 채택이나 배포를 허가하지 않는다.
 - 최종 전체 회귀는 Python `965 passed, 2 skipped, 98 warnings, 264 subtests passed`, Web `13 passed`, Team QA `1 passed`, `compileall`, `git diff --check`와 산출물 스키마 검증을 통과했다. 통합 release gate는 의도대로 33개 사유의 `BLOCKED_HARD_GATE`를 반환했다.
+
+## 2026-09-05T12:41:01+09:00 / 2026-09-05T03:41:01Z — NCP 8001 설치형 config 경로 회귀 수정
+
+- 진단용 staging 입력은 commit `c2a7d42f2e3a72c2797c9b7e6a4a57d68970dccb`의 tracked archive(SHA-256 `5a1c58dfd093240e063d51a5c316db0b025e77cb4856fc2ddc3b1f9c66344e52`)와 image `sha256:fba4b193a601f097596c031cc8676922dace95c150d988428af3f3d5a4d4ce95`다. NCP 8001 컨테이너는 base·overlay·search·attestation을 개별 read-only mount로 사용했고 `/health`는 ready, 76개 기업, provider/function calling configured를 보고했다. 기존 8001은 이름 변경과 rollback tag로 보존했으며 8000 운영 컨테이너는 변경하지 않았다.
+- 실제 smoke에서 `/v1/answer`의 삼성전자 최신 매출은 검증된 2025 연결 수치와 evidence를 반환했지만 `/v1/hcx/function-answer`는 `bounded_analysis_failed_closed`와 `FileNotFoundError`로 중단됐다. 컨테이너 내부 동일 호출의 traceback에서 `analysis_planner.load_dimension_catalog()`가 설치된 module 경로를 따라 `/usr/local/lib/python3.11/config/analysis_dimensions.json`을 조회한 것이 근본원인이었다. Docker가 선언한 `DISCLOSURE_CONFIG_DIR=/app/config`를 이 로더만 사용하지 않은 배선 결함이다.
+- TDD RED는 package 기본 config 경로가 없고 runtime config directory만 존재하는 설치형 조건을 추가해 `1 failed`로 재현했다. 최소 수정은 명시적 `path`를 최우선으로 유지하고, 기본 호출일 때 `DISCLOSURE_CONFIG_DIR/analysis_dimensions.json`을 사용하며, 환경변수가 없을 때만 기존 source-tree 기본값으로 fallback한다.
+- 관련 분석·실행기·HCX runtime 회귀는 `66 passed, 6 warnings`; 전체 Python은 `966 passed, 2 skipped, 98 warnings, 264 subtests passed` (`76.48s`), Web은 `13 passed`다. 경고는 기존 FastAPI/Starlette `on_event` deprecation이다.
+- 이 수정은 아직 새 image로 NCP 8001에서 재검증되지 않았고 독립 hidden/Judge/provider release evidence도 계속 미충족이다. 따라서 hard gate를 낮추지 않았으며 8000 승격은 금지 상태다. credential, `.env`, PEM, NCP 보안 설정과 live 데이터 파일은 읽거나 변경하지 않았다.
