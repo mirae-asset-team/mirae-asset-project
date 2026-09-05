@@ -99,6 +99,24 @@ class EvidenceService:
         self._dense_filing_cache: dict[tuple[object, ...], tuple[str, ...]] = {}
         if (self.overlay_database is not None or self.search_database is not None) and attestation is None:
             raise ValueError("attestation is required when runtime overlay/search is configured")
+        self._search_index = None
+        self._search_index_error: str | None = None
+        if self.search_database is not None:
+            if not self.search_database.exists():
+                self._search_index_error = "search_index_unavailable"
+            else:
+                try:
+                    from .search_index import SafeSearchIndex
+
+                    self._search_index = SafeSearchIndex(
+                        self.search_database,
+                        base_sha256=self.attestation.sha256,
+                        expected_base_size=self.attestation.size_bytes,
+                    )
+                except ValueError:
+                    self._search_index_error = "search_index_attestation_mismatch"
+                except (OSError, sqlite3.Error):
+                    self._search_index_error = "search_index_sqlite_error"
         self._companies: list[str] | None = None
         config_directory = Path(
             os.environ.get(
@@ -132,6 +150,10 @@ class EvidenceService:
             }
         except (OSError, json.JSONDecodeError):
             self.event_predicate_aliases = {}
+
+    @property
+    def search_index_ready(self) -> bool:
+        return self.search_database is None or self._search_index is not None
 
     @staticmethod
     def _slot_version_as_of(plan: AnalysisPlan) -> str | None:
@@ -356,22 +378,15 @@ class EvidenceService:
             "excluded_prompt_injection_count": 0,
             "sparse_ranks": [],
         }
-        if not variants or self.search_database is None or not self.search_database.exists() or self.attestation is None:
-            diagnostics["reason_code"] = "search_index_unavailable"
+        if not variants or self._search_index is None:
+            diagnostics["reason_code"] = self._search_index_error or "search_index_unavailable"
             diagnostics["latency_ms"] = int(round((time.perf_counter() - started) * 1000))
             return [], diagnostics
         try:
-            from .search_index import SafeSearchIndex
-
-            index = SafeSearchIndex(
-                self.search_database,
-                base_sha256=self.attestation.sha256,
-                expected_base_size=self.attestation.size_bytes,
-            )
             rankings: list[list[EvidenceRef]] = []
             version_as_of = self._slot_version_as_of(plan)
             for variant_id, variant in enumerate(variants):
-                rows = index.search(
+                rows = self._search_index.search(
                     variant,
                     company=slot.issuer or plan.base_plan.company,
                     as_of=version_as_of,
@@ -871,14 +886,11 @@ class EvidenceService:
                 if self.search_database.exists():
                     index_available = True
                     try:
-                        if self.attestation is None:
-                            raise ValueError("search index requires base attestation")
-                        from .search_index import SafeSearchIndex
-                        rows = SafeSearchIndex(
-                            self.search_database,
-                            base_sha256=self.attestation.sha256,
-                            expected_base_size=self.attestation.size_bytes,
-                        ).search(
+                        if self._search_index is None:
+                            if self._search_index_error:
+                                plan.reason_codes.append(self._search_index_error)
+                            raise RuntimeError("validated search index unavailable")
+                        rows = self._search_index.search(
                             plan.question,
                             company=plan.company,
                             as_of=version_as_of,
@@ -914,6 +926,8 @@ class EvidenceService:
                         plan.reason_codes.append("search_index_attestation_mismatch")
                     except (OSError, sqlite3.Error):
                         plan.reason_codes.append("search_index_sqlite_error")
+                    except RuntimeError:
+                        pass
                 if not index_used:
                     plan.reason_codes.append(
                         "search_index_unavailable" if not index_available else "search_index_fallback_to_ssot"

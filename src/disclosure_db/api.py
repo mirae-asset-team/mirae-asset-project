@@ -142,7 +142,10 @@ def _health_status(service: Any) -> dict[str, Any]:
     search_database = getattr(service, "search_database", None)
     search_configured = bool(search_database)
     search_index_ready = not search_configured
-    if search_configured and base_attested and attestation_configured and Path(search_database).exists():
+    cached_search_ready = getattr(service, "search_index_ready", None)
+    if search_configured and cached_search_ready is not None:
+        search_index_ready = bool(cached_search_ready)
+    elif search_configured and base_attested and attestation_configured and Path(search_database).exists():
         try:
             from .search_index import SafeSearchIndex
             SafeSearchIndex(

@@ -1036,3 +1036,11 @@
 - 실데이터 검색 평가: 120 case·480 query·234 target을 새로 실행했다. Recall@20은 `114/234 = 0.48717948717948717`, Recall@5 `0.358974358974359`, wrong issuer/version 각 `0`, p50 `9837.62ms`, p95 `31286.68ms`, semantic SHA-256 `f391a7d3a38baa1f77c78306ae7f21bbf88d1459b24767a8715279e08c044340`이다. 임베딩 pilot은 eligible이지만 text residual만으로 가능한 최대 개선은 `0.153846...`이므로 전체 95% gate를 단독 충족할 수 없다.
 - release 판정: fresh retrieval을 넣어 통합 gate를 재계산했지만 `BLOCKED_HARD_GATE`, 사유 33개다. Recall@20 `0.487179... < 0.95`, private holdout/실제 provider·security·latency 결과, fresh financial 결과와 trusted commit/image/base/overlay/search identity가 없다. 기준을 낮추거나 증거를 합성하지 않았고, staging과 8000 승격을 실행하지 않았다. 기존 8000 서비스는 그대로 유지했다.
 - 환경 진단: 로컬 Docker Linux engine 실패 원인은 WSL2 미설정이 아니라 Docker Desktop이 접근하지 못하는 `C:\Users\lark0\AppData\Local\Docker\run\sailor-ingest.sock`이다. Docker factory reset이나 NCP 설정 변경은 승인 범위를 넘으므로 실행하지 않았다. D 드라이브 파일, `.env`, credential, PEM, ACG는 변경하지 않았다.
+
+## 2026-09-05T08:58:27+09:00 / 2026-09-04T23:58:27Z — 검색 인덱스 검증 수명 최적화
+
+- 원인: `SafeSearchIndex` 생성자가 274 MB 인덱스의 metadata, 전체 row count, `PRAGMA quick_check`를 수행하는데 text slot·generic fallback·health 경로가 객체를 반복 생성했다. 실제 D 드라이브 평가의 p95 `31.28668초`는 일반 질의보다 이 반복 무결성 검사의 cold-cache 비용이 지배했다.
+- TDD RED: 두 검색과 health에서 생성자가 한 번만 실행돼야 한다는 회귀가 기존 코드에서 `3 != 1`로 실패했다.
+- 최소 구현: `EvidenceService` 시작 시 인덱스를 1회 검증해 재사용하고, 시작 시 실패 사유를 캐시해 기존 `search_index_unavailable`/`search_index_attestation_mismatch`/`search_index_sqlite_error`와 SSOT fallback을 유지했다. `/health`도 같은 readiness를 사용한다.
+- 실측: read-only D 인덱스의 cold startup 검증은 `6486.30ms`, 이후 동일 프로세스 검색 3회는 `1.50/1.13/1.09ms`였다. 관련 회귀는 `180 passed, 24 warnings, 10 subtests passed`, 전체 Python은 `944 passed, 2 skipped, 98 warnings, 264 subtests passed`, Team QA Node는 `1 passed`다.
+- 경계: base/search SHA는 각각 `b8fb3b...6563`, `e223a1...8793`이며 파일은 변경하지 않았다. 이 최적화만으로 Recall@20·private holdout·provider·trusted image gate 통과를 주장하지 않는다. 상세 판단은 `docs/operations/2026-09-05-search-index-validation.md`에 기록했다.
