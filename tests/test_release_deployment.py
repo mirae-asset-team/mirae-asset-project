@@ -933,6 +933,13 @@ class ReleaseDeploymentAssetTests(unittest.TestCase):
         self.assertIn("def assert_content_free", source)
         self.assertNotIn("in json.dumps(payload", source)
 
+    def test_staging_evaluator_resolves_allowed_filings_from_audited_sources(self):
+        source = extract_staging_evaluator_source()
+
+        self.assertIn("def resolve_oracle", source)
+        self.assertIn("source_filings", source)
+        self.assertIn("oracle_resolver=resolve_oracle", source)
+
     def test_staging_health_identity_rejects_missing_wrong_or_extra_fields(self):
         validator = load_staging_evaluator_function("validate_health_identity")
         trusted = {

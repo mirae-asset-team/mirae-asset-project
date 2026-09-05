@@ -1142,3 +1142,11 @@
 - 최신 8001 내부 health는 ready, eval/provider/function calling configured, 76개사이며 commit·image·base·overlay·search identity가 외부 신뢰값과 정확히 일치한다. base·overlay·search·attestation 네 data mount는 모두 read-only다. `.env`는 읽지 않고 기존 `/srv/mirae/app/.env`를 Docker `--env-file`로만 사용했으며 credential 값은 출력·기록하지 않았다.
 - 삼성전자 최근 2개년 수익성 질문은 `status=answered`, `execution_mode=deterministic_bounded_analysis`, `conclusion=improved`, citation 6건, `final_generation_called=false`, 50.99ms였다. 동일 질문 20동시 요청은 오류 0, p95 958.35ms, max 960.96ms였다. 삼성전자 최신 매출은 citation 1건과 검증 답변을 6,698.35ms에 반환했고 직접 prompt injection은 차단했다.
 - 현재 작업 호스트에서 공개 8000 health는 HTTP 200이고 기존 `qa-growth-v4-qa-agent:latest` image가 그대로다. 공개 8001은 curl exit 28·HTTP 000으로 timeout이며 NCP ACG는 변경하지 않았다. local 원본 저장소·작업 worktree·`/srv/mirae` inventory에서 V2 private holdout 120건과 release-eligible independent hidden retrieval Gold를 찾지 못했으므로 공식 600건·provider release gate와 8000 promotion은 계속 blocked다.
+
+## 2026-09-05T14:45:47+09:00 / 2026-09-05T05:45:47Z — staging Judge 실행 경로·독립 검증 계약 수정
+
+- 실제 8001에서 development free-form·multi-evidence 문항이 `/v1/answer`로 실행돼 citation 없이 보류되는 반면, 같은 질문을 `/v1/evidence/search`에 보내면 8개 근거를 반환하는 현상을 재현했다. 검색 실패가 아니라 `retrieval_precheck`를 구조화 답변 endpoint에 잘못 연결한 평가기 결함이었다.
+- TDD RED는 고정 검색 endpoint 부재, retrieval precheck의 잘못된 route, 운영의 legacy verified-answer 응답을 독립 claim inspector가 읽지 못하는 문제, audited source의 공시번호를 staging oracle에 전달하지 못하는 문제를 고정했다. 최소 구현은 precheck를 provider-free `/v1/evidence/search`로 분리하고 target evidence 교집합·최소 개수를 검사하며 malformed evidence를 evaluator error로 fail-close한다.
+- 구조화 `/v1/answer`는 `claim_support` 대신 top-level `verified`, `numeric_values`, `citation_ids`, `financial_facts`를 반환한다. 서버가 이미 검증한 이 legacy 계약만 검사기 형태로 변환하되, 숫자·citation·filing은 별도 oracle과 다시 대조한다. audited source의 canonical record SHA-256에서 공시번호를 독립적으로 복원해 case hash나 공개 문항을 바꾸지 않고 cross-filing 검사를 활성화했다.
+- 표 주석 `(주30)`과 질문에 명시된 회계연도는 주장 숫자가 아니며, `100 백만원`의 단위어를 별도 한국어 숫자로 중복 해석하지 않도록 숫자 검사 규칙을 보강했다. 임계값, provider 호출 수, private/hidden 독립성 계약은 변경하지 않았다.
+- 관련 Judge·release·staging 회귀는 `214 passed, 94 subtests passed` (`164.69s`)다. 이 단계에서는 코드 평가기만 변경했고 D 드라이브 및 NCP 데이터, `.env`, credential, PEM, ACG와 운영 8000은 변경하지 않았다.

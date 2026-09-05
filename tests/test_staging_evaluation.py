@@ -7,7 +7,11 @@ from typing import Mapping
 
 import pytest
 
-from disclosure_db.judge_stress_execution import JudgeRunOptions, run_case
+from disclosure_db.judge_stress_execution import (
+    JudgeRunOptions,
+    build_case_probes,
+    run_case,
+)
 from disclosure_db.release_gate import evaluate_release_gate, load_release_contract
 from disclosure_db.staging_evaluation import (
     StagingApiClient,
@@ -55,6 +59,7 @@ def test_client_uses_fixed_public_paths_and_injected_transport() -> None:
     health = client.health()
     answer = client.answer("삼성전자 매출액", provider=False)
     provider_answer = client.answer("삼성전자 매출액 설명", provider=True)
+    retrieval = client.search("삼성전자 사업위험")
 
     assert health["status"] == "ok"
     assert answer["status"] == "answered"
@@ -71,7 +76,143 @@ def test_client_uses_fixed_public_paths_and_injected_transport() -> None:
             "http://127.0.0.1:8001/v1/hcx/function-answer",
             {"question": "삼성전자 매출액 설명"},
         ),
+        (
+            "POST",
+            "http://127.0.0.1:8001/v1/evidence/search",
+            {"question": "삼성전자 사업위험", "limit": 20},
+        ),
     ]
+
+
+def test_retrieval_precheck_uses_provider_free_evidence_search() -> None:
+    class RetrievalTransport(RecordingTransport):
+        def __call__(self, method, url, payload, **kwargs):
+            self.calls.append((method, url, payload))
+            if url.endswith("/v1/evidence/search"):
+                return {
+                    "answerable": True,
+                    "evidence": [
+                        {
+                            "evidence_id": "ev-target",
+                            "filing_id": "filing-target",
+                        },
+                        {
+                            "evidence_id": "ev-distractor",
+                            "filing_id": "filing-target",
+                        },
+                    ],
+                }
+            raise AssertionError(f"unexpected staging route: {url}")
+
+    transport = RetrievalTransport()
+    runtime = StagingJudgeRuntime(
+        StagingApiClient("http://127.0.0.1:8001", transport=transport)
+    )
+    case = {
+        "case_id": "development-free-form-search",
+        "split": "development",
+        "category": "free_form",
+        "question": "삼성전자 사업위험을 공시 근거로 설명해줘",
+        "oracle": {
+            "kind": "evidence_judgment",
+            "evidence_ids": ["ev-target"],
+            "filing_ids": ["filing-target"],
+        },
+    }
+
+    result = run_case(case, runtime, provider_allowed=False)
+
+    assert result.passed is True
+    assert result.answerability_agreement == 1.0
+    assert result.claim_citation_coverage == 1.0
+    assert transport.calls
+    assert all(url.endswith("/v1/evidence/search") for _, url, _ in transport.calls)
+
+
+def test_retrieval_precheck_rejects_malformed_evidence_response() -> None:
+    class MalformedTransport(RecordingTransport):
+        def __call__(self, method, url, payload, **kwargs):
+            return {"answerable": True, "evidence": None}
+
+    runtime = StagingJudgeRuntime(
+        StagingApiClient(
+            "http://127.0.0.1:8001", transport=MalformedTransport()
+        )
+    )
+    case = {
+        "case_id": "malformed-retrieval-response",
+        "split": "development",
+        "category": "free_form",
+        "question": "삼성전자 사업위험은?",
+        "oracle": {
+            "kind": "evidence_judgment",
+            "evidence_ids": ["ev-target"],
+        },
+    }
+
+    with pytest.raises(
+        StagingEvaluationError, match="retrieval response is invalid"
+    ):
+        runtime.execute(
+            "retrieval_precheck", case, build_case_probes(case)[0]
+        )
+
+
+def test_default_staging_oracle_maps_case_evidence_and_filing_ids() -> None:
+    class StructuredTransport(RecordingTransport):
+        def __call__(self, method, url, payload, **kwargs):
+            self.calls.append((method, url, payload))
+            return {
+                "answerable": True,
+                "verified": True,
+                "answer": "2025년 매출액 (주30)(연결)은 100 백만원입니다.",
+                "numeric_values": ["100"],
+                "citation_ids": ["ev-target"],
+                "citations": [
+                    {"evidence_id": "ev-target", "filing_id": "filing-target"}
+                ],
+                "financial_facts": [
+                    {
+                        "financial_fact_id": "fact-1",
+                        "filing_id": "filing-target",
+                        "value_numeric": "100",
+                        "scale": 1_000_000,
+                        "unit_raw": "백만원",
+                        "scope": "consolidated",
+                        "period_end": "2025-12-31",
+                        "evidence_ids": ["ev-target"],
+                    }
+                ],
+            }
+
+    runtime = StagingJudgeRuntime(
+        StagingApiClient(
+            "http://127.0.0.1:8001", transport=StructuredTransport()
+        )
+    )
+    case = {
+        "case_id": "development-structured-default-oracle",
+        "split": "development",
+        "category": "structured",
+        "question": "삼성전자 2025년 매출액은?",
+        "oracle": {
+            "kind": "exact_numeric",
+            "value": "100",
+            "scale": 1_000_000,
+            "evidence_ids": ["ev-target"],
+            "filing_ids": ["filing-target"],
+        },
+    }
+    probe = build_case_probes(case)[0]
+
+    observation = runtime.execute("deterministic_answer", case, probe)
+
+    assert observation.hallucinated_numeric_claim_count == 0
+    assert observation.unknown_citation_count == 0
+    assert observation.cross_filing_citation_count == 0
+    assert observation.value == "100"
+    assert observation.unit == "백만원"
+    assert observation.scope == "consolidated"
 
 
 @pytest.mark.parametrize(
