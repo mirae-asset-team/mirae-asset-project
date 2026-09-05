@@ -7,8 +7,8 @@
       "allowed_conclusions": ["improved", "deteriorated", "mixed", "stable", "insufficient_evidence"],
       "max_evidence": 12,
       "slots": [
-        {"slot_id": "income_trend", "domain": "financial", "search_concepts": ["매출액", "영업이익", "당기순이익"], "min_periods": 2, "min_evidence": 2, "max_evidence": 4, "mandatory": true, "absence_reason_code": "income_trend_missing"},
-        {"slot_id": "balance_sheet", "domain": "financial", "search_concepts": ["자산총계", "부채총계", "자본총계"], "min_periods": 2, "min_evidence": 2, "max_evidence": 4, "mandatory": true, "absence_reason_code": "balance_sheet_missing"},
+        {"slot_id": "income_trend", "domain": "financial", "search_concepts": ["매출액", "영업이익", "당기순이익"], "min_periods": 2, "min_evidence": 6, "max_evidence": 6, "mandatory": true, "absence_reason_code": "income_trend_missing"},
+        {"slot_id": "balance_sheet", "domain": "financial", "search_concepts": ["자산총계", "부채총계", "자본총계"], "min_periods": 2, "min_evidence": 6, "max_evidence": 6, "mandatory": true, "absence_reason_code": "balance_sheet_missing"},
         {"slot_id": "financing_events", "domain": "event", "search_concepts": ["차입", "사채", "유상증자", "상환"], "min_evidence": 0, "max_evidence": 4, "mandatory": false, "absence_reason_code": "financing_events_missing"}
       ]
     },
@@ -112,7 +112,7 @@
       "allowed_conclusions": ["improved", "deteriorated", "mixed", "stable", "insufficient_evidence"],
       "max_evidence": 8,
       "slots": [
-        {"slot_id": "management_discussion_text", "domain": "text", "search_concepts": ["경영진", "사업의 내용", "전망"], "min_evidence": 1, "max_evidence": 4, "mandatory": true, "absence_reason_code": "management_discussion_missing"},
+        {"slot_id": "management_discussion_text", "domain": "text", "search_concepts": ["사업의 내용", "사업경쟁력", "주력 사업", "경영 효율성"], "min_evidence": 1, "max_evidence": 4, "mandatory": true, "absence_reason_code": "management_discussion_missing"},
         {"slot_id": "reported_outcomes", "domain": "financial", "search_concepts": ["매출액", "영업이익", "당기순이익"], "min_evidence": 1, "max_evidence": 4, "mandatory": true, "absence_reason_code": "reported_outcomes_missing"}
       ]
     },

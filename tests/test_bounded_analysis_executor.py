@@ -6,6 +6,7 @@ from disclosure_db.freeform_retrieval import AnalysisRetrieval, SlotRetrieval
 from disclosure_db.hcx_function_calling import (
     HcxFunctionCallingService,
     HcxAnswerClaim,
+    HcxFunctionCallingError,
     HcxGeneratedAnswer,
 )
 
@@ -45,6 +46,52 @@ def _complete_retrieval(ref: EvidenceRef) -> AnalysisRetrieval:
     )
 
 
+def _profitability_retrieval() -> AnalysisRetrieval:
+    evidence = []
+    facts = []
+    values = {
+        2024: {"revenue": "100", "operating_income": "10", "net_income": "8"},
+        2025: {"revenue": "120", "operating_income": "18", "net_income": "12"},
+    }
+    for year, accounts in values.items():
+        for index, (account_id, value) in enumerate(accounts.items(), start=1):
+            evidence_id = f"ev-{year}-{index}"
+            ref = EvidenceRef(
+                evidence_id=evidence_id,
+                filing_id=f"{year + 1}0318{index:06d}",
+                source_id=f"source-{year}-{index}",
+                text=f"{year}년 {account_id} 검증 수치",
+                locator={
+                    "analysis_issuer": "삼성전자",
+                    "period_end": f"{year}-12-31",
+                },
+                lineage_status="root",
+                filed_at=f"{year + 1}-03-18",
+                report_name="사업보고서",
+                is_current=True,
+            )
+            evidence.append(ref)
+            facts.append({
+                "financial_fact_id": f"fact-{year}-{account_id}",
+                "account_id": account_id,
+                "value_numeric": value,
+                "scale": 1,
+                "currency": "KRW",
+                "fiscal_year": year,
+                "period_end": f"{year}-12-31",
+                "validation_status": "validated",
+                "evidence_ids": [evidence_id],
+            })
+    return AnalysisRetrieval(
+        evidence=tuple(evidence),
+        slots=(SlotRetrieval(
+            "profitability_results", tuple(evidence), True,
+        ),),
+        complete=True,
+        financial_facts=tuple(facts),
+    )
+
+
 def test_executor_builds_existing_tool_response_from_owned_mandatory_slot() -> None:
     evidence = _evidence()
     source = StubEvidenceService(_complete_retrieval(evidence))
@@ -79,6 +126,18 @@ def test_executor_builds_existing_tool_response_from_owned_mandatory_slot() -> N
         "reason_codes": [],
     }]
     assert response["evidence_bundle"]["evidence_ids"] == ["ev-risk"]
+
+
+def test_executor_deterministically_classifies_two_period_profitability() -> None:
+    execution = BoundedAnalysisExecutor(
+        StubEvidenceService(_profitability_retrieval())
+    ).execute("삼성전자의 최근 2개년 수익성이 개선됐는지 공시 근거로 분석해줘")
+
+    assert execution is not None
+    assert execution.complete is True
+    assert execution.plan.judgment_dimension == "profitability"
+    assert execution.conclusion == "improved"
+    assert execution.to_tool_response()["data"]["conclusion"] == "improved"
 
 
 def test_any_missing_mandatory_slot_forces_insufficient_evidence_without_search_result_claim() -> None:
@@ -289,6 +348,15 @@ class JudgmentClient:
         raise AssertionError("bounded analysis must use the constrained conclusion contract")
 
 
+class FailingJudgmentClient(JudgmentClient):
+    def generate_answer(self, question, tool_call, tool_response):
+        self.generation_calls.append((question, tool_call, tool_response))
+        raise HcxFunctionCallingError(
+            "hcx_request_failed",
+            stage="final_generation_request",
+        )
+
+
 def _public_service(
     retrieval: AnalysisRetrieval,
     *,
@@ -351,6 +419,49 @@ def test_public_hcx_missing_mandatory_slot_abstains_without_provider_generation(
     assert result.metadata["conclusion"] == "insufficient_evidence"
     assert result.tool_response["data"]["conclusion"] == "insufficient_evidence"
     assert client.selection_calls == []
+    assert client.generation_calls == []
+
+
+def test_public_hcx_provider_failure_preserves_bounded_evidence_and_abstains() -> None:
+    service, _source, _registry, client = _public_service(
+        _complete_retrieval(_evidence()),
+        client=FailingJudgmentClient(),
+    )
+
+    result = service.answer("삼성전자 공시의 사업위험을 분석해줘")
+
+    assert result.status == "abstained"
+    assert result.answer_allowed is False
+    assert result.recommended_action == "abstain"
+    assert result.tool_name == "build_summary_context"
+    assert result.tool_response["data"]["execution_mode"] == "bounded_analysis"
+    assert result.citation_ids == ["ev-risk"]
+    assert result.citations[0]["rcept_no"] == "20240301000001"
+    assert "hcx_final_generation_failed" in result.warnings
+    assert "provider_failure_analysis_abstention" in result.warnings
+    assert result.metadata["error_stage"] == "final_generation_request"
+    assert result.metadata["final_generation_called"] is True
+    assert len(client.generation_calls) == 1
+
+
+def test_public_hcx_answers_deterministic_profitability_without_provider_latency() -> None:
+    service, _source, _registry, client = _public_service(
+        _profitability_retrieval(),
+        client=FailingJudgmentClient(),
+    )
+
+    result = service.answer(
+        "삼성전자의 최근 2개년 수익성이 개선됐는지 공시 근거로 분석해줘"
+    )
+
+    assert result.status == "answered"
+    assert result.answer_allowed is True
+    assert "수익성은 개선" in result.answer
+    assert result.metadata["conclusion"] == "improved"
+    assert result.metadata["execution_mode"] == "deterministic_bounded_analysis"
+    assert result.metadata["final_generation_called"] is False
+    assert result.metadata["verification_trace"]["status"] == "fallback"
+    assert len(result.citation_ids) == 6
     assert client.generation_calls == []
 
 

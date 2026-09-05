@@ -15,7 +15,7 @@
     "effective_correction": ["정정 수정", "정정 공시"],
     "governance_events": ["지배구조 내부통제", "최대주주 이사회", "감사위원회 지배구조"],
     "disclosed_risk_factors": ["사업 위험요인", "주요 위험 리스크", "사업의 내용 위험"],
-    "management_discussion_text": ["경영진 사업의 내용", "경영진 전망", "사업의 내용"],
+    "management_discussion_text": ["사업의 내용", "사업경쟁력", "주력 사업 성장", "사업 역량 경영 효율성"],
     "reported_outcomes": ["매출액 영업이익", "당기순이익"],
     "peer_metric_coverage": ["매출액 영업이익", "당기순이익"],
     "peer_comparison_context": ["동종 경쟁 시장", "경쟁사 비교"]

@@ -1,16 +1,10 @@
 {
-  "eligible": true,
-  "maximum_possible_gain": 0.15384615384615385,
+  "eligible": false,
   "minimum_gain": 0.05,
   "minimum_recall": 0.95,
-  "pilot_dimension": 1024,
-  "pilot_fragment_cap": 20000,
-  "pilot_manifest_semantic_sha256": "baa2bf3834d347a9b8facbd13aa36c58a5de9638de33251ebdc01576e6127fd4",
-  "pilot_model": "bge-m3",
-  "reason": "provider_access_unavailable",
-  "residual_text_target_count": 36,
-  "sparse_recall_at_20": 0.48717948717948717,
-  "status": "BLOCKED_EXTERNAL",
-  "summary_semantic_sha256": "1a7a030ef29aeca5ed9dfdf597628638074302cc74241314b4d27a3db4d64baf",
-  "target_count": 234
+  "reason": "sparse_recall_gate_met",
+  "sparse_recall_at_20": 0.9571045576407506,
+  "status": "DEFERRED_NO_EVIDENCE",
+  "summary_semantic_sha256": "a7c12747416850100ba6b23793d8530f4a959cb9979ed037b68ecf854676daf0",
+  "target_count": 373
 }

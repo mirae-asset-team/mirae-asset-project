@@ -8,13 +8,25 @@
 
 ## 현재 개발 상태와 인수인계
 
-> **Judge Stress V2 인수인계:** Task 1~8의 로컬 구현과 회귀가 완료되었습니다. Task 8은 원시 case 결과를 재검산하는 통합 release gate와 동일-image 8001→8000 배포/rollback 절차를 구현했지만, 현재 판정은 의도적으로 `BLOCKED_HARD_GATE`입니다. private holdout·실제 staging/provider·신뢰 앵커가 없고 Sparse Recall@20이 `0.487179... < 0.95`이므로 운영 승격은 실행하지 않았습니다. 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)를 읽고 차단 항목을 해소한 뒤 같은 gate를 다시 실행하세요.
+> **2026-09-05 18:10 KST 최신 인수인계:** exact candidate `0f2fb7a` / `sha256:0dfbb950...`는 NCP 8001에서 healthy이지만, 실제 600문항 Judge Stress V2 평가는 사용자 요청으로 `2,644/5,328` 요청에서 중단됐다. 최종 staging artifact와 통합 release PASS가 없으므로 운영 8000은 기존 image 그대로다. 다음 담당자는 [staging → 8000 인수인계](docs/handoffs/2026-09-05-judge-v2-production-handoff.md)의 hash·재실행·rollback 절차를 그대로 따른다.
+
+> **2026-09-05 독립 hidden 검색 gate 통과:** Git에서 무시되는 private evaluator 입력 120건을 제품 출력이 아닌 read-only 공시 evidence ledger에서 직접 표기했다. 19개 기업·98개 공시·7개 판단 차원, 373개 필수 근거에서 Sparse Recall@20은 `357/373 = 95.71%`, wrong issuer/version과 hard failure는 각 `0`, p95는 `1.42초`다. 보고서는 질문 원문 없이 입력 hash·provenance·case별 근거 ID와 집계만 추적하며 `agent_audited`이지 `human_verified`가 아니다. 독립 Sparse gate가 95%를 넘었으므로 Dense/embedding은 `DEFERRED_NO_EVIDENCE`다. 이는 검색 gate만 통과한 결과이며, 실제 600건 staging Judge/provider와 동일-image 배포 gate를 통과하기 전까지 운영 8000은 교체하지 않는다. 상세 근거는 [독립 hidden 검색 평가 기록](docs/operations/2026-09-05-independent-hidden-retrieval.md)에 있다.
+
+> **2026-09-05 결정론적 수익성 분석 보완:** 실제 NCP 8001에서 삼성전자 2개년 수익성 분석은 근거 6건 조회 후 HCX-005 최종 생성이 20초 timeout이었다. 단일 재무값은 7.2초였지만 비교 질문도 17.6초여서 provider p95 10초 gate를 만족하지 못했다. 이제 검증된 최근 두 회계연도의 매출액 대비 영업이익·당기순이익률 방향이 모두 확정되는 `profitability` 질문은 SQLite fact로 `개선/악화/혼재/안정`을 결정론적으로 판정하고, 동일 근거의 claim verification을 통과한 문장을 HCX 호출 없이 반환한다. 사업위험 등 정형 계산할 수 없는 판단은 기존 HCX/안전 보류 경로를 유지한다. release identity 보완까지 포함한 로컬 회귀는 Python `970 passed, 2 skipped, 266 subtests`, Web `13/13`, release/staging `168 passed, 94 subtests`다. 서버에는 독립 private holdout 120건과 독립 hidden 검색 Gold가 없으므로 8000 승격 hard gate는 계속 차단한다.
+
+> **2026-09-05 release identity 보완:** 공식 staging 스크립트가 요구하는 commit·image·base·overlay·search 신뢰값을 Compose가 runtime에 전달하지 않았고 `/health`도 노출하지 않아, 평가 입력이 준비돼도 exact-image 검증이 불가능한 결함을 TDD로 수정했다. 다섯 값이 모두 형식에 맞을 때만 `/health.identity`에 고정된 allowlist로 노출하고 일부 누락·형식 오류는 identity 전체를 생략한다. 이는 credential을 노출하지 않으며 production 승격 기준을 낮추지 않는다.
+
+> **2026-09-05 최신 NCP staging:** exact Git commit `7cb6bbf2e805855f4daba0be630e4b87178a1518`을 archive로 build한 image `sha256:9f0e3ae4fe854ad1a6379e887134040606dd492358668906b824b504b5458e15`가 8001에서 실행 중이다. 내부 health는 ready, eval/provider/function calling configured, 76개사, release identity exact이며 base·overlay·search·attestation 네 mount가 모두 read-only다. 삼성전자 2개년 수익성은 `improved`, citation 6건, provider 호출 없이 50.99ms에 답했고 20동시 요청은 오류 0, p95 958.35ms였다. 삼성전자 최신 매출 회귀는 citation 1건과 검증 답변을 6.70초에 반환했고 prompt injection은 차단했다. 공개 8000은 HTTP 200인 기존 image 그대로이며, 외부 8001은 ACG를 변경하지 않아 timeout이다. private holdout 120건과 release-eligible independent hidden 검색 Gold가 로컬·서버에 없어 8000 승격은 실행하지 않았다.
+
+> **2026-09-05 NCP 진단 staging:** 브랜치 `perf/search-index-validation-v2`의 `16b811e`를 image `sha256:0d5b8cb4aa882e053e8ff8d756f2464e17a2274df3e9823a148a83bb3ffd23a8`로 한 번 build해 NCP 8001에만 올렸다. base·overlay·search·attestation은 모두 read-only이고 health는 ready, 76개 기업, provider/function calling configured다. 삼성전자 최신 매출은 검증된 2025 연결 수치로 답했고, 설치형 config 경로 오류를 수정했다. 다중근거 분석의 HCX 생성은 20초 timeout이 재현되어 이제 근거 citation을 보존한 채 안전하게 보류하지만 provider p95 gate는 실패 상태다. 외부에서 8001은 timeout이고 공개 8000은 HTTP 200인 기존 image 그대로다. 이 진단 배포는 private holdout·독립 hidden·trusted identity를 갖춘 공식 pre-stage/PASS가 아니므로 8000 승격 근거로 사용하지 않는다.
+
+> **Judge Stress V2 인수인계:** Task 1~8의 로컬 구현과 회귀가 완료되었습니다. Task 8은 원시 case 결과를 재검산하는 통합 release gate와 동일-image 8001→8000 배포/rollback 절차를 구현했습니다. 2026-09-05 relevance-set Gold V2의 공개 개발 평가는 Sparse Recall@20 `402/402 = 100%`, wrong issuer/version `0`, p95 `97.38ms`이고, 최신 재무 평가는 `856/856`, 20동시 요청 오류 `0`, p95 `125.71ms`입니다. 독립 리뷰 결과 이 Gold는 production filter와 같은 규칙으로 자동 생성되고 19개 source record·7개 issuer만 포함하므로 `development_public_agent_audited`, `release_eligible=false`로 명시했습니다. private holdout 120건을 포함한 실제 600건, 독립 hidden 검색 Gold, staging/provider 관측 및 commit/image/data 신뢰 앵커가 없어 통합 판정은 33개 사유의 `BLOCKED_HARD_GATE`입니다. 따라서 운영 8000은 교체하지 않았습니다. 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)를 읽고 남은 외부 차단 항목을 해소한 뒤 같은 gate를 다시 실행하세요.
 
 > **2026-09-05 기준:** 재무계정 카탈로그, chunk-v1, 5개 Tool Registry, Evidence Gate, bounded analysis, 주장 단위 검증, HCX Function Calling V1.2, 팀용 Web과 Sparse/Dense/Hybrid runtime 연결 및 QA Growth v4 보완이 안전 통합되어 있습니다. Judge Stress V2의 tracked 코드는 개발 480건만 생성하고, 전체 600건 검증에는 별도 git-ignored private holdout 120건을 요구합니다. 로컬 contract harness는 앱·provider를 호출하지 않으므로 해당 480건 통과를 앱 품질로 해석하면 안 됩니다. 통합 release gate는 누락·stale·비유한 지표, 원시 결과 불일치, identity 불일치와 변조된 PASS 보고서를 fail-closed로 거부합니다.
 
 > **main 통합:** PR #5가 CI 통과 후 merge commit `076ca73`으로 병합되었습니다. 병합 직후 release gate는 34개 사유로 계속 `BLOCKED_HARD_GATE`여서 새 이미지를 8000에 승격하지 않았고 기존 공개 서비스는 그대로 유지했습니다.
 
-> **2026-09-03 정형 응답 QA 보완:** HCX credential이 없거나 provider가 일시 중단돼도 결정론적으로 라우팅할 수 있는 재무 수치·기업 비교·기간 증감 질문은 read-only SQLite의 검증된 fact와 citation으로 답합니다. HCX는 이 경로의 도구 선택·계산에 관여하지 않으며, 서버가 만든 답변도 주장 단위 숫자·계산·evidence 검증을 모두 통과해야 노출됩니다. 실제 DB 8종 QA에서 삼성전자 최신값, 에스엠 alias, 다중 지표, 다중 기업, 기간 차이/증가율과 세 가지 안전 거절을 확인했습니다. 이는 private holdout/provider/Dense release gate를 대체하지 않으며, 8001은 외부 health timeout 상태라 배포하지 않았습니다.
+> **2026-09-03 정형 응답 QA 보완:** HCX credential이 없거나 provider가 일시 중단돼도 결정론적으로 라우팅할 수 있는 재무 수치·기업 비교·기간 증감 질문은 read-only SQLite의 검증된 fact와 citation으로 답합니다. HCX는 이 경로의 도구 선택·계산에 관여하지 않으며, 서버가 만든 답변도 주장 단위 숫자·계산·evidence 검증을 모두 통과해야 노출됩니다. 실제 DB 8종 QA에서 삼성전자 최신값, 에스엠 alias, 다중 지표, 다중 기업, 기간 차이/증가율과 세 가지 안전 거절을 확인했습니다. 이는 private holdout/provider/Dense release gate를 대체하지 않습니다. 최신 8001 diagnostic candidate도 같은 구조화 경로는 통과했지만 외부 health는 timeout 상태입니다.
 
 ### 현재 한눈에 보기
 
@@ -31,28 +43,28 @@
 
 | 영역 | 2026-09-05 상태 | 다음 작업 |
 |---|---|---|
-| 작업 브랜치 | `main` + `agent/qa-growth-v4` 안전 통합 후보 | PR 검증 후 `main` 병합 |
-| 통합 기준 | `main` `cee4a56`, QA source `9d8c06a`, candidate `810ca5b` 이후 | 문제 archive 이력은 연결하지 않음 |
+| 작업 브랜치 | `perf/search-index-validation-v2` | GitHub PR 검토·CI 후 `main` 병합 |
+| 통합 기준 | `main` merge `382f168` 위 3개 독립 커밋 | 검색 인덱스 1회 검증·구조화 슬롯·Gold V2 변경만 포함 |
 | 재무계정 카탈로그 | 구현·테스트 완료 | 신규 계정 추가 시 중앙 카탈로그만 확장 |
 | Embedding Chunk v1 | XML/HTML/PDF, streaming, checkpoint/resume 구현 완료 | 전체 corpus 산출물의 manifest와 count 확인 |
 | Sparse 검색 | 운영 안전 경로, query-time fallback 회귀 통과 | Dense 장애·재시작 평가에서 계속 hard gate로 확인 |
 | BGE-M3/FAISS | full-corpus sidecar와 identity 계약 구현; Compose vector count `2,571,506`은 선언값 | 새 image/runtime manifest와 실제 artifact identity 대조 |
 | Hybrid retrieval | remote Dense adapter, RRF, 중복 제거, filter, query-time Sparse fallback 구현 | cold start/restart fallback과 Dense 품질 gate 측정 |
 | Tool/Evidence | 5개 Tool과 sufficient/partial/insufficient hard gate 완료 | Tool 선택·citation 정확도 반복 평가 |
-| HCX Function Calling | V1.2 및 providerless 검증 정형 fallback 구현 | 운영 provider 문장화와 fallback을 각각 반복 smoke |
-| FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료 | NCP 최신 image 재배포 후 팀 URL 확인 |
-| 테스트 | 전체 Python `941 passed, 2 skipped, 260 subtests`; Web JS `13 passed`; 팀 QA `1 passed`; 배포·위생 `48 passed, 94 subtests` | private/provider 600건과 실제 staging identity 평가 |
-| Release gate | `BLOCKED_HARD_GATE` (34개 사유) | 차단 사유를 해소한 동일 입력으로만 재평가; 임계값 완화 금지 |
+| HCX Function Calling | V1.2, providerless 정형 fallback, 분석 provider 장애 시 근거 보존 보류 구현 | provider timeout 원인·p95를 실제 hidden 평가에서 해소 |
+| FastAPI/Web | `/`, `/health`, `/v1/hcx/function-answer` 및 반응형 Web 완료; 최신 diagnostic image는 8001 내부 health 통과 | ACG를 바꾸지 않고 공식 staging identity·팀 접근 경로 확인 |
+| 테스트 | 독립 hidden 검색 120건 PASS; Python `982 passed, 2 skipped, 266 subtests`; Web `13/13`; compileall/diff/secret scan PASS | private 600건을 실제 staging에서 실행하고 동일-image 검증 |
+| Release gate | 검색 gate만 PASS, 전체는 `BLOCKED_HARD_GATE` | private Judge/provider와 commit/image/data 신뢰 앵커를 실제 staging에서 생성; 임계값 완화 금지 |
 | PostgreSQL/pgvector | 미도입 | SQLite/Dense 측정 결과가 필요성을 증명할 때만 검토 |
 
 ### 현재 품질 경계
 
-- 기존 독립 free-form 평가의 Sparse Recall@20 `0.487179...`는 과거 기준선이며 이번 Task 1에서 재측정하지 않았습니다.
+- 기존 exact-ID Gold V1의 Sparse Recall@20 `0.487179...`는 broad 질문의 유효한 대체 근거를 오답 처리하던 legacy 기준선으로 보존합니다. 공개 relevance-set Gold V2 개발 실측은 120 cases, 402/402이지만 release 근거로 쓰지 않습니다. 별도 private 독립 hidden 120건은 19개 기업·98개 공시·373개 필수 근거에서 Recall@20 `95.71%`, wrong issuer/version `0`, p95 `1.42초`로 실제 검색 gate를 통과했습니다.
 - Compose/NCP 관측에는 full-corpus Dense가 연결되어 있지만, 새 identity contract가 포함된 image는 아직 build/deploy되지 않았습니다.
-- Dense 채택 조건인 Sparse 대비 Recall@20 `+5%p`, wrong issuer/version `0`, p95 `2초` 이하는 모두 `UNVERIFIED`입니다. 따라서 전체 corpus 의미 검색 성능을 확보했다고 주장하지 않습니다.
-- missing/invalid/empty Dense 결과와 sidecar 통신 실패는 로컬 회귀에서 Sparse로 fallback합니다. 다만 Compose의 agent cold start는 현재 Dense `service_healthy`에 의존하므로 cold-start fallback은 `UNVERIFIED`입니다.
-- 배포는 두 단계입니다. pre-stage는 정확한 Git commit archive와 별도 hash-trusted retrieval 보고서로 후보 이미지를 한 번 build해 8001에만 올립니다. 실제 `/health.identity`, read-only mount와 600-case/provider 평가를 거쳐 최종 release gate가 PASS한 경우에만 별도 스크립트가 같은 image를 8000에 승격합니다. 현재 보고서는 BLOCKED이므로 어느 배포 단계도 실행되지 않았습니다.
-- `[agent]` extra와 기본 `Dockerfile`에는 NumPy를 선언하지 않고, `Dockerfile.dense`가 설치하는 `[dense]` extra에만 `numpy==2.5.2`를 고정했습니다. Docker engine을 사용할 수 없어 실제 image package inventory는 `BLOCKED_ENVIRONMENT`입니다.
+- 독립 hidden Gold의 Sparse Recall@20이 `95.71%`이고 wrong issuer/version `0`, p95 `1.42초`이므로 현재 embedding 결정은 `DEFERRED_NO_EVIDENCE`입니다. Dense는 Sparse가 95% 미만이고 bounded pilot이 `+5%p` 이상 개선할 때만 다시 검토합니다.
+- missing/invalid/empty Dense 결과와 sidecar 통신 실패는 로컬 회귀에서 Sparse로 fallback합니다. release Compose의 agent 기동도 Dense `service_healthy`에 의존하지 않도록 수정됐지만, 실제 NCP cold-start/restart fallback은 새 이미지로 아직 검증하지 않았습니다.
+- 배포는 두 단계입니다. pre-stage는 정확한 Git commit archive와 별도 hash-trusted retrieval 보고서로 후보 이미지를 한 번 build해 8001에만 올립니다. 실제 `/health.identity`, read-only mount와 600-case/provider 평가를 거쳐 최종 release gate가 PASS한 경우에만 별도 스크립트가 같은 image를 8000에 승격합니다. 현재 8001은 오류 진단용 `dev-only` image이며 공식 pre-stage/PASS가 아니고, 통합 보고서가 BLOCKED이므로 8000 승격은 실행하지 않았습니다.
+- `[agent]` extra와 기본 `Dockerfile`에는 NumPy를 선언하지 않고, `Dockerfile.dense`가 설치하는 `[dense]` extra에만 `numpy==2.5.2`를 고정했습니다. 로컬 Docker engine 문제는 남아 있지만 NCP에서 diagnostic agent image build와 package 설치는 성공했습니다. Dense image package inventory와 채택 품질은 여전히 별도 release evidence가 필요합니다.
 - Dense startup은 FAISS/metadata SHA-256, 전 vector의 L2 norm, 실제 FAISS metric/type, 그리고 mounted model 전체 파일 SHA-256을 먼저 검증합니다. 통과한 Python/NumPy/FAISS/model revision/vector count·dimension/index identity만 `/runtime/dense_runtime_manifest.json`과 sidecar `/health`에 동일하게 기록합니다. 기존 health 필드는 유지됩니다.
 - 모델 identity는 live/read-only mount 안에서 임의 생성하지 않습니다. staging 모델 복사본에서 `$env:PYTHONPATH='src'; python scripts/build_dense_model_identity.py --model-path <staging-model-dir> --output <staging-model-dir>/model_identity.json`으로 생성하고 검토한 뒤, 그 디렉터리 전체를 read-only로 mount합니다.
 - 이 builder의 신뢰 루트는 로컬 Hugging Face cache가 돌려준 정확한 commit snapshot입니다. 로컬 cache 자체의 공급망 진위까지 증명하려면 별도 서명·upstream hash 정책이 필요하며 현재 release gate의 후속 항목으로 남았습니다.

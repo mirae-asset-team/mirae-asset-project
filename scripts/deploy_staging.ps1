@@ -129,7 +129,9 @@ function Assert-FinancialPreStage([object]$Report, [hashtable]$Expected) {
 }
 
 function Assert-RetrievalPreStage([object]$Report, [hashtable]$Expected) {
-    if ($Report.schema_version -isnot [string] -or $Report.schema_version -cne "1.0.0") { throw "Unsupported retrieval pre-stage schema." }
+    if ($Report.schema_version -isnot [string] -or $Report.schema_version -cne "freeform-retrieval-evaluation-v2") { throw "Unsupported retrieval pre-stage schema." }
+    if ($Report.evaluation_scope -isnot [string] -or $Report.evaluation_scope -cne "independent_hidden") { throw "Retrieval evaluation scope is not independent hidden." }
+    if ($Report.release_eligible -isnot [bool] -or $Report.release_eligible -ne $true) { throw "Retrieval report is not release-eligible." }
     if ($Report.status -isnot [string] -or $Report.status -cne "ok") { throw "Retrieval status is not ok." }
     Assert-FreshTimestamp $Report.generated_at "retrieval.generated_at"
     $retrievalIdentity = [PSCustomObject]@{
@@ -139,7 +141,8 @@ function Assert-RetrievalPreStage([object]$Report, [hashtable]$Expected) {
     }
     Assert-DataIdentity $retrievalIdentity $Expected "retrieval"
     Assert-ExactNumber $Report.metrics "case_count" 120 "retrieval.metrics"
-    Assert-ExactNumber $Report.metrics "query_count" 480 "retrieval.metrics"
+    $queryCount = ConvertTo-FiniteNumber $Report.metrics.query_count "retrieval.metrics.query_count"
+    if ($queryCount -ne [math]::Floor($queryCount) -or $queryCount -lt 120 -or $queryCount -gt 960) { throw "Retrieval query_count must be an integer between 120 and 960." }
     foreach ($name in @("wrong_issuer_count", "wrong_version_count", "hard_failure_count")) { Assert-ExactNumber $Report.metrics $name 0 "retrieval.metrics" }
     $recall = ConvertTo-FiniteNumber $Report.metrics.target_recall_at_20 "retrieval.metrics.target_recall_at_20"
     if ($recall -lt 0.95 -or $recall -gt 1) { throw "Retrieval Recall@20 is below the release threshold." }
@@ -297,6 +300,10 @@ test "$(sha256sum /srv/mirae/data/agent/agent_search.sqlite | awk '{print $1}')"
 docker load --input candidate-image.tar >/dev/null
 test "$(docker image inspect --format '{{.Id}}' "$image_ref")" = "$expected_image"
 export DISCLOSURE_RELEASE_IMAGE="$image_ref" DISCLOSURE_EXPECTED_COMMIT="$expected_commit"
+export DISCLOSURE_EXPECTED_IMAGE_ID="$expected_image"
+export DISCLOSURE_EXPECTED_BASE_SHA256="$expected_base"
+export DISCLOSURE_EXPECTED_OVERLAY_SHA256="$expected_overlay"
+export DISCLOSURE_EXPECTED_SEARCH_INDEX_SHA256="$expected_search"
 docker compose -p mirae-release -f compose.release.yaml up -d --no-build dense-retriever disclosure-agent-staging
 staging_container="$(docker compose -p mirae-release -f compose.release.yaml ps -q disclosure-agent-staging)"
 dense_container="$(docker compose -p mirae-release -f compose.release.yaml ps -q dense-retriever)"
@@ -359,12 +366,34 @@ health_identity, health_identity_sha256 = validate_health_identity(health, ident
 if not all(health.get(name) is True for name in ("ready", "eval_enabled", "provider_configured", "function_calling_configured")): raise RuntimeError("staging runtime is not release-evaluable")
 contract = load_contract(root / "config/judge_stress_v2_contract.json")
 sources, _ = load_audited_sources(root, contract)
+source_filings = {}
+for rows in sources.values():
+    for record in rows:
+        record_hash = hashlib.sha256(json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        filings = []
+        if record.get("filing_id"): filings.append(str(record["filing_id"]))
+        for field in ("filing_ids", "candidate_filing_ids"):
+            values = record.get(field)
+            if isinstance(values, list): filings.extend(str(value) for value in values if value)
+        source_filings[record_hash] = sorted(set(filings))
+
+def resolve_oracle(case, probe):
+    del probe
+    raw = case.get("oracle")
+    if not isinstance(raw, dict): raise RuntimeError("staging case oracle is invalid")
+    result = dict(raw)
+    source = case.get("source")
+    source_hash = source.get("record_sha256") if isinstance(source, dict) else None
+    if "filing_ids" not in result and isinstance(source_hash, str):
+        result["filing_ids"] = source_filings.get(source_hash, [])
+    return result
+
 development = build_development_cases(sources, contract)
 holdout = load_private_holdout(args.private_holdout, repository_root=root, contract=contract)
 suite = assemble_judge_suite(development, holdout, contract); cases = suite["development"] + suite["holdout"]
 if len(cases) != 600: raise RuntimeError("staging suite must contain exactly 600 cases")
 manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-runtime = StagingJudgeRuntime(client)
+runtime = StagingJudgeRuntime(client, oracle_resolver=resolve_oracle)
 summary = run_staging_suite(cases, runtime, JudgeRunOptions(private_holdout_available=True, provider_available=True, concurrency=20), manifest=manifest)
 smoke = smoke_public_contracts(client)
 if smoke.get("error_count") != 0: raise RuntimeError("staging public smoke failed")

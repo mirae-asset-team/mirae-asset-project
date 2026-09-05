@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 import os
+import re
 import sqlite3
 from pathlib import Path
 from time import perf_counter
@@ -35,6 +36,28 @@ SECURITY_HEADERS = {
     "Referrer-Policy": "no-referrer",
     "X-Frame-Options": "DENY",
 }
+
+_RELEASE_IDENTITY_ENV = (
+    ("commit", "RELEASE_COMMIT", re.compile(r"[0-9a-fA-F]{40}")),
+    ("image_id", "RELEASE_IMAGE_ID", re.compile(r"sha256:[0-9a-fA-F]{64}")),
+    ("base_sha256", "RELEASE_BASE_SHA256", re.compile(r"[0-9a-fA-F]{64}")),
+    ("overlay_sha256", "RELEASE_OVERLAY_SHA256", re.compile(r"[0-9a-fA-F]{64}")),
+    (
+        "search_index_sha256",
+        "RELEASE_SEARCH_INDEX_SHA256",
+        re.compile(r"[0-9a-fA-F]{64}"),
+    ),
+)
+
+
+def _release_identity_from_environment() -> dict[str, str] | None:
+    identity: dict[str, str] = {}
+    for public_name, environment_name, pattern in _RELEASE_IDENTITY_ENV:
+        value = os.environ.get(environment_name, "").strip()
+        if pattern.fullmatch(value) is None:
+            return None
+        identity[public_name] = value.lower()
+    return identity
 
 
 def _validated_as_of(value: str | None) -> str | None:
@@ -142,7 +165,10 @@ def _health_status(service: Any) -> dict[str, Any]:
     search_database = getattr(service, "search_database", None)
     search_configured = bool(search_database)
     search_index_ready = not search_configured
-    if search_configured and base_attested and attestation_configured and Path(search_database).exists():
+    cached_search_ready = getattr(service, "search_index_ready", None)
+    if search_configured and cached_search_ready is not None:
+        search_index_ready = bool(cached_search_ready)
+    elif search_configured and base_attested and attestation_configured and Path(search_database).exists():
         try:
             from .search_index import SafeSearchIndex
             SafeSearchIndex(
@@ -317,6 +343,7 @@ def create_app(
         else None
     )
     startup_health: dict[str, Any] | None = None
+    release_identity = _release_identity_from_environment()
 
     def require_qa_store() -> QaLabStore:
         if qa_store is None:
@@ -389,6 +416,8 @@ def create_app(
             function_calling_service is not None and getattr(function_client, "configured", False)
         )
         health_payload["eval_enabled"] = eval_enabled
+        if release_identity is not None:
+            health_payload["identity"] = dict(release_identity)
         return envelope(health_payload, started)
 
     def verified_answer(

@@ -63,6 +63,22 @@ def test_all_nine_public_judgment_dimensions_have_bounded_mandatory_slots(questi
     assert all(slot.issuer is not None for slot in plan.required_evidence_slots)
 
 
+def test_plan_captures_only_contextual_dart_filing_ids_without_treating_large_values_as_ids() -> None:
+    plan = plan_analysis(
+        "삼성전자 최초 공시 20240301000001와 정정 공시번호 20240402000002를 비교 분석해줘",
+        company_candidates=["삼성전자"],
+    )
+
+    assert plan.base_plan.filing_ids == ("20240301000001", "20240402000002")
+    assert "explicit_filing_id" in plan.base_plan.reason_codes
+
+    numeric = plan_analysis(
+        "삼성전자 매출액 20240301000001원이 맞는지 공시로 분석해줘",
+        company_candidates=["삼성전자"],
+    )
+    assert numeric.base_plan.filing_ids == ()
+
+
 def test_future_forecast_request_is_prohibited_but_historical_forecast_text_analysis_is_allowed():
     forecast = plan_analysis(
         "삼성전자 공시를 바탕으로 내년 매출을 전망해줘",
@@ -130,6 +146,40 @@ def test_dimension_catalog_rejects_invalid_minimum_periods(minimum):
     with patch("pathlib.Path.open", mock_open(read_data=json.dumps(catalog, ensure_ascii=False))):
         with pytest.raises(ValueError, match="minimum periods"):
             load_dimension_catalog("unused.json")
+
+
+def test_dimension_catalog_uses_runtime_config_directory_when_package_default_is_missing(
+    tmp_path,
+    monkeypatch,
+):
+    catalog = {
+        "dimensions": [{
+            "dimension_id": "runtime-config",
+            "match_any": ["분석"],
+            "subquestions": ["근거"],
+            "allowed_conclusions": ["insufficient_evidence"],
+            "max_evidence": 2,
+            "slots": [{
+                "slot_id": "runtime-slot", "domain": "text",
+                "search_concepts": ["사업위험"], "min_periods": 1,
+                "min_evidence": 1, "max_evidence": 2, "mandatory": True,
+                "absence_reason_code": "missing",
+            }],
+        }],
+    }
+    (tmp_path / "analysis_dimensions.json").write_text(
+        json.dumps(catalog, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DISCLOSURE_CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "disclosure_db.analysis_planner._DEFAULT_DIMENSIONS_PATH",
+        tmp_path / "missing-package-config" / "analysis_dimensions.json",
+    )
+
+    loaded = load_dimension_catalog()
+
+    assert loaded[0]["dimension_id"] == "runtime-config"
 
 
 def test_evidence_slot_positional_evidence_bounds_remain_backward_compatible():

@@ -1,0 +1,10 @@
+{
+  "eligible": false,
+  "minimum_gain": 0.05,
+  "minimum_recall": 0.95,
+  "reason": "release_ineligible_evaluation_scope",
+  "sparse_recall_at_20": 1.0,
+  "status": "BLOCKED_INDEPENDENT_GOLD",
+  "summary_semantic_sha256": "468a647a23f3718a900f178c96bddc139235ca33008f1dbc8caef0ff34c7d60f",
+  "target_count": 402
+}

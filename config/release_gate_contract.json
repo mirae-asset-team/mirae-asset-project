@@ -21,7 +21,9 @@
     "provider_p95_ms_max": 10000
   },
   "retrieval": {
-    "recall_at_20_min": 0.95
+    "recall_at_20_min": 0.95,
+    "report_schema_version": "freeform-retrieval-evaluation-v2",
+    "required_evaluation_scope": "independent_hidden"
   },
   "concurrency": {
     "request_count": 20,

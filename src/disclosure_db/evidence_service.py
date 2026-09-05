@@ -42,6 +42,21 @@ _INSTRUCTION_LIKE_EVIDENCE_MARKERS = (
     "<system>", "[system]", "이전 지시를 무시", "지시를 무시",
     "시스템 프롬프트", "개발자 메시지", "개발자 지침",
 )
+_SEMANTIC_TEXT_SLOT_IDS = frozenset({
+    "disclosed_risk_factors",
+    "governance_events",
+    "management_discussion_text",
+})
+_MIN_SEMANTIC_EVIDENCE_CHARACTERS = 80
+
+
+def _slot_correction_policy(plan: AnalysisPlan, slot: EvidenceSlot) -> str:
+    slot_id = slot.slot_id.split("__i", 1)[0]
+    if plan.base_plan.correction_policy == "both" and slot_id == "original_disclosure":
+        return "original"
+    if plan.base_plan.correction_policy == "both" and slot_id == "effective_correction":
+        return "corrected"
+    return plan.base_plan.correction_policy
 
 
 def evidence_text_is_admitted(text: object) -> bool:
@@ -58,6 +73,25 @@ def evidence_text_is_admitted(text: object) -> bool:
     return not any(
         marker in normalized or "".join(marker.split()) in compact
         for marker in _INSTRUCTION_LIKE_EVIDENCE_MARKERS
+    )
+
+
+def semantic_text_evidence_is_answer_capable(text: object, slot: EvidenceSlot) -> bool:
+    """Reject short keyword collisions for broad semantic analysis slots."""
+
+    slot_id = slot.slot_id.split("__i", 1)[0]
+    if slot_id not in _SEMANTIC_TEXT_SLOT_IDS:
+        return True
+    normalized = " ".join(unicodedata.normalize("NFKC", str(text or "")).split()).casefold()
+    concepts = tuple(
+        " ".join(unicodedata.normalize("NFKC", concept).split()).casefold()
+        for concept in slot.search_concepts
+        if concept.strip()
+    )
+    return bool(
+        len(normalized) >= _MIN_SEMANTIC_EVIDENCE_CHARACTERS
+        and concepts
+        and any(concept in normalized for concept in concepts)
     )
 
 
@@ -99,6 +133,24 @@ class EvidenceService:
         self._dense_filing_cache: dict[tuple[object, ...], tuple[str, ...]] = {}
         if (self.overlay_database is not None or self.search_database is not None) and attestation is None:
             raise ValueError("attestation is required when runtime overlay/search is configured")
+        self._search_index = None
+        self._search_index_error: str | None = None
+        if self.search_database is not None:
+            if not self.search_database.exists():
+                self._search_index_error = "search_index_unavailable"
+            else:
+                try:
+                    from .search_index import SafeSearchIndex
+
+                    self._search_index = SafeSearchIndex(
+                        self.search_database,
+                        base_sha256=self.attestation.sha256,
+                        expected_base_size=self.attestation.size_bytes,
+                    )
+                except ValueError:
+                    self._search_index_error = "search_index_attestation_mismatch"
+                except (OSError, sqlite3.Error):
+                    self._search_index_error = "search_index_sqlite_error"
         self._companies: list[str] | None = None
         config_directory = Path(
             os.environ.get(
@@ -132,6 +184,10 @@ class EvidenceService:
             }
         except (OSError, json.JSONDecodeError):
             self.event_predicate_aliases = {}
+
+    @property
+    def search_index_ready(self) -> bool:
+        return self.search_database is None or self._search_index is not None
 
     @staticmethod
     def _slot_version_as_of(plan: AnalysisPlan) -> str | None:
@@ -354,33 +410,38 @@ class EvidenceService:
             "wrong_issuer_count": 0,
             "wrong_version_count": 0,
             "excluded_prompt_injection_count": 0,
+            "excluded_unanswerable_count": 0,
             "sparse_ranks": [],
         }
-        if not variants or self.search_database is None or not self.search_database.exists() or self.attestation is None:
-            diagnostics["reason_code"] = "search_index_unavailable"
+        if not variants or self._search_index is None:
+            diagnostics["reason_code"] = self._search_index_error or "search_index_unavailable"
             diagnostics["latency_ms"] = int(round((time.perf_counter() - started) * 1000))
             return [], diagnostics
         try:
-            from .search_index import SafeSearchIndex
-
-            index = SafeSearchIndex(
-                self.search_database,
-                base_sha256=self.attestation.sha256,
-                expected_base_size=self.attestation.size_bytes,
-            )
             rankings: list[list[EvidenceRef]] = []
             version_as_of = self._slot_version_as_of(plan)
-            for variant_id, variant in enumerate(variants):
-                rows = index.search(
-                    variant,
-                    company=slot.issuer or plan.base_plan.company,
-                    as_of=version_as_of,
-                    filed_at=slot.filing_date,
-                    start_date=slot.period_start,
-                    end_date=slot.period_end,
-                    limit=MAX_CANDIDATES_PER_VARIANT,
-                    correction_policy=plan.base_plan.correction_policy,
-                )
+            filing_ids: tuple[str | None, ...] = plan.base_plan.filing_ids or (None,)
+            correction_policy = _slot_correction_policy(plan, slot)
+            search_variants = (
+                tuple(dict.fromkeys((plan.question, *variants)))[:4]
+                if plan.base_plan.filing_ids
+                else variants
+            )
+            diagnostics["variant_ids"] = list(range(len(search_variants)))
+            for variant_id, variant in enumerate(search_variants):
+                rows = []
+                for filing_id in filing_ids:
+                    rows.extend(self._search_index.search(
+                        variant,
+                        company=slot.issuer or plan.base_plan.company,
+                        filing_id=filing_id,
+                        as_of=version_as_of,
+                        filed_at=slot.filing_date,
+                        start_date=slot.period_start,
+                        end_date=slot.period_end,
+                        limit=MAX_CANDIDATES_PER_VARIANT,
+                        correction_policy=correction_policy,
+                    ))
                 diagnostics["candidate_count"] = int(diagnostics["candidate_count"]) + len(rows)
                 sparse_ranks = diagnostics["sparse_ranks"]
                 assert isinstance(sparse_ranks, list)
@@ -397,7 +458,7 @@ class EvidenceService:
                 hydrated = self._hydrate_ids(
                     (str(row["evidence_id"]) for row in rows),
                     as_of=version_as_of,
-                    correction_policy=plan.base_plan.correction_policy,
+                    correction_policy=correction_policy,
                 )
                 by_id = {ref.evidence_id: ref for ref in hydrated}
                 refs = [by_id[str(row["evidence_id"])] for row in rows if str(row["evidence_id"]) in by_id]
@@ -408,22 +469,34 @@ class EvidenceService:
                     if not evidence_text_is_admitted(ref.text):
                         diagnostics["excluded_prompt_injection_count"] = int(diagnostics["excluded_prompt_injection_count"]) + 1
                         continue
+                    if not semantic_text_evidence_is_answer_capable(ref.text, slot):
+                        diagnostics["excluded_unanswerable_count"] = int(diagnostics["excluded_unanswerable_count"]) + 1
+                        continue
                     safe_refs.append(ref)
                 rankings.append(safe_refs)
             dense_refs, dense_diagnostics = self._search_dense(
-                variants[0],
+                search_variants[0],
                 company=slot.issuer or plan.base_plan.company,
+                filing_id=plan.base_plan.filing_ids[0] if len(plan.base_plan.filing_ids) == 1 else None,
                 as_of=version_as_of,
                 filed_at=slot.filing_date,
                 start_date=slot.period_start,
                 end_date=slot.period_end,
-                correction_policy=plan.base_plan.correction_policy,
+                correction_policy=correction_policy,
             )
             for ref in dense_refs:
                 ref.locator["analysis_issuer"] = slot.issuer or plan.base_plan.company
                 ref.locator["analysis_version_admitted"] = True
-            if dense_refs:
-                rankings.append(dense_refs)
+            answer_capable_dense_refs = [
+                ref for ref in dense_refs
+                if semantic_text_evidence_is_answer_capable(ref.text, slot)
+            ]
+            diagnostics["excluded_unanswerable_count"] = (
+                int(diagnostics["excluded_unanswerable_count"])
+                + len(dense_refs) - len(answer_capable_dense_refs)
+            )
+            if answer_capable_dense_refs:
+                rankings.append(answer_capable_dense_refs)
             diagnostics.update(dense_diagnostics)
             result = fuse_slot_results(rankings, limit=min(slot.max_evidence, MAX_EVIDENCE_PER_SLOT))
         except ValueError:
@@ -486,6 +559,7 @@ class EvidenceService:
                 statement_type=None if slot.domain == "financial" else base.statement_type,
                 correction_policy=base.correction_policy,
                 filing_date=slot.filing_date,
+                filing_ids=list(base.filing_ids) if slot.domain == "event" else [],
                 fact_domain=slot_domain,
                 account_terms=[concept] if concept is not None else [],
                 predicate_terms=list(slot.search_concepts) if slot.domain == "event" else [],
@@ -591,15 +665,27 @@ class EvidenceService:
             final_financial_facts = self._facts_with_final_evidence(financial_facts, final_slot_ids)
             final_event_facts = self._facts_with_final_evidence(event_facts, final_slot_ids)
             period_complete = True
-            if slot.domain == "financial" and slot.min_periods > 1:
+            if slot.domain == "financial":
                 periods_by_account: dict[str, set[tuple[object, object, object]]] = {}
                 for fact in final_financial_facts:
                     account_id = str(fact.get("account_id") or "")
                     period = (fact.get("period_start"), fact.get("period_end"), fact.get("instant_date"))
                     if account_id and any(value is not None for value in period):
                         periods_by_account.setdefault(account_id, set()).add(period)
-                period_complete = any(
-                    len(periods) >= slot.min_periods for periods in periods_by_account.values()
+                expected_accounts = {
+                    resolution.canonical_id
+                    for concept in slot.search_concepts
+                    for resolution in [resolve_financial_account(
+                        concept,
+                        catalog=self.financial_account_catalog,
+                    )]
+                    if resolution.status == "resolved"
+                    and resolution.support_level == "structured"
+                    and resolution.canonical_id is not None
+                }
+                period_complete = bool(expected_accounts) and all(
+                    len(periods_by_account.get(account_id, set())) >= slot.min_periods
+                    for account_id in expected_accounts
                 )
             complete = len(fused) >= slot.min_evidence and period_complete
             slot_reasons: tuple[str, ...] = () if complete or not slot.mandatory else (f"required_slot_missing:{slot.slot_id}",)
@@ -804,6 +890,7 @@ class EvidenceService:
             None if plan.period_start or plan.period_end or plan.instant_date else plan.as_of
         )
         filing_date = plan.filing_date
+        filing_id = plan.filing_ids[0] if len(plan.filing_ids) == 1 else None
         structured_domain = plan.fact_domain in {"financial", "event"}
         if self.overlay_database and self.overlay_database.exists() and structured_domain:
             overlay_attested = overlay_matches_base(self.base_database, self.overlay_database, attestation=self.attestation)
@@ -826,6 +913,7 @@ class EvidenceService:
             financial_facts = fetch_overlay_facts(
                 self.base_database,
                 self.overlay_database,
+                filing_id=filing_id,
                 company=plan.company,
                 as_of=version_as_of,
                 period_start=plan.period_start if exact_duration else None,
@@ -848,6 +936,7 @@ class EvidenceService:
             event_facts = fetch_event_facts(
                 self.base_database,
                 self.overlay_database,
+                filing_id=filing_id,
                 company=plan.company,
                 predicate_terms=self._expand_event_terms(plan.predicate_terms),
                 as_of=version_as_of,
@@ -871,16 +960,14 @@ class EvidenceService:
                 if self.search_database.exists():
                     index_available = True
                     try:
-                        if self.attestation is None:
-                            raise ValueError("search index requires base attestation")
-                        from .search_index import SafeSearchIndex
-                        rows = SafeSearchIndex(
-                            self.search_database,
-                            base_sha256=self.attestation.sha256,
-                            expected_base_size=self.attestation.size_bytes,
-                        ).search(
+                        if self._search_index is None:
+                            if self._search_index_error:
+                                plan.reason_codes.append(self._search_index_error)
+                            raise RuntimeError("validated search index unavailable")
+                        rows = self._search_index.search(
                             plan.question,
                             company=plan.company,
+                            filing_id=filing_id,
                             as_of=version_as_of,
                             filed_at=filing_date,
                             limit=max(1, limit - len(refs)),
@@ -900,6 +987,7 @@ class EvidenceService:
                                 dense_refs, dense_diagnostics = self._search_dense(
                                     plan.question,
                                     company=plan.company,
+                                    filing_id=filing_id,
                                     as_of=version_as_of,
                                     filed_at=filing_date,
                                     correction_policy=plan.correction_policy,
@@ -914,6 +1002,8 @@ class EvidenceService:
                         plan.reason_codes.append("search_index_attestation_mismatch")
                     except (OSError, sqlite3.Error):
                         plan.reason_codes.append("search_index_sqlite_error")
+                    except RuntimeError:
+                        pass
                 if not index_used:
                     plan.reason_codes.append(
                         "search_index_unavailable" if not index_available else "search_index_fallback_to_ssot"

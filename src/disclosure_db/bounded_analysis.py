@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Protocol
 
 from .agent_contracts import EvidenceRef, to_jsonable
@@ -28,6 +29,83 @@ def _fact_evidence_ids(fact: Mapping[str, object]) -> set[str]:
     return {
         str(value) for value in values if value
     } if isinstance(values, (list, tuple)) else set()
+
+
+def _financial_period(fact: Mapping[str, object]) -> str:
+    fiscal_year = fact.get("fiscal_year")
+    if isinstance(fiscal_year, int) and 1900 <= fiscal_year <= 2200:
+        return str(fiscal_year)
+    return str(
+        fact.get("period_end")
+        or fact.get("instant_date")
+        or fact.get("period_start")
+        or ""
+    )[:4]
+
+
+def _financial_value(fact: Mapping[str, object]) -> Decimal | None:
+    if fact.get("validation_status") not in {None, "validated"}:
+        return None
+    try:
+        value = Decimal(str(fact.get("value_numeric")))
+        scale = Decimal(str(fact.get("scale") or 1))
+    except (InvalidOperation, ValueError):
+        return None
+    result = value * scale
+    return result if result.is_finite() else None
+
+
+def _profitability_conclusion(
+    facts: Sequence[Mapping[str, object]],
+) -> str | None:
+    by_period: dict[str, dict[str, Decimal]] = {}
+    for fact in facts:
+        account_id = str(fact.get("account_id") or "")
+        if account_id not in {"revenue", "operating_income", "net_income"}:
+            continue
+        period = _financial_period(fact)
+        value = _financial_value(fact)
+        if not period or value is None:
+            continue
+        period_values = by_period.setdefault(period, {})
+        if account_id in period_values:
+            return None
+        period_values[account_id] = value
+    complete_periods = sorted(
+        period for period, values in by_period.items()
+        if values.get("revenue") not in {None, Decimal(0)}
+        and "operating_income" in values
+    )
+    if len(complete_periods) < 2:
+        return None
+    previous, current = (by_period[period] for period in complete_periods[-2:])
+    directions: list[int] = []
+    for account_id in ("operating_income", "net_income"):
+        if account_id not in previous or account_id not in current:
+            if account_id == "operating_income":
+                return None
+            continue
+        old_margin = previous[account_id] / previous["revenue"]
+        new_margin = current[account_id] / current["revenue"]
+        directions.append((new_margin > old_margin) - (new_margin < old_margin))
+    if not directions:
+        return None
+    if all(direction > 0 for direction in directions):
+        return "improved"
+    if all(direction < 0 for direction in directions):
+        return "deteriorated"
+    if all(direction == 0 for direction in directions):
+        return "stable"
+    return "mixed"
+
+
+def _deterministic_conclusion(
+    dimension: str | None,
+    facts: Sequence[Mapping[str, object]],
+) -> str | None:
+    if dimension == "profitability":
+        return _profitability_conclusion(facts)
+    return None
 
 
 def _date_in_slot(value: object, slot: EvidenceSlot) -> bool:
@@ -318,11 +396,19 @@ class BoundedAnalysisExecutor:
         if not retrieval.complete and mandatory_complete:
             mandatory_complete = False
             reasons.append("analysis_retrieval_incomplete")
+        conclusion = (
+            _deterministic_conclusion(
+                plan.judgment_dimension,
+                retrieval.financial_facts,
+            )
+            if mandatory_complete
+            else "insufficient_evidence"
+        )
         return BoundedAnalysisExecution(
             plan=plan,
             retrieval=retrieval,
             complete=mandatory_complete,
-            conclusion=None if mandatory_complete else "insufficient_evidence",
+            conclusion=conclusion,
             reason_codes=_ordered(tuple(reasons)),
             evidence=tuple(admitted.values()),
             evidence_slots=tuple(payloads),

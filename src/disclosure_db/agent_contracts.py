@@ -39,6 +39,7 @@ class QueryPlan:
     target_periods: list[dict[str, str | None]] = field(default_factory=list)
     requires_complete_evidence_set: bool = False
     filing_date: str | None = None
+    filing_ids: list[str] = field(default_factory=list)
     account_id: str | None = None
     account_status: str = "unknown"
     account_match_type: str | None = None

@@ -52,7 +52,11 @@ def _contract() -> dict[str, object]:
             "provider_call_count": 120,
             "provider_p95_ms_max": 10_000,
         },
-        "retrieval": {"recall_at_20_min": 0.95},
+        "retrieval": {
+            "recall_at_20_min": 0.95,
+            "report_schema_version": "freeform-retrieval-evaluation-v2",
+            "required_evaluation_scope": "independent_hidden",
+        },
         "concurrency": {
             "request_count": 20,
             "error_count": 0,
@@ -181,6 +185,9 @@ def _passing_reports() -> tuple[dict[str, object], ...]:
         ],
     }
     retrieval = {
+        "schema_version": "freeform-retrieval-evaluation-v2",
+        "evaluation_scope": "independent_hidden",
+        "release_eligible": True,
         "generated_at": timestamp,
         "identity": deepcopy(IDENTITY),
         "case_scores": [
@@ -468,6 +475,26 @@ def test_retrieval_recall_is_recomputed_from_raw_case_scores() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("schema_version", "1.0.0", "unsupported:retrieval.schema_version"),
+        ("evaluation_scope", "development_public_agent_audited", "unsupported:retrieval.evaluation_scope"),
+        ("release_eligible", False, "blocked:retrieval.release_ineligible"),
+    ],
+)
+def test_retrieval_report_must_be_independent_v2_and_release_eligible(
+    field: str, value: object, reason: str,
+) -> None:
+    reports = list(_passing_reports())
+    reports[2][field] = value
+
+    result = _evaluate(tuple(reports))
+
+    assert result.hard_gate_passed is False
+    assert reason in result.hard_gate_reasons
+
+
 @pytest.mark.parametrize("raw_scores", [None, [], [{"case_id": "incomplete"}]])
 def test_missing_or_incomplete_raw_retrieval_scores_fail_closed(
     raw_scores: object,
@@ -714,7 +741,9 @@ def test_current_tracked_artifacts_are_blocked() -> None:
     assert result.release_state == "BLOCKED_HARD_GATE"
     assert result.hard_gate_passed is False
     assert any("judge.results" in reason for reason in result.hard_gate_reasons)
-    assert any("retrieval.recall_at_20" in reason for reason in result.hard_gate_reasons)
+    assert not any(
+        "retrieval.recall_at_20" in reason for reason in result.hard_gate_reasons
+    )
     assert any("deployment" in reason for reason in result.hard_gate_reasons)
 
 
@@ -746,6 +775,8 @@ def test_reports_are_content_free_and_contract_is_strict(tmp_path: Path) -> None
         lambda value: value["financial"].__setitem__("required_total", 1),
         lambda value: value["judge"].__setitem__("numeric_exactness", 0.5),
         lambda value: value["retrieval"].__setitem__("recall_at_20_min", 0.1),
+        lambda value: value["retrieval"].__setitem__("report_schema_version", "1.0.0"),
+        lambda value: value["retrieval"].__setitem__("required_evaluation_scope", "development"),
         lambda value: value.__setitem__(
             "zero_counters", value["zero_counters"][:-1]
         ),

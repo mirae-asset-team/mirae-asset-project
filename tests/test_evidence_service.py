@@ -242,10 +242,6 @@ class EvidenceServiceTests(unittest.TestCase):
 
     def test_text_slot_period_is_sent_to_sparse_and_dense_prefilters(self) -> None:
         search_path = Path("search.sqlite")
-        service = EvidenceService(
-            Path("base.sqlite"), search_database=search_path,
-            attestation=Mock(sha256="a" * 64, size_bytes=123), dense_client=Mock(),
-        )
         slot = EvidenceSlot(
             "risk", "text", issuer="삼성전자",
             period_start="2024-01-01", period_end="2024-12-31",
@@ -259,8 +255,13 @@ class EvidenceServiceTests(unittest.TestCase):
         index.search.return_value = []
         with patch.object(Path, "exists", return_value=True), patch(
             "disclosure_db.search_index.SafeSearchIndex", return_value=index,
-        ), patch.object(service, "_search_dense", return_value=([], {})) as dense_search:
-            service._search_text_slot(plan, slot, ("위험",))
+        ):
+            service = EvidenceService(
+                Path("base.sqlite"), search_database=search_path,
+                attestation=Mock(sha256="a" * 64, size_bytes=123), dense_client=Mock(),
+            )
+            with patch.object(service, "_search_dense", return_value=([], {})) as dense_search:
+                service._search_text_slot(plan, slot, ("위험",))
 
         self.assertEqual(index.search.call_args.kwargs["start_date"], "2024-01-01")
         self.assertEqual(index.search.call_args.kwargs["end_date"], "2024-12-31")

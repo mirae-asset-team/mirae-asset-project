@@ -1,14 +1,14 @@
 {
   "schema_version": "financial-release-evaluation-v1",
-  "finished_at_utc": "2026-08-20T16:52:05.691033+00:00",
-  "finished_at_kst": "2026-08-21T01:52:05.691033+09:00",
+  "finished_at_utc": "2026-09-05T00:37:31.669498+00:00",
+  "finished_at_kst": "2026-09-05T09:37:31.669498+09:00",
   "inputs": {
     "base_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563",
-    "attestation_manifest_sha256": "13b6de3984edd55dd8f9f93b6fcb41701944637e00dc3b6c77f523c9995be1ce",
+    "attestation_manifest_sha256": "f8fd26189fe4cfd84f5e7d32bb7e5181cd8f682834c105715814cc51a383cb50",
     "overlay_sha256": "a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55",
     "search_index_sha256": "e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793",
-    "universe_manifest_sha256": "8f8c08c29605d7737bb83cb1843075f64676f9de9d166e4e56ac1d0e8657400b",
-    "financial_seed_sha256": "c36a33847d1d67c492d7f4137b428c6cb3bf7cccea8d4a3b0a0d620dbee7a9bf"
+    "universe_manifest_sha256": "515b909a7ebbb6b24e8bef5e0514ece82da6e704cf63da52a205e99399f29e9f",
+    "financial_seed_sha256": "82e14f8b540a73e5c3e86747fe0fdae324023aadb4f4a58562e091910a1ed338"
   },
   "population": {
     "search_target_count": 76,
@@ -37,7 +37,7 @@
     "structured_accuracy": 1.0,
     "false_numeric_claim_count": 0,
     "ungrounded_verified_answer_count": 0,
-    "p95_ms": 10.357,
+    "p95_ms": 12.372,
     "failures": []
   },
   "special_cases": {
@@ -51,28 +51,28 @@
     "request_count": 20,
     "error_count": 0,
     "error_types": [],
-    "p95_ms": 86.94,
+    "p95_ms": 125.713,
     "latencies_ms": [
-      51.771,
-      52.554,
-      60.618,
-      68.022,
-      68.219,
-      68.243,
-      71.566,
-      72.113,
-      74.127,
-      74.959,
-      76.316,
-      78.348,
-      81.259,
-      83.051,
-      83.456,
-      83.788,
-      84.066,
-      84.782,
-      86.94,
-      87.34
+      64.123,
+      89.594,
+      93.36,
+      95.582,
+      102.28,
+      102.718,
+      104.812,
+      110.295,
+      110.6,
+      111.555,
+      111.598,
+      113.024,
+      116.108,
+      116.612,
+      117.504,
+      119.324,
+      119.945,
+      120.562,
+      125.713,
+      126.48
     ]
   },
   "provider": {

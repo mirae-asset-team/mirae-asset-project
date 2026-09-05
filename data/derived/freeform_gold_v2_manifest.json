@@ -1,0 +1,39 @@
+{
+  "alternative_evidence_count": 2574,
+  "artifact": "freeform_gold_v2.agent_audited.jsonl",
+  "case_count": 120,
+  "content_sha256": "26687e76ca771eb65763e548e92d52b3cb5f734f8a8cae53d9fcaea7fef7c71a",
+  "contract_sha256": "1e79212d4cab8e4cc7bfa390b48834e25cb17394f3079a84aba46ea71b6a8760",
+  "database_sha256": "b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563",
+  "dimension_counts": {
+    "business_risk": 18,
+    "contract_change": 18,
+    "correction_materiality": 12,
+    "financing_pressure": 18,
+    "governance_signal": 24,
+    "management_discussion": 12,
+    "profitability_financial_health": 18
+  },
+  "evaluation_scope": "development_public_agent_audited",
+  "issuer_count": 7,
+  "overlay_sha256": "a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55",
+  "release_eligible": false,
+  "required_target_count": 402,
+  "review_status": "agent_audited",
+  "route_counts": {
+    "event": 18,
+    "mixed": 48,
+    "text": 54
+  },
+  "schema_version": "2.0.0",
+  "search_index_sha256": "e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793",
+  "source_gold_sha256": "b2edb1cb58c302065625ad522f347800abcf6f00488265b31f0451dcc281b952",
+  "source_record_count": 19,
+  "split_counts": {
+    "test": 120
+  },
+  "target_count": 2574,
+  "target_selection": "slot_relevance_sets_v2",
+  "templates_sha256": "292e041e258d500e4ef6eac06dbe24eb7eaa743236a6156598b1cb86138462eb",
+  "unique_target_count": 421
+}

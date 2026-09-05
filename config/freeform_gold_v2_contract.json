@@ -1,0 +1,60 @@
+{
+  "schema_version": "2.0.0",
+  "target_selection": "slot_relevance_sets_v2",
+  "max_relevance_candidates_per_slot": 100,
+  "minimum_cases": 120,
+  "source_records_per_dimension": 3,
+  "source_records_by_dimension": {
+    "correction_materiality": 1,
+    "governance_signal": 4,
+    "management_discussion": 2
+  },
+  "dimensions": [
+    "profitability_financial_health",
+    "contract_change",
+    "financing_pressure",
+    "correction_materiality",
+    "governance_signal",
+    "business_risk",
+    "management_discussion"
+  ],
+  "allowed_routes": ["text", "event", "financial", "mixed"],
+  "allowed_correction_policies": ["current", "original", "both"],
+  "allowed_parse_statuses": ["success"],
+  "minimum_text_characters": 80,
+  "split_percentages": {"train": 0, "validation": 0, "test": 100},
+  "dimension_seed_questions": {
+    "profitability_financial_health": "{issuer_name}의 수익성과 재무건전성을 공시 수치의 기간별 변화로 종합 분석해줘.",
+    "contract_change": "{issuer_name}의 계약 상대와 조건이 여러 공시에서 어떻게 달라졌는지 종합 분석해줘.",
+    "financing_pressure": "{issuer_name}의 차입 부담과 발행주식·자기주식 처분 자본조달 사건을 종합 분석해줘.",
+    "correction_materiality": "{issuer_name}의 최초 공시와 정정 공시를 각각 비교하여 수정 내용의 중요성을 종합 분석해줘.",
+    "governance_signal": "{issuer_name}의 지배구조와 내부통제·최대주주·이사회 공시 신호를 종합 분석해줘.",
+    "business_risk": "{issuer_name}가 공시한 사업 위험요인과 리스크 및 불확실성을 종합 분석해줘.",
+    "management_discussion": "{issuer_name} 경영진의 사업 설명과 전망을 보고된 매출액·영업이익과 함께 종합 분석해줘."
+  },
+  "text_markers": {
+    "original_disclosure": ["최초", "원문", "공시"],
+    "effective_correction": ["정정", "수정"],
+    "governance_events": ["지배구조", "내부통제", "최대주주", "이사회", "감사위원회", "사외이사"],
+    "disclosed_risk_factors": ["위험요인", "리스크", "불확실성"],
+    "management_discussion_text": ["사업의 내용", "사업경쟁력", "주력 사업", "경영 효율성"]
+  },
+  "dimension_routes": {
+    "profitability_financial_health": "financial",
+    "contract_change": "event",
+    "financing_pressure": "event",
+    "correction_materiality": "text",
+    "governance_signal": "event",
+    "business_risk": "text",
+    "management_discussion": "text"
+  },
+  "candidate_terms": {
+    "profitability_financial_health": ["매출액", "영업이익", "당기순이익", "부채총계"],
+    "contract_change": ["계약금액", "계약기간", "계약상대", "계약 변경"],
+    "financing_pressure": ["차입", "사채", "유상증자", "상환"],
+    "correction_materiality": ["정정", "수정"],
+    "governance_signal": ["지배구조", "내부자", "임원", "최대주주"],
+    "business_risk": ["위험요인", "리스크", "불확실성"],
+    "management_discussion": ["경영진", "사업의 내용", "전망"]
+  }
+}

@@ -35,6 +35,8 @@ _FIXED_VALUES = {
     ("judge", "provider_call_count"): 120,
     ("judge", "provider_p95_ms_max"): 10_000,
     ("retrieval", "recall_at_20_min"): 0.95,
+    ("retrieval", "report_schema_version"): "freeform-retrieval-evaluation-v2",
+    ("retrieval", "required_evaluation_scope"): "independent_hidden",
     ("concurrency", "request_count"): 20,
     ("concurrency", "error_count"): 0,
     ("concurrency", "p95_ms_max"): 2_000,
@@ -895,6 +897,13 @@ def evaluate_release_gate(
     judge_contract = _contract_section(contract, "judge")
     retrieval_contract = _contract_section(contract, "retrieval")
     concurrency_contract = _contract_section(contract, "concurrency")
+
+    if retrieval.get("schema_version") != retrieval_contract["report_schema_version"]:
+        reasons.append("unsupported:retrieval.schema_version")
+    if retrieval.get("evaluation_scope") != retrieval_contract["required_evaluation_scope"]:
+        reasons.append("unsupported:retrieval.evaluation_scope")
+    if retrieval.get("release_eligible") is not True:
+        reasons.append("blocked:retrieval.release_ineligible")
 
     financial_total = _count(financial, (("cases", "total"),), "financial.cases.total", reasons)
     financial_passed = _count(financial, (("cases", "passed"),), "financial.cases.passed", reasons)

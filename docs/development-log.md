@@ -1036,3 +1036,134 @@
 - 실데이터 검색 평가: 120 case·480 query·234 target을 새로 실행했다. Recall@20은 `114/234 = 0.48717948717948717`, Recall@5 `0.358974358974359`, wrong issuer/version 각 `0`, p50 `9837.62ms`, p95 `31286.68ms`, semantic SHA-256 `f391a7d3a38baa1f77c78306ae7f21bbf88d1459b24767a8715279e08c044340`이다. 임베딩 pilot은 eligible이지만 text residual만으로 가능한 최대 개선은 `0.153846...`이므로 전체 95% gate를 단독 충족할 수 없다.
 - release 판정: fresh retrieval을 넣어 통합 gate를 재계산했지만 `BLOCKED_HARD_GATE`, 사유 33개다. Recall@20 `0.487179... < 0.95`, private holdout/실제 provider·security·latency 결과, fresh financial 결과와 trusted commit/image/base/overlay/search identity가 없다. 기준을 낮추거나 증거를 합성하지 않았고, staging과 8000 승격을 실행하지 않았다. 기존 8000 서비스는 그대로 유지했다.
 - 환경 진단: 로컬 Docker Linux engine 실패 원인은 WSL2 미설정이 아니라 Docker Desktop이 접근하지 못하는 `C:\Users\lark0\AppData\Local\Docker\run\sailor-ingest.sock`이다. Docker factory reset이나 NCP 설정 변경은 승인 범위를 넘으므로 실행하지 않았다. D 드라이브 파일, `.env`, credential, PEM, ACG는 변경하지 않았다.
+
+## 2026-09-05T08:58:27+09:00 / 2026-09-04T23:58:27Z — 검색 인덱스 검증 수명 최적화
+
+- 원인: `SafeSearchIndex` 생성자가 274 MB 인덱스의 metadata, 전체 row count, `PRAGMA quick_check`를 수행하는데 text slot·generic fallback·health 경로가 객체를 반복 생성했다. 실제 D 드라이브 평가의 p95 `31.28668초`는 일반 질의보다 이 반복 무결성 검사의 cold-cache 비용이 지배했다.
+- TDD RED: 두 검색과 health에서 생성자가 한 번만 실행돼야 한다는 회귀가 기존 코드에서 `3 != 1`로 실패했다.
+- 최소 구현: `EvidenceService` 시작 시 인덱스를 1회 검증해 재사용하고, 시작 시 실패 사유를 캐시해 기존 `search_index_unavailable`/`search_index_attestation_mismatch`/`search_index_sqlite_error`와 SSOT fallback을 유지했다. `/health`도 같은 readiness를 사용한다.
+- 실측: read-only D 인덱스의 cold startup 검증은 `6486.30ms`, 이후 동일 프로세스 검색 3회는 `1.50/1.13/1.09ms`였다. 관련 회귀는 `180 passed, 24 warnings, 10 subtests passed`, 전체 Python은 `944 passed, 2 skipped, 98 warnings, 264 subtests passed`, Team QA Node는 `1 passed`다.
+- 경계: base/search SHA는 각각 `b8fb3b...6563`, `e223a1...8793`이며 파일은 변경하지 않았다. 이 최적화만으로 Recall@20·private holdout·provider·trusted image gate 통과를 주장하지 않는다. 상세 판단은 `docs/operations/2026-09-05-search-index-validation.md`에 기록했다.
+
+## 2026-09-05T09:08:00+09:00 / 2026-09-05T00:08:00Z — 구조화 다중근거 슬롯 완전성 수정
+
+- 원인: 수익성·재무건전성 슬롯은 각각 `3계정 × 2기간 = 6근거`가 필요한데 cap이 4였고, 완료 판정도 계정 하나만 2기간이면 `any(...)`로 통과했다. 실제 legacy Gold에서 구조화 target 84건이 이 경로에 묶여 있었다.
+- TDD RED: 6근거가 4개로 잘리는 회귀와 한 계정만 완전해도 슬롯이 완료되는 회귀가 각각 실패했다. 최소 수정으로 두 슬롯의 min/max evidence를 6으로 맞추고 선언된 모든 structured canonical account에 `min_periods`를 요구했다.
+- 검증: 관련 분석·retrieval·claim·HCX 회귀 `206 passed, 6 warnings, 6 subtests passed`, 전체 Python `946 passed, 2 skipped, 98 warnings, 264 subtests passed`, Team QA Node `1 passed`.
+- D read-only 재평가: Recall@20이 `114/234 (48.72%)`에서 `132/234 (56.41%)`로 상승했고 wrong issuer/version `0`, p50 `64.62ms`, p95 `103.65ms`, slot completeness `1.0`이었다. semantic SHA는 `e3719d...bfa2`다.
+- 판정: 성능 gate는 충분히 개선됐지만 legacy exact-target Recall은 여전히 95% 미만이다. broad 질문에 정렬상 첫 evidence ID 하나만 정답으로 고른 기존 Gold를 제품 검색에 맞춰 억지로 과적합하지 않고, 다음 Task에서 버전된 relevance-set 평가로 교정한다. 상세 기록은 `docs/operations/2026-09-05-structured-slot-completeness.md`다.
+
+## 2026-09-05T09:29:51+09:00 / 2026-09-05T00:29:51Z — Free-form Gold V2와 의미 근거 필터
+
+- V1 exact-target은 legacy 회귀로 보존하고, V2는 슬롯별 대체 evidence set과 최소 적중 수를
+  명시한다. 재무 슬롯은 모든 선언 계정×최신 기간 요구를 분리하고 broad 슬롯은 bounded 대체 근거를
+  유지한다.
+- TDD RED로 relevance set 합집합/중복/최소 적중, 계정별 기간, residual 분류, manifest schema를
+  고정했다. 실제 검색 RED에서는 짧은 `사업 소득` 행이 위험 설명보다 앞서는 keyword collision을
+  재현했다.
+- 제품 경로는 위험·지배구조·경영설명 슬롯에 80자 이상과 선언된 concept을 요구한다. Gold에서는
+  `고위험고수익`의 `위험`, 법정서식의 `경영권/경영진 변동`을 정답으로 보던 부분 문자열 오염을
+  제거하고, 경영 설명을 실제 공시된 사업전략·경쟁력 문구로 좁혔다.
+- 단계별 D read-only 평가는 Recall@20 `90.48% → 93.65% → 96.83% → 100%`였다. 최종은 120
+  cases, 378/378 hits, slot completeness 1.0, wrong issuer/version/hard failure 0, p50 61.99ms,
+  p95 103.07ms다. Gold SHA는 `2b020d...78de5`, summary semantic SHA는 `561b5a...302b3`다.
+- Sparse gate가 충족돼 embedding 결정은 `DEFERRED_NO_EVIDENCE`다. private holdout/provider/security/
+  staging image gate는 별도이며 이 결과로 전체 배포 PASS를 주장하지 않는다. 상세 기록은
+  `docs/operations/2026-09-05-freeform-gold-v2.md`다.
+- 검증: 관련 free-form/planner 회귀 `127 passed`; 최종 Python `954 passed, 2 skipped, 98 warnings,
+  264 subtests passed` (`83.81s`); Team QA Node `1 passed`; `compileall`과 `git diff --check` 통과.
+
+## 2026-09-05T09:37:31+09:00 / 2026-09-05T00:37:31Z — 최신 재무 평가와 배포 판정
+
+- 실제 D 드라이브 base/overlay/search를 read-only로 열어 `evaluate_financial_release.py`를 다시 실행했다. 76개 검색 대상, 1,191개 검증 fact에서 856/856 회귀가 통과했고 삼성전자 최신 매출, 124개 정정, 83개 금융업 매출 별칭, 불완전 모집단 집계 거절을 확인했다. 허위 숫자와 근거 없는 검증 답변은 각 0건이다.
+- 20개 동시 구조화 요청은 오류 0건, p95 `125.713ms`로 SQLite 유지 gate를 통과했다. base/overlay/search SHA-256은 각각 `b8fb3b...6563`, `a4491f...b55`, `e223a1...8793`이며 입력 파일은 변경하지 않았다.
+- 최신 재무 보고서와 당시 Gold V2 검색 보고서를 통합 release gate에 넣자 stale financial 차단은 사라졌고 1차 판정은 31개 사유의 `BLOCKED_HARD_GATE`였다. 후속 독립 리뷰에서 공개 자동 생성 Gold의 독립성 부족을 확인해 release 입력으로 사용하는 것을 금지했다.
+- 비공개 문항이나 외부 관측을 합성하지 않았고 임계값도 낮추지 않았다. 따라서 8001 pre-stage와 8000 승격을 실행하지 않았으며 기존 공개 8000과 rollback 자산을 그대로 유지했다.
+
+## 2026-09-05T09:56:21+09:00 / 2026-09-05T00:56:21Z — 독립 리뷰 후 검색 gate·단일기간 슬롯 보강
+
+- 독립 리뷰는 Critical 0건, Important 3건을 보고했다. V2가 V1 report schema를 재사용한 점, 492 query와 pre-stage의 480 exact 계약 충돌, 공개 자동 생성 Gold가 product marker와 규칙을 공유하면서 19 source record·7 issuer만 포함한 점, `min_periods=1` 재무 슬롯이 선언 계정 일부만으로 완료되던 점이다.
+- TDD RED 10건으로 세 문제를 재현했다. 최소 수정 후 focused 16건과 관련 확대 `211 passed, 94 subtests passed`가 통과했다. 모든 financial 슬롯은 선언된 structured canonical account마다 `min_periods`를 요구하며 V2 Gold 생성도 같은 규칙을 사용한다.
+- V2 report schema를 `freeform-retrieval-evaluation-v2`로 분리했다. 공개 자동 생성 산출물은 `development_public_agent_audited`, `release_eligible=false`이고 embedding 판정은 `BLOCKED_INDEPENDENT_GOLD`다. release gate와 pre-stage는 `independent_hidden`, `release_eligible=true`인 V2만 허용하며 query count는 품질 임계값이 아닌 bounded 실행량 `120..960`으로 검증한다.
+- D read-only 재생성 결과는 120 cases, 402/402 required hits, wrong issuer/version 0, p95 `97.3764ms`다. 이 수치는 개발 회귀로만 기록하고 출시 통과로 사용하지 않는다. 통합 release gate는 검색 독립성 2건과 기존 외부 항목을 합친 33개 사유로 계속 차단되며 8000은 변경하지 않았다.
+- 최종 전체 검증은 Python `964 passed, 2 skipped, 98 warnings, 264 subtests passed`, Web `13 passed`, Team QA `1 passed`, `compileall`, `git diff --check` 통과다. 경고는 기존 FastAPI/Starlette deprecation과 Team QA module type 경고다.
+
+## 2026-09-05T10:10:02+09:00 / 2026-09-05T01:10:02Z — 임베딩 채택 판정 fail-closed 보강
+
+- 독립 재리뷰에서 `decide_embedding_pilot()`의 `release_eligible` 기본값이 `true`여서, 개발용 검색 지표를 넘긴 호출자가 명시적 출시 자격 없이도 pilot 채택 판정을 받을 수 있음을 확인했다.
+- TDD RED는 자격 인자를 생략한 개발 지표가 `ELIGIBLE_PILOT`으로 판정되는 실패 1건으로 재현했다. 기본값을 `false`로 바꾸고, 파일·semantic digest와 runtime identity를 모두 검증한 Dense adoption loader만 `release_eligible=true`를 명시하도록 했다.
+- 관련 회귀는 `69 passed, 13 subtests passed`다. 공개 자동 생성 Gold와 이번 V2 산출물은 계속 `BLOCKED_INDEPENDENT_GOLD`이며 독립 hidden Gold 없이는 임베딩 채택이나 배포를 허가하지 않는다.
+- 최종 전체 회귀는 Python `965 passed, 2 skipped, 98 warnings, 264 subtests passed`, Web `13 passed`, Team QA `1 passed`, `compileall`, `git diff --check`와 산출물 스키마 검증을 통과했다. 통합 release gate는 의도대로 33개 사유의 `BLOCKED_HARD_GATE`를 반환했다.
+
+## 2026-09-05T12:41:01+09:00 / 2026-09-05T03:41:01Z — NCP 8001 설치형 config 경로 회귀 수정
+
+- 진단용 staging 입력은 commit `c2a7d42f2e3a72c2797c9b7e6a4a57d68970dccb`의 tracked archive(SHA-256 `5a1c58dfd093240e063d51a5c316db0b025e77cb4856fc2ddc3b1f9c66344e52`)와 image `sha256:fba4b193a601f097596c031cc8676922dace95c150d988428af3f3d5a4d4ce95`다. NCP 8001 컨테이너는 base·overlay·search·attestation을 개별 read-only mount로 사용했고 `/health`는 ready, 76개 기업, provider/function calling configured를 보고했다. 기존 8001은 이름 변경과 rollback tag로 보존했으며 8000 운영 컨테이너는 변경하지 않았다.
+- 실제 smoke에서 `/v1/answer`의 삼성전자 최신 매출은 검증된 2025 연결 수치와 evidence를 반환했지만 `/v1/hcx/function-answer`는 `bounded_analysis_failed_closed`와 `FileNotFoundError`로 중단됐다. 컨테이너 내부 동일 호출의 traceback에서 `analysis_planner.load_dimension_catalog()`가 설치된 module 경로를 따라 `/usr/local/lib/python3.11/config/analysis_dimensions.json`을 조회한 것이 근본원인이었다. Docker가 선언한 `DISCLOSURE_CONFIG_DIR=/app/config`를 이 로더만 사용하지 않은 배선 결함이다.
+- TDD RED는 package 기본 config 경로가 없고 runtime config directory만 존재하는 설치형 조건을 추가해 `1 failed`로 재현했다. 최소 수정은 명시적 `path`를 최우선으로 유지하고, 기본 호출일 때 `DISCLOSURE_CONFIG_DIR/analysis_dimensions.json`을 사용하며, 환경변수가 없을 때만 기존 source-tree 기본값으로 fallback한다.
+- 관련 분석·실행기·HCX runtime 회귀는 `66 passed, 6 warnings`; 전체 Python은 `966 passed, 2 skipped, 98 warnings, 264 subtests passed` (`76.48s`), Web은 `13 passed`다. 경고는 기존 FastAPI/Starlette `on_event` deprecation이다.
+- 이 수정은 아직 새 image로 NCP 8001에서 재검증되지 않았고 독립 hidden/Judge/provider release evidence도 계속 미충족이다. 따라서 hard gate를 낮추지 않았으며 8000 승격은 금지 상태다. credential, `.env`, PEM, NCP 보안 설정과 live 데이터 파일은 읽거나 변경하지 않았다.
+
+## 2026-09-05T12:47:51+09:00 / 2026-09-05T03:47:51Z — 8001 재검증과 HCX 분석 장애 보류 경로
+
+- 수정 commit `9d9916b9d13cb3a3654039dee5b8a6e4e75330c1`의 tracked archive SHA-256은 `a239d28cf8e65ed3915a66306badc3ea4a9be21b24b14af8e05a5ce5bfa7048b`, NCP candidate image는 `sha256:591bf5d359a31351f4cfeef7283a0840f2f678f1f87eb6d8ad387c0bedf82f6b`다. 8001 health는 ready, base/overlay/search attested, 76개 기업, provider/function calling configured이며 네 데이터 mount는 모두 read-only다. 8000은 계속 기존 정상 image로 유지했다.
+- 실제 8001 smoke에서 삼성전자 최신 사업보고서 매출은 2025 연결 `333조 6,059억 3,800만 원`, 공시 `20260310002820`으로 정상 답변했다(7.34초). `SM엔터테인먼트` 별칭 비교도 에스엠 15.58%, 삼성전자 13.07%로 답했고 검증 실패한 provider 문장은 폐기한 뒤 구조화 deterministic fallback을 사용했다. 직접 prompt injection은 provider 호출 없이 정상 보류했으며, 사업위험은 필수 공시 근거가 없어 `insufficient_evidence`로 정상 보류했다.
+- 수익성 다중근거 분석은 근거 slot 수집 이후 HCX 최종 생성 요청이 약 20초에 실패했고 기존 코드는 공시 근거까지 사용자 응답에서 버린 채 `status=error`를 반환했다. 외부 provider 장애가 검증된 evidence를 훼손하지 않도록, `HcxFunctionCallingError`일 때는 결론을 생성하지 않고 `status=abstained`, `answer_allowed=false`로 전환하며 기존 tool response와 공시 citation을 보존하는 것이 fail-closed 계약에 맞다고 판단했다.
+- TDD RED는 완전한 bounded evidence 뒤 provider 생성 실패가 `error`가 되는 현상을 `1 failed`로 재현했다. 최소 수정 후에는 명시적 `provider_failure_analysis_abstention` 경고·한계와 근거 citation을 보존한 보류 응답이 되며 focused `12 passed`, 확대 HCX 회귀 `88 passed, 6 warnings, 6 subtests passed`를 통과했다.
+- 새 보류 경로는 아직 다음 image로 8001 재배포하기 전이다. 실제 provider 지연·실패가 있었고 독립 hidden/Judge/provider release evidence와 p95 기준이 충족되지 않았으므로 8000 승격은 계속 차단한다. credential, `.env`, PEM, NCP 보안 설정과 read-only 데이터는 변경하지 않았다.
+
+## 2026-09-05T12:55:21+09:00 / 2026-09-05T03:55:21Z — 최신 8001 진단 image 검증과 8000 차단
+
+- commit `16b811e31cbeaa4ed45474bf6eb3da6916ac9d87`의 tracked archive SHA-256은 `e45681d9c3912e732f591c60c5383615d9433b15c5a50840506ec085ba283c2b`, NCP image는 `sha256:0d5b8cb4aa882e053e8ff8d756f2464e17a2274df3e9823a148a83bb3ffd23a8`다. 8001은 이 image로 기동됐고 ready, 76개 기업, provider/function calling configured, restart count 0이며 base·overlay·search·attestation mount는 모두 read-only다. 최초 staging rollback 컨테이너·image는 중지 상태로 보존했다. 오류가 있던 중지 후보 `c2a7d42`, `9d9916b`만 실행 참조가 없음을 확인한 뒤 컨테이너와 image tag를 제거했고, 두 Git archive는 `/srv/mirae/staging`에 남아 재빌드 가능하다. 루트 여유 공간은 536MB에서 735MB로 회복됐다.
+- 실제 8001 재검증에서 삼성전자 최신 매출은 7.69초에 검증 답변과 citation 1건을 반환했다. 같은 수익성 분석은 provider가 다시 정확히 약 20.03초에 실패했지만 새 계약대로 `status=abstained`, `answer_allowed=false`, `provider_failure_analysis_abstention`과 기존 공시 citation 6건을 보존했다. 직접 prompt injection은 2.2ms에 provider 없이 보류됐다.
+- NCP 내부 8001 health는 통과하지만 현재 작업 호스트에서 공인 `101.79.31.221:8001`의 `/`와 `/health`는 각각 15초 timeout이다. ACG·보안 설정을 변경하지 않는 범위에서 이는 공개 staging smoke 통과가 아니다. 공인 8000의 `/`와 `/health`는 각각 HTTP 200이며 기존 운영 컨테이너를 변경하지 않았다.
+- 최종 로컬 검증은 Python `967 passed, 2 skipped, 98 warnings, 264 subtests passed` (`71.96s`), Web `13 passed`, `compileall`, `git diff --check`다. provider 포함 분석 p95 10초 기준, private holdout, 독립 hidden 검색 Gold와 trusted release identity가 미충족이므로 정확한 동일 image 8000 승격 조건은 성립하지 않았다. hard gate를 낮추거나 결과를 합성하지 않았다.
+
+## 2026-09-05T13:29:22+09:00 / 2026-09-05T04:29:22Z — 수익성 분석 provider timeout의 결정론적 우회
+
+- 원격 `main`은 `382f168`, 작업 HEAD는 `d82c6da`였고 PR #8 CI는 통과 상태였다. NCP 운영 8000은 `ready=true`, 76개사, provider/function calling configured이며 기존 image를 유지했다. 진단 8001도 내부 health는 정상이고 base·overlay·search·attestation mount가 read-only임을 재확인했다.
+- 외부 입력 inventory: `/srv/mirae`에서 V2 `eval/judge_stress_v2` private holdout 또는 release-eligible 독립 hidden 검색 Gold에 해당하는 파일은 발견되지 않았다. 과거 `agent_holdout.jsonl`은 V2 스키마·분할·독립성 계약이 달라 대체하지 않았다. 파일 내용, `.env`, API key, PEM, credential과 NCP 보안 설정은 읽거나 변경하지 않았다.
+- systematic debugging: 삼성전자 2개년 수익성 질문은 근거 6건과 약 396자 context를 확보한 후 HCX-005 final generation에서 20초 timeout이었다. 실제 단일 재무값은 7,219ms, 비교 질문은 17,623ms였다. 출력 토큰 384 실험은 provider `40001`; [NCP 공식 문서](https://guide.ncloud-docs.com/docs/clovastudio-dev-langchain)가 Function Calling은 `max_tokens` 1024 이상을 요구함을 확인했다. 중복 projection으로 요청을 21,408B→15,737B→10,885B로 줄여도 10초 timeout이 재현되어 입력 중복만이 단독 원인은 아니었다.
+- 대안 검증: 계정에 노출된 `HCX-DASH-002`의 단일 문자열 Tool은 약 1,100ms였지만 배열 또는 현재 중첩 claim schema는 [공식 오류 문서의 `40009 Unsupported function`](https://api.ncloud-docs.com/docs/en/clovastudio-troubleshoot-c4xx)으로 거절됐다. backend 사후 검증과 closed claim schema를 약화하는 전환은 채택하지 않았다.
+- TDD RED: `profitability`의 두 기간 매출·영업이익·순이익 fact가 모두 있어도 `conclusion=None`이고 provider timeout 시 `abstained`가 되는 두 회귀를 추가해 `2 failed, 12 passed`를 확인했다.
+- 최소 구현: validated finite Decimal fact를 period/account로 유일하게 묶고 최근 두 회계연도의 영업이익률과 순이익률 방향을 비교한다. 두 방향이 모두 상승/하락/동일이면 `improved/deteriorated/stable`, 엇갈리면 `mixed`, 중복·0 매출·필수값 부족은 결정론적 결론을 만들지 않는다. 결론이 완전한 `profitability`만 provider를 호출하지 않고 모든 admitted fact/evidence slot을 가진 claim으로 재검증해 답한다. 다른 판단 차원은 기존 경로를 유지한다.
+- 검증: focused `14 passed`; 확대 HCX/analysis/retrieval `165 passed, 6 subtests`; 전체 Python `969 passed, 2 skipped, 98 warnings, 264 subtests` (`78.25s`); Web `13/13`; release/staging `168 passed, 94 subtests`; `compileall`과 `git diff --check` 통과. 공식 private 600건·독립 hidden 검색 Gold가 없어 production 8000 승격은 계속 `BLOCKED_HARD_GATE`다.
+
+## 2026-09-05 — official staging release identity 전달 복구
+
+- 배포 경로 재검토 중 `deploy_staging.ps1`가 commit·image·base·overlay·search 다섯 값을 `/health.identity`와 정확히 대조하지만, Compose는 `RELEASE_COMMIT`만 전달하고 API는 identity를 생성하지 않는 계약 단절을 확인했다. 실제 진단 8001의 identity가 `null`이었던 원인이다.
+- TDD RED는 완전한 유효 환경에서도 `/health.identity`가 없고 release Compose/스크립트에도 네 신뢰값이 없는 현상을 `2 failed`로 고정했다. 최소 구현은 다섯 외부 신뢰 앵커를 Compose에 추가하고 staging·promotion 스크립트가 전달하도록 했으며, API가 전부 유효한 경우에만 소문자 정규화된 정확한 다섯 필드를 노출한다. 일부 누락·형식 오류는 identity 전체를 생략하므로 공식 gate가 계속 fail-close한다.
+- 이 identity는 공개 가능한 commit·image/DB digest만 포함하며 credential·환경의 다른 값은 노출하지 않는다. `.env`, API key, PEM, NCP 보안 설정과 read-only 데이터는 읽거나 변경하지 않았다. RED 후 focused 결과는 `2 passed, 2 subtests`다.
+- 최종 회귀: 전체 Python `970 passed, 2 skipped, 104 warnings, 266 subtests` (`76.79s`), Web `13/13`, release/staging `168 passed, 94 subtests` (`55.24s`), `compileall`과 `git diff --check`를 통과했다.
+
+## 2026-09-05 — commit `7cb6bbf` NCP 8001 diagnostic staging
+
+- Git archive SHA-256 `404fe48b71a1ea81c22847cb9268147b0d176fc258ba90138372e2f992303076`을 `/srv/mirae/staging/diagnostic-7cb6bbf`에 풀어 image `sha256:9f0e3ae4fe854ad1a6379e887134040606dd492358668906b824b504b5458e15`를 한 번 build했다. 원격 Docker의 BuildKit component가 없어 첫 명령은 image 생성 전에 실패했고, 서버 패키지를 추가하지 않고 같은 source로 legacy builder를 사용했다.
+- 첫 기동에서 사람이 전체 commit을 추정 입력한 오류를 발견했다. 그 실행은 release identity로 인정하지 않고 해당 후보 컨테이너만 제거했으며, `git rev-parse`로 확인한 exact commit `7cb6bbf2e805855f4daba0be630e4b87178a1518`로 동일 image를 재기동했다. 기존 `mirae-16b811e-staging`은 중지 상태로 보존했고 실패 시 자동 복원하도록 했다.
+- 최신 8001 내부 health는 ready, eval/provider/function calling configured, 76개사이며 commit·image·base·overlay·search identity가 외부 신뢰값과 정확히 일치한다. base·overlay·search·attestation 네 data mount는 모두 read-only다. `.env`는 읽지 않고 기존 `/srv/mirae/app/.env`를 Docker `--env-file`로만 사용했으며 credential 값은 출력·기록하지 않았다.
+- 삼성전자 최근 2개년 수익성 질문은 `status=answered`, `execution_mode=deterministic_bounded_analysis`, `conclusion=improved`, citation 6건, `final_generation_called=false`, 50.99ms였다. 동일 질문 20동시 요청은 오류 0, p95 958.35ms, max 960.96ms였다. 삼성전자 최신 매출은 citation 1건과 검증 답변을 6,698.35ms에 반환했고 직접 prompt injection은 차단했다.
+- 현재 작업 호스트에서 공개 8000 health는 HTTP 200이고 기존 `qa-growth-v4-qa-agent:latest` image가 그대로다. 공개 8001은 curl exit 28·HTTP 000으로 timeout이며 NCP ACG는 변경하지 않았다. local 원본 저장소·작업 worktree·`/srv/mirae` inventory에서 V2 private holdout 120건과 release-eligible independent hidden retrieval Gold를 찾지 못했으므로 공식 600건·provider release gate와 8000 promotion은 계속 blocked다.
+
+## 2026-09-05T14:45:47+09:00 / 2026-09-05T05:45:47Z — staging Judge 실행 경로·독립 검증 계약 수정
+
+- 실제 8001에서 development free-form·multi-evidence 문항이 `/v1/answer`로 실행돼 citation 없이 보류되는 반면, 같은 질문을 `/v1/evidence/search`에 보내면 8개 근거를 반환하는 현상을 재현했다. 검색 실패가 아니라 `retrieval_precheck`를 구조화 답변 endpoint에 잘못 연결한 평가기 결함이었다.
+- TDD RED는 고정 검색 endpoint 부재, retrieval precheck의 잘못된 route, 운영의 legacy verified-answer 응답을 독립 claim inspector가 읽지 못하는 문제, audited source의 공시번호를 staging oracle에 전달하지 못하는 문제를 고정했다. 최소 구현은 precheck를 provider-free `/v1/evidence/search`로 분리하고 target evidence 교집합·최소 개수를 검사하며 malformed evidence를 evaluator error로 fail-close한다.
+- 구조화 `/v1/answer`는 `claim_support` 대신 top-level `verified`, `numeric_values`, `citation_ids`, `financial_facts`를 반환한다. 서버가 이미 검증한 이 legacy 계약만 검사기 형태로 변환하되, 숫자·citation·filing은 별도 oracle과 다시 대조한다. audited source의 canonical record SHA-256에서 공시번호를 독립적으로 복원해 case hash나 공개 문항을 바꾸지 않고 cross-filing 검사를 활성화했다.
+- 표 주석 `(주30)`과 질문에 명시된 회계연도는 주장 숫자가 아니며, `100 백만원`의 단위어를 별도 한국어 숫자로 중복 해석하지 않도록 숫자 검사 규칙을 보강했다. 임계값, provider 호출 수, private/hidden 독립성 계약은 변경하지 않았다.
+- 관련 Judge·release·staging 회귀는 `214 passed, 94 subtests passed` (`164.69s`)다. 이 단계에서는 코드 평가기만 변경했고 D 드라이브 및 NCP 데이터, `.env`, credential, PEM, ACG와 운영 8000은 변경하지 않았다.
+
+## 2026-09-05T15:43:14+09:00 / 2026-09-05T06:43:14Z — 독립 hidden 검색 평가 PASS
+
+- 제품 출력이 아닌 read-only 공시 evidence ledger를 직접 대조해 Git에서 무시되는 private 검색 Gold 120건을 작성했다. provenance는 `independent_direct_corpus_annotation`, 검수 등급은 `agent_audited`이며 사람 검수로 표시하지 않았다. 질문 원문·답변·provider body·credential은 추적 산출물에 넣지 않았다.
+- 독립성 profile은 19개 기업, 98개 공시, 7개 판단 차원, 120개 고유 question hash이며 `product_output_used=false`, `target_selection=direct_evidence_ledger`다. private Gold SHA-256은 `52d4e76173f7541aaa281bf0435f4be73e79ed8539a65031f933625ee60e9525`다.
+- TDD RED는 공시번호 문맥 추출, 숫자 금액 오인 방지, exact filing scope, 정정 전후 slot version policy, event 공시 filter, 독립 profile의 Git ignore·다양성·provenance 조건으로 고정했다. 최소 구현은 `QueryPlan.filing_ids`, slot별 correction policy와 exact filing 검색, event filing filter, release-eligible profile 검증을 추가했다.
+- D read-only 최종 평가는 120 cases, 373 required target 중 357 hit, Recall@20 `0.9571045576`, slot completeness `0.95`, wrong issuer/version/hard failure 각 `0`, p50 `338.23ms`, p95 `1421.31ms`다. summary semantic SHA-256은 `a7c12747416850100ba6b23793d8530f4a959cb9979ed037b68ecf854676daf0`이다.
+- Sparse gate가 95%를 넘었으므로 embedding은 `DEFERRED_NO_EVIDENCE (sparse_recall_gate_met)`다. 검색 gate만 PASS이며 실제 600건 staging Judge/provider와 exact-image 배포 gate는 아직 별도다. 관련 회귀 최초 실행은 오래된 `retrieval.recall_at_20` 미달 가정 때문에 `1 failed, 425 passed`였고, 현재 추적 보고서가 검색 gate만 통과하되 Judge·deployment 사유로 전체 release를 계속 차단한다는 계약으로 수정해 단독 `1 passed`를 확인했다.
+- 최종 로컬 검증은 Python `981 passed, 2 skipped, 104 warnings, 266 subtests` (`288.05s`), Web `13/13`, `compileall`, `git diff --check`, tracked credential/secret scan을 통과했다. 첫 위생 명령은 안전한 `.env.example` 두 개를 실제 `.env`로 오인해 종료코드 1을 냈고, exact filename 경계로 고친 재검사에서 금지 파일·값은 0건이었다.
+
+## 2026-09-05T16:00+09:00 / 2026-09-05T07:00Z — private Judge 입력 attestation 복구
+
+- 공식 pre-stage 검토에서 `deploy_staging.ps1`가 private holdout의 case count와 SHA-256을 `manifest.raw_artifacts.holdout`에서 검증하지만, 현재 추적 manifest에는 이 content-free attestation이 빠져 있어 Docker build 전 fail-close하는 배선 결함을 발견했다.
+- TDD RED는 현재 추적 manifest가 private 경로나 질문을 노출하지 않으면서 `case_count=120`, 64자리 SHA-256, `git-ignored evaluator artifact` visibility를 가져야 한다는 회귀를 추가해 `KeyError: raw_artifacts`로 재현했다.
+- 기존 공식 builder를 private 입력과 함께 실행해 manifest·NOT_RUN summary를 재생성했다. holdout SHA-256 `475452500d8eec2126bdb198f3343b191267cdb4e6dd6789fce82b4dcf404f1d`와 실제 private 파일 120행이 일치하며, manifest에는 경로·질문·oracle이 없다. 수정 후 attestation 및 현재 release 차단 회귀는 `2 passed`다.
+- NCP 공간 확보를 위해 실행 중인 8000/8001/8002와 rollback image는 보존하고, 종료된 재생성 가능 진단 컨테이너 `mirae-16b811e-staging`과 전용 image tag만 제거했다. 공통 layer 때문에 여유 공간은 543MB로 거의 변하지 않았으며, 제거한 진단 이미지는 Git archive로 재빌드 가능하다.
+- 검증은 attestation/release 단독 `2 passed`, Judge·release·배포 집중 `171 passed, 94 subtests`, 전체 Python `982 passed, 2 skipped, 104 warnings, 266 subtests` (`115.93s`)다.

@@ -20,6 +20,10 @@ _STATEMENT_CODES = {
     "changes_in_equity": "SCE",
     "per_share_information": "IS",
 }
+_EXPLICIT_FILING_ID = re.compile(
+    r"(?:공시(?:\s*(?:번호|접수번호))?|접수번호|filing\s*(?:id|number))\s*[:#]?\s*(20\d{12})(?!\d)",
+    re.IGNORECASE,
+)
 
 
 def _statement_type_for_resolution(statement_type: str | None, required_accounts: list[str]) -> str | None:
@@ -122,6 +126,9 @@ def plan_query(
     parsed_calendar_date: str | None = None
     filing_date: str | None = None
     reason_codes: list[str] = []
+    filing_ids = list(dict.fromkeys(match.group(1) for match in _EXPLICIT_FILING_ID.finditer(text)))
+    if filing_ids:
+        reason_codes.append("explicit_filing_id")
     # Parse the accounting period independently of the point-in-time filing cutoff.
     # An API-provided as_of remains authoritative for version selection.
     if date_match:
@@ -306,6 +313,7 @@ def plan_query(
         reason_codes=reason_codes, fact_domain=fact_domain, predicate_terms=event_terms,
         target_periods=target_periods, requires_complete_evidence_set=requires_complete,
         filing_date=filing_date,
+        filing_ids=filing_ids,
         account_id=account_id,
         account_status=account_resolution.status,
         account_match_type=account_resolution.match_type,

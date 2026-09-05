@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -20,6 +21,19 @@ from disclosure_db.freeform_evaluation import (
     score_freeform_case,
     semantic_summary_sha256,
 )
+from disclosure_db.judge_stress_v2 import is_git_ignored
+
+
+ROOT = Path(__file__).resolve().parents[1]
+_INDEPENDENT_HIDDEN_DIMENSIONS = {
+    "profitability_financial_health",
+    "contract_change",
+    "financing_pressure",
+    "correction_materiality",
+    "governance_signal",
+    "business_risk",
+    "management_discussion",
+}
 
 
 def _sha256(path: Path) -> str:
@@ -92,6 +106,121 @@ def _structured_evidence_ids(overlay: Path, evidence_ids: set[str]) -> set[str]:
         connection.close()
 
 
+def _evaluation_profile(
+    rows: list[dict[str, object]],
+    *,
+    evaluation_scope: str = "development_public_agent_audited",
+    gold_path: Path | None = None,
+    repository_root: Path | None = None,
+) -> dict[str, object]:
+    gold_schema_versions = {str(row.get("schema_version", "1.0.0")) for row in rows}
+    if len(gold_schema_versions) != 1:
+        raise ValueError("mixed_gold_schema_versions")
+    gold_schema_version = next(iter(gold_schema_versions))
+    relevance_mode = gold_schema_version == "2.0.0"
+    profile: dict[str, object] = {
+        "schema_version": "freeform-retrieval-evaluation-v2" if relevance_mode else "1.0.0",
+        "gold_schema_version": gold_schema_version,
+        "evaluation_scope": "development_public_agent_audited",
+        "release_eligible": False,
+    }
+    if evaluation_scope == "development_public_agent_audited":
+        return profile
+    if evaluation_scope != "independent_hidden":
+        raise ValueError("unsupported_evaluation_scope")
+    if not relevance_mode:
+        raise ValueError("independent_hidden_schema_version")
+    if gold_path is None or repository_root is None or not Path(gold_path).is_file():
+        raise ValueError("independent_hidden_gold_missing")
+    if not is_git_ignored(Path(repository_root), Path(gold_path)):
+        raise ValueError("independent_hidden_gold_not_private")
+    if len(rows) != 120:
+        raise ValueError("independent_hidden_case_count")
+
+    case_ids: set[str] = set()
+    question_hashes: set[str] = set()
+    issuers: set[str] = set()
+    filings: set[str] = set()
+    dimensions: Counter[str] = Counter()
+    for index, row in enumerate(rows):
+        label = f"independent_hidden[{index}]"
+        case_id = row.get("case_id")
+        question = row.get("question")
+        question_sha256 = row.get("question_sha256")
+        if not isinstance(case_id, str) or not case_id or case_id in case_ids:
+            raise ValueError(f"{label}.case_id")
+        if not isinstance(question, str) or not question.strip() or len(question) > 2_000:
+            raise ValueError(f"{label}.question")
+        actual_question_sha256 = hashlib.sha256(question.encode("utf-8")).hexdigest()
+        if question_sha256 != actual_question_sha256 or question_sha256 in question_hashes:
+            raise ValueError(f"{label}.question_sha256")
+        case_ids.add(case_id)
+        question_hashes.add(actual_question_sha256)
+
+        issuer = row.get("issuer_corp_code")
+        raw_filings = row.get("filing_ids")
+        targets = row.get("target_evidence_ids")
+        dimension = row.get("dimension_id")
+        if not isinstance(issuer, str) or not issuer:
+            raise ValueError(f"{label}.issuer_corp_code")
+        if not isinstance(raw_filings, list) or not raw_filings or any(
+            not isinstance(value, str) or not value for value in raw_filings
+        ):
+            raise ValueError(f"{label}.filing_ids")
+        if not isinstance(targets, list) or not targets or any(
+            not isinstance(value, str) or not value for value in targets
+        ):
+            raise ValueError(f"{label}.target_evidence_ids")
+        if dimension not in _INDEPENDENT_HIDDEN_DIMENSIONS:
+            raise ValueError(f"{label}.dimension_id")
+        issuers.add(issuer)
+        filings.update(raw_filings)
+        dimensions[str(dimension)] += 1
+
+        source_record_id = row.get("source_record_id")
+        source_sha256 = row.get("source_sha256")
+        review = row.get("review")
+        if not isinstance(source_record_id, str) or not source_record_id:
+            raise ValueError(f"{label}.source_record_id")
+        if (
+            not isinstance(source_sha256, str)
+            or len(source_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in source_sha256)
+        ):
+            raise ValueError(f"{label}.source_sha256")
+        if not isinstance(review, dict) or review.get("status") != "agent_audited":
+            raise ValueError(f"{label}.review")
+        if review.get("provenance") != "independent_direct_corpus_annotation":
+            raise ValueError(f"{label}.provenance")
+        if review.get("target_selection") != "direct_evidence_ledger":
+            raise ValueError(f"{label}.target_selection")
+        if review.get("product_output_used") is not False:
+            raise ValueError(f"{label}.product_output_used")
+        if "selected_evidence_ids" in row or "retrieval_result" in row:
+            raise ValueError(f"{label}.product_output_used")
+
+    if set(dimensions) != _INDEPENDENT_HIDDEN_DIMENSIONS:
+        raise ValueError("independent_hidden_dimension_coverage")
+    if len(issuers) < 12:
+        raise ValueError("independent_hidden_issuer_coverage")
+    if len(filings) < 12:
+        raise ValueError("independent_hidden_filing_coverage")
+    return {
+        **profile,
+        "evaluation_scope": "independent_hidden",
+        "release_eligible": True,
+        "independence": {
+            "case_count": len(rows),
+            "issuer_count": len(issuers),
+            "filing_count": len(filings),
+            "dimension_counts": dict(sorted(dimensions.items())),
+            "target_selection": "direct_evidence_ledger",
+            "product_output_used": False,
+            "visibility": "git_ignored_private_artifact",
+        },
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--database", type=Path, required=True)
@@ -101,6 +230,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--gold", type=Path, required=True)
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--embedding-decision", type=Path, required=True)
+    parser.add_argument(
+        "--evaluation-scope",
+        choices=("development_public_agent_audited", "independent_hidden"),
+        default="development_public_agent_audited",
+    )
+    parser.add_argument("--repository-root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
 
     inputs = {path.resolve() for path in (args.database, args.overlay, args.search_index, args.attestation, args.gold)}
@@ -163,13 +298,26 @@ def main(argv: list[str] | None = None) -> int:
             candidate_count=candidate_count,
             latency_ms=elapsed_ms,
         )
-        if score["missing_target_evidence_ids"]:
+        missing_targets = list(score["missing_target_evidence_ids"])
+        missing_relevance_sets = list(score.get("missing_relevance_set_ids", ()))
+        if missing_targets or missing_relevance_sets:
             target_domains = case.get("target_domains", {})
             missing_domains = {
                 str(target_domains.get(item, ""))
-                for item in score["missing_target_evidence_ids"]
+                for item in missing_targets
                 if isinstance(target_domains, dict)
             }
+            if missing_relevance_sets:
+                relevance_domains = {
+                    str(item.get("set_id")): str(item.get("domain", ""))
+                    for item in case.get("relevance_sets", ())
+                    if isinstance(item, dict)
+                }
+                missing_domains.update(
+                    relevance_domains.get(str(set_id), "")
+                    for set_id in missing_relevance_sets
+                )
+            missing_domains.discard("")
             residual_route = next(iter(missing_domains)) if len(missing_domains) == 1 else "mixed"
             score["route"] = residual_route
             score["exclusion_boundary"] = (
@@ -178,15 +326,21 @@ def main(argv: list[str] | None = None) -> int:
             )
             if residual_route != "text":
                 score["hypothesis"] = "structured_target_not_returned_by_audited_route"
-            elif any(item not in indexed_targets for item in score["missing_target_evidence_ids"]):
+            elif missing_targets and any(item not in indexed_targets for item in missing_targets):
                 score["hypothesis"] = "target_absent_from_search_index"
             else:
                 score["hypothesis"] = "target_outside_expanded_top20"
         scores.append(score)
 
     metrics = aggregate_freeform_scores(scores)
+    profile = _evaluation_profile(
+        rows,
+        evaluation_scope=args.evaluation_scope,
+        gold_path=args.gold,
+        repository_root=args.repository_root,
+    )
     summary: dict[str, object] = {
-        "schema_version": "1.0.0",
+        **profile,
         "status": "ok",
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "database_sha256": attestation.sha256,
@@ -200,7 +354,9 @@ def main(argv: list[str] | None = None) -> int:
         "latency_samples_ms": latency_samples,
     }
     summary["semantic_sha256"] = semantic_summary_sha256(summary)
-    decision = decide_embedding_pilot(metrics)
+    decision = decide_embedding_pilot(
+        metrics, release_eligible=bool(profile["release_eligible"])
+    )
     decision["summary_semantic_sha256"] = summary["semantic_sha256"]
     _write_json(args.summary, summary)
     _write_json(args.embedding_decision, decision)

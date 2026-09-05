@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from disclosure_db.attestation import CorpusAttestation
 from disclosure_db.agent_contracts import QueryPlan
+from disclosure_db.api import _health_status
 from disclosure_db.evidence_service import EvidenceService
 from disclosure_db.schema import create_schema, create_indexes
 from disclosure_db.search_index import SafeSearchIndex, build_search_index
@@ -129,6 +130,24 @@ class SearchIndexTests(unittest.TestCase):
         self.assertEqual(result.indexed_rows, 1)
         rows = SafeSearchIndex(self.index, base_sha256=self.attestation.sha256).search("계약금액", company="테스트", as_of=None)
         self.assertEqual([row["evidence_id"] for row in rows], ["ev_safe"])
+
+    def test_evidence_service_validates_search_index_once_and_reuses_it(self) -> None:
+        build_search_index(self.base, self.index, self.attestation)
+
+        with patch("disclosure_db.search_index.SafeSearchIndex", wraps=SafeSearchIndex) as safe_index:
+            service = EvidenceService(
+                self.base,
+                attestation=self.attestation,
+                search_database=self.index,
+            )
+            first = service.search(QueryPlan("계약금액", company="테스트"))
+            second = service.search(QueryPlan("계약금액", company="테스트"))
+            health = _health_status(service)
+
+        self.assertEqual([ref.evidence_id for ref in first.evidence], ["ev_safe"])
+        self.assertEqual([ref.evidence_id for ref in second.evidence], ["ev_safe"])
+        self.assertTrue(health["search_index_ready"])
+        self.assertEqual(safe_index.call_count, 1)
 
     def test_search_index_exact_filing_date_excludes_nearby_filing(self) -> None:
         base = Path(self.temp.name) / "filing_date_base.sqlite"

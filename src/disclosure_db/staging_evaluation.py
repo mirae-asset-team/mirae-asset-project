@@ -202,6 +202,17 @@ class StagingApiClient:
             {"question": question},
         )
 
+    def search(self, question: str, *, limit: int = 20) -> Mapping[str, object]:
+        if not isinstance(question, str) or not question.strip() or len(question) > 2_000:
+            raise ValueError("invalid evaluation question")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
+            raise ValueError("invalid evaluation search limit")
+        return self._request(
+            "POST",
+            "/v1/evidence/search",
+            {"question": question, "limit": limit},
+        )
+
 
 def _p95(values: list[float]) -> float | None:
     if not values:
@@ -376,6 +387,8 @@ def _is_explicit_non_claim(
     preceding = text[max(0, match.start() - 12) : match.start()]
     if raw in modeled["date"] and following.startswith("년"):
         return True
+    if preceding.endswith("(주") and following.startswith(")"):
+        return True
     return raw in modeled["receipt_id"] and "접수번호" in preceding
 
 
@@ -414,6 +427,11 @@ def _text_numbers(
             value *= _UNIT_SCALE[unit_match.group(1)]
         result.add(value)
     for match in _KOREAN_NUMBER_TOKEN.finditer(text):
+        if re.search(
+            r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*$",
+            text[: match.start()],
+        ):
+            continue
         value = _korean_number(match.group(0))
         if value is None:
             continue
@@ -594,6 +612,96 @@ class StagingJudgeObservation(JudgeObservation):
     secret_leak_count: int = 0
 
 
+def _inspection_oracle(case: Mapping[str, object]) -> dict[str, object]:
+    """Map raw case-oracle fields to the independent claim inspector contract."""
+
+    raw = _mapping(case.get("oracle"))
+    allowed_numbers = raw.get("allowed_numeric_values")
+    if not isinstance(allowed_numbers, (list, tuple)):
+        allowed_numbers = [] if raw.get("value") is None else [str(raw["value"])]
+    else:
+        allowed_numbers = list(allowed_numbers)
+    value = raw.get("value")
+    scale = raw.get("scale")
+    if value is not None and isinstance(scale, int) and not isinstance(scale, bool):
+        try:
+            scaled = Decimal(str(value)) * Decimal(scale)
+        except InvalidOperation:
+            pass
+        else:
+            if scaled.is_finite():
+                allowed_numbers.append(_decimal_key(scaled))
+    allowed_citations = raw.get("allowed_citation_ids")
+    if not isinstance(allowed_citations, (list, tuple)):
+        allowed_citations = raw.get("evidence_ids", [])
+    allowed_filings = raw.get("allowed_filing_ids")
+    if not isinstance(allowed_filings, (list, tuple)):
+        allowed_filings = raw.get("filing_ids", [])
+    non_claim_tokens = raw.get("non_claim_numeric_tokens")
+    if not isinstance(non_claim_tokens, list):
+        non_claim_tokens = []
+    else:
+        non_claim_tokens = list(non_claim_tokens)
+    question = case.get("question")
+    if isinstance(question, str):
+        known = {
+            str(item.get("value"))
+            for item in non_claim_tokens
+            if isinstance(item, Mapping) and item.get("kind") == "date"
+        }
+        for year in re.findall(r"(?<!\d)((?:19|20)\d{2})(?!\d)", question):
+            if year not in known:
+                non_claim_tokens.append({"kind": "date", "value": year})
+                known.add(year)
+    return {
+        **dict(raw),
+        "allowed_numeric_values": list(allowed_numbers),
+        "allowed_citation_ids": list(allowed_citations)
+        if isinstance(allowed_citations, (list, tuple))
+        else [],
+        "allowed_filing_ids": list(allowed_filings)
+        if isinstance(allowed_filings, (list, tuple))
+        else [],
+        "non_claim_numeric_tokens": non_claim_tokens,
+    }
+
+
+def _inspection_response(response: Mapping[str, object]) -> Mapping[str, object]:
+    """Expose the legacy verified-answer contract to the claim inspector."""
+
+    metadata = dict(_mapping(response.get("metadata")))
+    if isinstance(metadata.get("claim_support"), list):
+        return response
+    if response.get("verified") is not True or response.get("answerable") is not True:
+        return response
+    citation_ids = sorted(_string_set(response.get("citation_ids")))
+    numeric_values = sorted(_string_set(response.get("numeric_values")))
+    facts = response.get("financial_facts")
+    fact_rows = facts if isinstance(facts, list) else []
+    fact_refs = [
+        str(item["financial_fact_id"])
+        for item in fact_rows
+        if isinstance(item, Mapping)
+        and isinstance(item.get("financial_fact_id"), str)
+    ]
+    if not fact_refs:
+        fact_refs = ["legacy-verified-answer"]
+    metadata["claim_support"] = [
+        {
+            "claim_id": "legacy-verified-answer",
+            "text": str(response.get("answer", "")),
+            "citation_ids": citation_ids,
+            "fact_refs": fact_refs,
+            "calculation_refs": [],
+            "evidence_slot_ids": ["legacy-verified-answer"],
+            "numeric_values": numeric_values,
+        }
+    ]
+    normalized = dict(response)
+    normalized["metadata"] = metadata
+    return normalized
+
+
 class StagingJudgeRuntime:
     """Adapter from the public staging API to content-free Judge observations."""
 
@@ -664,6 +772,35 @@ class StagingJudgeRuntime:
         if not isinstance(question, str):
             raise StagingEvaluationError("staging probe is invalid")
         began = perf_counter()
+        if lane == "retrieval_precheck":
+            response = self._client.search(question, limit=20)
+            latency_ms = max(0.001, (perf_counter() - began) * 1_000)
+            oracle = _inspection_oracle(case)
+            expected_ids = _string_set(oracle.get("allowed_citation_ids"))
+            evidence = response.get("evidence")
+            if not isinstance(evidence, list):
+                raise StagingEvaluationError(
+                    "staging retrieval response is invalid"
+                )
+            returned_ids = {
+                str(item["evidence_id"])
+                for item in evidence
+                if isinstance(item, Mapping)
+                and isinstance(item.get("evidence_id"), str)
+            }
+            matched_ids = tuple(sorted(expected_ids & returned_ids))
+            minimum = oracle.get("minimum_evidence_count", 1)
+            if isinstance(minimum, bool) or not isinstance(minimum, int) or minimum < 1:
+                raise StagingEvaluationError("staging retrieval oracle is invalid")
+            answerable = response.get("answerable") is True and len(matched_ids) >= minimum
+            return StagingJudgeObservation(
+                status="answered" if answerable else "abstained",
+                answerable=answerable,
+                citation_ids=matched_ids,
+                provider_used=False,
+                latency_ms=latency_ms,
+            )
+
         response = self._client.answer(question, provider=lane == "provider_answer")
         latency_ms = max(0.001, (perf_counter() - began) * 1_000)
         metadata = _mapping(response.get("metadata"))
@@ -695,14 +832,15 @@ class StagingJudgeRuntime:
         }
         if not _response_succeeded(response, expected_answer=expected_answer):
             raise StagingEvaluationError("staging response was unsuccessful")
-        oracle = (
+        resolved_oracle = (
             self._oracle_resolver(case, probe)
             if self._oracle_resolver is not None
             else _mapping(case.get("oracle"))
         )
-        if not isinstance(oracle, Mapping):
+        if not isinstance(resolved_oracle, Mapping):
             raise StagingEvaluationError("staging oracle is invalid")
-        inspection = inspect_claim_support(response, oracle)
+        oracle = _inspection_oracle({**dict(case), "oracle": dict(resolved_oracle)})
+        inspection = inspect_claim_support(_inspection_response(response), oracle)
         with self._security_lock:
             for field in _SECURITY_COUNTER_FIELDS:
                 self._security_counts[field] += inspection[field]
@@ -728,12 +866,45 @@ class StagingJudgeRuntime:
                 "answered",
                 "verified",
             }
+        facts = response.get("financial_facts")
+        first_fact = (
+            facts[0]
+            if isinstance(facts, list) and facts and isinstance(facts[0], Mapping)
+            else {}
+        )
+        numeric_values = response.get("numeric_values")
+        fallback_value = (
+            str(numeric_values[0])
+            if isinstance(numeric_values, list)
+            and len(numeric_values) == 1
+            and isinstance(numeric_values[0], (str, int, float))
+            else None
+        )
+        status = response.get("status")
+        if not isinstance(status, str):
+            status = "answered" if answerable else "abstained"
         return StagingJudgeObservation(
-            status=str(response.get("status", "invalid")),
+            status=status,
             answerable=answerable,
-            value=str(metadata["value"]) if metadata.get("value") is not None else None,
-            unit=str(metadata["unit"]) if metadata.get("unit") is not None else None,
-            scope=str(metadata["scope"]) if metadata.get("scope") is not None else None,
+            value=(
+                str(metadata["value"])
+                if metadata.get("value") is not None
+                else fallback_value
+            ),
+            unit=(
+                str(metadata["unit"])
+                if metadata.get("unit") is not None
+                else str(first_fact["unit_raw"])
+                if first_fact.get("unit_raw") is not None
+                else None
+            ),
+            scope=(
+                str(metadata["scope"])
+                if metadata.get("scope") is not None
+                else str(first_fact["scope"])
+                if first_fact.get("scope") is not None
+                else None
+            ),
             conclusion=str(metadata["conclusion"])
             if metadata.get("conclusion") is not None
             else None,
