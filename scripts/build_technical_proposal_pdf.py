@@ -369,7 +369,7 @@ def cover_story(styles: dict[str, ParagraphStyle]) -> list[Flowable]:
         Spacer(1, 7 * mm),
         Paragraph(
             "제10회 2026 미래에셋증권 AI Festival · 공시 Agent 기술제안서"
-            "<br/>팀명 신비복숭아 · 김세민 · 조성찬 · 이정민",
+            "<br/>팀명 신비복숭아 · 김세민 · 이정찬 · 이정민",
             styles["cover_sub"],
         ),
         Spacer(1, 17 * mm),
@@ -424,7 +424,7 @@ def build_pdf(source: Path, output: Path) -> None:
         topMargin=20 * mm,
         bottomMargin=18 * mm,
         title="MIRA 근거 검증형 공시 AI Agent 기술제안서",
-        author="신비복숭아 (김세민 · 조성찬 · 이정민)",
+        author="신비복숭아 (김세민 · 이정찬 · 이정민)",
         subject="제10회 2026 미래에셋증권 AI Festival 공시 Agent",
     )
     story = cover_story(styles)
