@@ -39,7 +39,7 @@ response = requests.get(
 print(response.json()["answer"])
 ```
 
-서버 상태는 `curl http://101.79.31.221:8000/health`로 확인합니다. 요청 제한은 IP당 분당 120건·동시 4건이며 초과 시 `429`, 서버 전체 동시 8건 초과 시 `503`을 반환합니다. 현재 서빙 중인 이미지는 이 저장소의 commit `8d238b4`에서 빌드한 `sha256:b6af20d65948c64f572e08b0d8dd603516e311d0aede81f0159bce587de390e1`이며, base·overlay·검색 인덱스는 read-only로 mount합니다. 그 뒤 `main`에 들어간 답변 문장 정리(계정 라벨에 맞는 조사, 단일 기간 비율에 비교 문장 미삽입, 같은 공시의 근거는 `retrieved_context` 한 행)는 서빙 이미지를 다시 빌드해 승격하기 전까지 평가 서버에 반영되지 않습니다. 자세한 요청·응답·오류 계약은 [평가용 API 서버 명세](docs/submission/api-server-spec.md), 운영 절차는 [contest-server 런북](docs/operations/contest-server.md)에 있습니다.
+서버 상태는 `curl http://101.79.31.221:8000/health`로 확인합니다. 요청 제한은 IP당 분당 120건·동시 4건이며 초과 시 `429`, 서버 전체 동시 8건 초과 시 `503`을 반환합니다. 현재 서빙 중인 이미지는 이 저장소의 commit `ae5126e`(태그 `submission-2026-09-06-final`)에서 빌드한 `sha256:0361fe2b308561ef9835868ad1024aa82165c40b513b5deeb55af812af1bbfdd`이며, base·overlay·검색 인덱스는 read-only로 mount합니다. 자세한 요청·응답·오류 계약은 [평가용 API 서버 명세](docs/submission/api-server-spec.md), 운영 절차는 [contest-server 런북](docs/operations/contest-server.md)에 있습니다.
 
 ## 환경 구성과 실행
 
@@ -61,7 +61,7 @@ docker compose logs --tail 200 disclosure-agent
 docker compose down                        # 중지
 ```
 
-배치할 데이터와 검증값은 다음과 같습니다. 파일을 놓은 뒤 `GET /health`가 `ready=true`와 `base_attested`·`overlay_attested`·`search_index_ready`를 모두 `true`로 보고해야 질문을 받을 수 있습니다.
+배치할 데이터와 검증값은 다음과 같습니다. overlay·검색 인덱스·attestation 3종은 GitHub Release [`submission-2026-09-06-final`](https://github.com/mirae-asset-team/mirae-asset-project/releases/tag/submission-2026-09-06-final)에 첨부돼 있고(`SHA256SUMS.txt` 포함), 불변 base SQLite는 주최측이 제공한 코퍼스입니다. 파일을 놓은 뒤 `GET /health`가 `ready=true`와 `base_attested`·`overlay_attested`·`search_index_ready`를 모두 `true`로 보고해야 질문을 받을 수 있습니다.
 
 | 파일 | 크기 · SHA-256 |
 |---|---|
