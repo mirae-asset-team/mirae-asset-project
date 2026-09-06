@@ -9,12 +9,12 @@
 - 인증: 없음. 평가 호출은 인증 헤더 없이 그대로 보낸다.
 - 포트: 8000만 공개한다. 80은 열지 않았으므로 URL에 포트를 반드시 포함한다.
 - 데이터: base SQLite·overlay·검색 인덱스는 read-only mount다.
-- 배포 identity (2026-09-06 승격, 외부망 실호출로 확인)
+- 배포 identity (2026-09-06 22시 승격, 8002 격리 검증 6문항 후 같은 image ID 승격, 외부망 실호출로 확인)
 
 | 항목 | 값 |
 |---|---|
-| source commit | `8d238b412a4adcb37455b1c67f51ee4ad748148a` |
-| image ID | `sha256:b6af20d65948c64f572e08b0d8dd603516e311d0aede81f0159bce587de390e1` |
+| source commit | `ae5126eebe8563c82473f0330b358f79a68b7ed9` (태그 `submission-2026-09-06-final`) |
+| image ID | `sha256:0361fe2b308561ef9835868ad1024aa82165c40b513b5deeb55af812af1bbfdd` |
 | 불변 base SQLite | `38,773,280,768` bytes / `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563` |
 | live overlay | `a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55` |
 | live 검색 인덱스 | `e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793` |
