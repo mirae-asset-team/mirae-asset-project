@@ -36,6 +36,13 @@ SECURITY_HEADERS = {
     "X-Frame-Options": "DENY",
 }
 
+# Function-calling statuses that mean the provider or the tool round trip broke,
+# not that the pipeline decided to withhold an answer. Only these fall back to the
+# deterministic agent path; `abstained` and `invalid_request` are deliberate.
+_PROVIDER_FAILURE_STATUSES = frozenset(
+    {"error", "hcx_tool_selection_failed", "hcx_final_generation_failed"}
+)
+
 
 def _validated_as_of(value: str | None) -> str | None:
     if value is None:
@@ -438,6 +445,25 @@ def create_app(
     contest_query.__annotations__["request"] = ContestQueryRequest
     app.post("/query")(contest_query)
 
+    def _official_context(citations: Any) -> str:
+        """Render the five-field context rows from either citation shape."""
+
+        rows: list[str] = []
+        for citation in list(citations or [])[:20]:
+            if isinstance(citation, dict):
+                report_name = citation.get("report_name")
+                filed_at = citation.get("filed_at")
+                filing_id = citation.get("rcept_no") or citation.get("filing_id")
+            else:
+                report_name = getattr(citation, "report_name", None)
+                filed_at = getattr(citation, "filed_at", None)
+                filing_id = getattr(citation, "filing_id", None) or getattr(citation, "rcept_no", None)
+            rows.append(
+                f"공시명={report_name or '공시'} | 공시일={filed_at or '일자 미상'} "
+                f"| 접수번호={filing_id or '접수번호 미상'}"
+            )
+        return "\n".join(rows)[:6000]
+
     def official_answer(
         question_id: str = Query(min_length=1, max_length=200),
         question: str = Query(min_length=1, max_length=PUBLIC_QUESTION_MAX_CHARS),
@@ -449,31 +475,51 @@ def create_app(
             question = _validated_question(question)
         except ValueError:
             raise HTTPException(status_code=422, detail="question_or_as_of_invalid") from None
-        question = plan_query(
+        if not runtime_health()["ready"]:
+            raise HTTPException(status_code=503, detail="runtime_not_ready")
+        # The echoed question keeps its established normalized form (alias and
+        # width folding); both answer paths receive the same validated question
+        # the public UI sends and plan the query themselves.
+        echoed_question = plan_query(
             question,
             company_candidates=agent.evidence_service.company_candidates(),
             company_hint=company,
             as_of=as_of,
         ).question
+        # Unit rendering, derived ratios, document-topic routing and the
+        # deterministic safety refusals all live in the function-calling
+        # pipeline that serves the public UI. The official endpoint answers from
+        # that same pipeline so the two never disagree; the deterministic agent
+        # path remains the fallback for provider failures only, and a deliberate
+        # abstention is returned as it is rather than retried on the weaker path.
+        result = None
+        if function_calling_service is not None:
+            try:
+                result = function_calling_service.answer(question)
+            except Exception:
+                result = None
+        if result is not None and str(getattr(result, "status", "")) not in _PROVIDER_FAILURE_STATUSES:
+            answered = bool(getattr(result, "answer_allowed", False)) and bool(getattr(result, "answer", ""))
+            return {
+                "question_id": question_id,
+                "question": echoed_question,
+                "retrieved_context": _official_context(getattr(result, "citations", []) if answered else []),
+                "think_trace": (
+                    "질의 구조화 -> Tool 선택 -> 근거 검증 -> 검증된 근거로 답변 생성"
+                    if answered
+                    else "질의 구조화 -> Tool 선택 -> 근거 검증 -> 정보한계 판정"
+                ),
+                "answer": str(getattr(result, "answer", "")),
+            }
         verified = verified_answer(question, company=company, as_of=as_of)
-        citations = list(getattr(verified, "citations", []) or [])[:20]
-        context_rows = []
-        for citation in citations:
-            report_name = getattr(citation, "report_name", None) or "공시"
-            filed_at = getattr(citation, "filed_at", None) or "일자 미상"
-            filing_id = getattr(citation, "filing_id", None) or "접수번호 미상"
-            context_rows.append(
-                f"공시명={report_name} | 공시일={filed_at} | 접수번호={filing_id}"
-            )
-        retrieved_context = "\n".join(context_rows)[:6000]
         if bool(getattr(verified, "answerable", False)) and bool(getattr(verified, "verified", False)):
             trace = "질의 구조화 -> 공시 검색 -> 정정·수치 검증 -> 근거 귀속"
         else:
             trace = "질의 구조화 -> 공시 검색 -> 근거 검증 -> 정보한계 판정"
         return {
             "question_id": question_id,
-            "question": question,
-            "retrieved_context": retrieved_context,
+            "question": echoed_question,
+            "retrieved_context": _official_context(getattr(verified, "citations", [])),
             "think_trace": trace,
             "answer": str(getattr(verified, "answer", "")),
         }

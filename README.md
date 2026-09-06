@@ -6,6 +6,41 @@
 
 팀 저장소: [ksm12030-sudo/mirae-asset-project](https://github.com/ksm12030-sudo/mirae-asset-project)
 
+## 평가용 API End-point
+
+```text
+End-point: http://101.79.31.221:8000/answer
+```
+
+`GET /answer`는 인증 헤더 없이 호출합니다. `question_id`와 `question`을 query string으로 전달하고(한글은 URL 인코딩), 응답은 아래 5개 문자열 필드입니다.
+
+| 필드 | 내용 |
+|---|---|
+| `question_id` | 요청에 실린 값을 그대로 회신 |
+| `question` | 요청에 실린 질문 원문 |
+| `retrieved_context` | 근거 공시 목록 `공시명 \| 공시일 \| 접수번호`, 최대 6,000자 |
+| `think_trace` | 질의 구조화 → 검색 → 근거 검증 → 판정 요약 |
+| `answer` | 검증을 통과한 답변, 또는 근거가 없을 때의 보류 문구 |
+
+```bash
+curl -G "http://101.79.31.221:8000/answer" \
+  --data-urlencode "question_id=q001" \
+  --data-urlencode "question=삼성전자의 최근 사업보고서 기준 매출액을 알려줘"
+```
+
+```python
+import requests
+
+response = requests.get(
+    "http://101.79.31.221:8000/answer",
+    params={"question_id": "q001", "question": "삼성전자의 최근 사업보고서 기준 매출액을 알려줘"},
+    timeout=300,
+)
+print(response.json()["answer"])
+```
+
+서버 상태는 `curl http://101.79.31.221:8000/health`로 확인합니다. 요청 제한은 IP당 분당 120건·동시 4건이며 초과 시 `429`, 서버 전체 동시 8건 초과 시 `503`을 반환합니다. 현재 서빙 중인 이미지는 이 저장소의 commit `8d238b4`에서 빌드한 `sha256:b6af20d65948c64f572e08b0d8dd603516e311d0aede81f0159bce587de390e1`이며, base·overlay·검색 인덱스는 read-only로 mount합니다. 자세한 요청·응답·오류 계약은 [평가용 API 서버 명세](docs/submission/api-server-spec.md), 운영 절차는 [contest-server 런북](docs/operations/contest-server.md)에 있습니다.
+
 ## 현재 개발 상태와 인수인계
 
 > **Judge Stress V2 인수인계:** Task 1~8의 로컬 구현과 회귀가 완료되었습니다. Task 8은 원시 case 결과를 재검산하는 통합 release gate와 동일-image 8001→8000 배포/rollback 절차를 구현했지만, 현재 판정은 의도적으로 `BLOCKED_HARD_GATE`입니다. private holdout·실제 staging/provider·신뢰 앵커가 없고 Sparse Recall@20이 `0.487179... < 0.95`이므로 운영 승격은 실행하지 않았습니다. 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)를 읽고 차단 항목을 해소한 뒤 같은 gate를 다시 실행하세요.
@@ -293,7 +328,7 @@ uvicorn은 선택 의존성으로 지연 로딩되며, 핵심 CLI·테스트에�
 서버 readiness만 의미하며, 정확도·provider·외부 endpoint gate 통과를 의미하지 않습니다.
 
 제출 산출물은 [기술제안서 원고](docs/submission/technical-proposal.md),
-[기술제안서 PDF](output/pdf/mirae-disclosure-agent-technical-proposal.pdf),
+[기술제안서 PDF](docs/submission/technical-proposal.pdf),
 [평가 API 서버 명세](docs/submission/api-server-spec.md)에 정리했습니다.
 
 공식 과제자료의 평가 API 예시와 호환되는 `GET /answer`도 제공합니다.

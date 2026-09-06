@@ -1,15 +1,24 @@
 # 공시 Agent 평가 API 서버 명세
 
-작성 기준일: 2026-08-20
+작성 기준일: 2026-09-05
 
 ## 배포 상태
 
-- 로컬·Docker 구현 commit: `498f90b` 이후
-- 기존 NCP 공개 서버: API-only 구버전, health와 기존 `/query` 정상
-- 제출용 endpoint URL: 새 UI·`GET /answer` 코드 전용 재배포 후 확정
-- 현재 공개 제출 상태: `BLOCKED_EXTERNAL` (인증된 NCP 세션 필요)
+- 평가용 End-point: `http://101.79.31.221:8000/answer`
+- 상태: 공개 배포 완료. 2026-09-05 외부망에서 `GET /health` HTTP 200(`ready=true`, base·overlay·search attestation 전부 true, `company_count=76`)과 `GET /answer` 5필드 응답을 확인했다.
+- 인증: 없음. 평가 호출은 인증 헤더 없이 그대로 보낸다.
+- 포트: 8000만 공개한다. 80은 열지 않았으므로 URL에 포트를 반드시 포함한다.
+- 데이터: base SQLite·overlay·검색 인덱스는 read-only mount다.
+- 배포 identity (2026-09-06 승격, 외부망 실호출로 확인)
 
-실제 URL이 검증되기 전에는 기존 공인 IP나 임시 주소를 제출 endpoint로 기록하지 않는다.
+| 항목 | 값 |
+|---|---|
+| source commit | `8d238b412a4adcb37455b1c67f51ee4ad748148a` |
+| image ID | `sha256:b6af20d65948c64f572e08b0d8dd603516e311d0aede81f0159bce587de390e1` |
+| 불변 base SQLite | `38,773,280,768` bytes / `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563` |
+| live overlay | `a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55` |
+| live 검색 인덱스 | `e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793` |
+| 롤백 image | `app-disclosure-agent:rollback-pre-submission-20260906` (`sha256:32b8d88c…`) |
 
 ## 1. 공식 예시 호환 API
 
@@ -25,7 +34,7 @@
 | `as_of` | string | no | `YYYY-MM-DD` |
 
 ```bash
-curl -G "https://<team-endpoint>/answer" \
+curl -G "http://101.79.31.221:8000/answer" \
   --data-urlencode "question_id=Q-001" \
   --data-urlencode "question=평가 질의"
 ```
@@ -34,9 +43,9 @@ curl -G "https://<team-endpoint>/answer" \
 import requests
 
 response = requests.get(
-    "https://<team-endpoint>/answer",
+    "http://101.79.31.221:8000/answer",
     params={"question_id": "Q-001", "question": "평가 질의"},
-    timeout=30,
+    timeout=300,
 )
 response.raise_for_status()
 result = response.json()
@@ -156,4 +165,4 @@ HTTP 200 응답의 주요 boolean은 `ready`, `base_attested`, `overlay_attested
 6. 컨테이너 restart 및 host reboot 복구 확인
 7. `provider_configured=true`와 provider-required 300 gate 통과
 
-1~6은 인증된 NCP 세션 부재로 아직 실행하지 않았다. 7은 교체된 HyperCLOVA X credential 부재로 아직 실행하지 않았다.
+1~6은 실행해 통과했고 증거는 [contest-release-checklist](../operations/contest-release-checklist.md)에 있다. 7의 `provider_configured=true`는 `/health`로 확인했으나 provider-required 300문항 게이트 자체는 실행하지 않았다(`NOT_RUN`). provider 경로의 관측 근거는 300문항 게이트가 아니라 2026-09-03 대량 QA 12,811문항 실측이며, 그 결과는 기술제안서 §7에 적는다.

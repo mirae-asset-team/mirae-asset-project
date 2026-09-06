@@ -11,11 +11,13 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas as pdfcanvas
 from reportlab.platypus import (
     Flowable,
+    Image,
     KeepTogether,
     PageBreak,
     Paragraph,
@@ -191,6 +193,11 @@ def build_styles() -> dict[str, ParagraphStyle]:
             "Status", parent=base["BodyText"], fontName="Malgun-Bold", fontSize=9,
             leading=14, textColor=GREEN, alignment=TA_CENTER,
         ),
+        "caption": ParagraphStyle(
+            "Caption", parent=base["BodyText"], fontName="Malgun", fontSize=8,
+            leading=12, textColor=MUTED, alignment=TA_CENTER, wordWrap="CJK",
+            spaceBefore=4, spaceAfter=10,
+        ),
     }
 
 
@@ -278,6 +285,25 @@ def parse_markdown(path: Path, available_width: float, styles: dict[str, Paragra
                 story.append(styled_table(rows, available_width, styles))
                 story.append(Spacer(1, 9))
             continue
+        figure = re.match(r"^!\[(.*)\]\(([^)]+)\)$", stripped)
+        if figure:
+            flush_paragraph()
+            caption, source = figure.group(1), figure.group(2)
+            resolved = (path.parent / source).resolve()
+            if not resolved.exists():
+                raise SystemExit(f"missing figure: {resolved}")
+            natural_width, natural_height = ImageReader(str(resolved)).getSize()
+            width = min(available_width, natural_width * 0.72)
+            height = width * natural_height / natural_width
+            if height > 205 * mm:
+                height = 205 * mm
+                width = height * natural_width / natural_height
+            block: list[Flowable] = [Image(str(resolved), width=width, height=height)]
+            if caption:
+                block.append(Paragraph(paragraph_markup(caption), styles["caption"]))
+            story.append(KeepTogether(block))
+            index += 1
+            continue
         heading = re.match(r"^(#{2,3})\s+(.+)$", stripped)
         if heading:
             flush_paragraph()
@@ -308,7 +334,7 @@ def parse_markdown(path: Path, available_width: float, styles: dict[str, Paragra
 
 def cover_story(styles: dict[str, ParagraphStyle]) -> list[Flowable]:
     status = Table(
-        [[Paragraph("로컬 결정론적 품질 게이트 GO · 외부 최종 게이트 진행 중", styles["status"])]],
+        [[Paragraph("평가용 End-point · http://101.79.31.221:8000/answer", styles["status"])]],
         colWidths=[155 * mm],
     )
     status.setStyle(TableStyle([
@@ -318,7 +344,7 @@ def cover_story(styles: dict[str, ParagraphStyle]) -> list[Flowable]:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
     ]))
     facts = Table([
-        ["38.8GB", "300/300", "0건", "304 tests"],
+        ["38.8GB", "300/300", "0건", "944 tests"],
         ["immutable corpus", "deterministic stress", "hard safety failures", "Python regression"],
     ], colWidths=[38.75 * mm] * 4)
     facts.setStyle(TableStyle([
@@ -341,7 +367,11 @@ def cover_story(styles: dict[str, ParagraphStyle]) -> list[Flowable]:
         Paragraph("MIRA", styles["cover_title"]),
         Paragraph("근거 검증형 공시 AI Agent", styles["cover_title"]),
         Spacer(1, 7 * mm),
-        Paragraph("제10회 2026 미래에셋증권 AI Festival<br/>공시 Agent 기술제안서", styles["cover_sub"]),
+        Paragraph(
+            "제10회 2026 미래에셋증권 AI Festival · 공시 Agent 기술제안서"
+            "<br/>팀명 신비복숭아 · 김세민 · 조성찬 · 이정민",
+            styles["cover_sub"],
+        ),
         Spacer(1, 17 * mm),
         status,
         Spacer(1, 12 * mm),
@@ -353,7 +383,7 @@ def cover_story(styles: dict[str, ParagraphStyle]) -> list[Flowable]:
             styles["body"],
         ),
         Spacer(1, 10 * mm),
-        Paragraph("작성 기준일 2026-08-21", styles["small"]),
+        Paragraph("작성 기준일 2026-09-06", styles["small"]),
         PageBreak(),
     ]
 
@@ -421,7 +451,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("output/pdf/mirae-disclosure-agent-technical-proposal.pdf"),
+        default=Path("docs/submission/technical-proposal.pdf"),
     )
     args = parser.parse_args()
     build_pdf(args.source, args.output)

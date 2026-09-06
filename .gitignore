@@ -54,3 +54,7 @@ references/official/source_archives/
 
 # Local QA ledgers and run artifacts
 runs/
+
+# Deployment archives built on demand; never part of the submitted source
+*.tar.gz
+output/pdf/
