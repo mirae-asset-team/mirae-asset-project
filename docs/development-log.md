@@ -1045,3 +1045,8 @@
 - 검증: 수정 후 전체 Python `946 passed, 2 skipped, 105 warnings, 283 subtests passed` (`115.35s`, PowerShell), Web `13/13`, `compileall` 통과, `ast.parse(feature_version=(3, 11))`로 3.11 문법 확인(중첩 f-string 제거). 제안서 PDF는 `scripts/build_technical_proposal_pdf.py`로 재생성했고 교체 문구 3종이 본문에 들어갔음을 추출로 확인했다.
 - 경계: 평가 서버(8000, commit `8d238b4` 이미지)는 재빌드·재배포하지 않았다. 이 커밋의 답변 문장 정리는 같은 이미지를 다시 빌드해 8002 격리 검증 후 승격하기 전까지 서빙에 반영되지 않으며 README에 그렇게 적었다. base/overlay/search, `.env`, credential, ACG는 열거나 바꾸지 않았다.
 
+### 2026-09-06T21:40:00+09:00 — 팀원 이름 정정과 제출 기록
+
+- 제안서·PDF 표지·PDF 메타데이터의 팀원 이름을 이정찬으로 정정했다(PR #15, merge `ae5126e`). PDF 추출 검사에서 이정찬 1건·조성찬 0건.
+- 메일(`ai@miraeasset.com`, zip = `main` `ae5126e` 트리)과 구글폼 제출을 마쳤다. 최종 커밋에 태그 `submission-2026-09-06-final`을 붙였다. 평가 서버 8000은 commit `8d238b4` 이미지 그대로다.
+
