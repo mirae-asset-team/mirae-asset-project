@@ -1,6 +1,6 @@
 # 공시 Agent 평가 API 서버 명세
 
-작성 기준일: 2026-09-05
+작성 기준일: 2026-09-06
 
 ## 배포 상태
 
@@ -60,7 +60,7 @@ result = response.json()
   "question_id": "Q-001",
   "question": "평가 질의",
   "retrieved_context": "공시명=사업보고서 | 공시일=2025-03-18 | 접수번호=20250318000001",
-  "think_trace": "질의 구조화 -> 공시 검색 -> 정정·수치 검증 -> 근거 귀속",
+  "think_trace": "질의 구조화 -> Tool 선택 -> 근거 검증 -> 검증된 근거로 답변 생성",
   "answer": "검증된 최종 답변"
 }
 ```
@@ -73,7 +73,7 @@ result = response.json()
 | `think_trace` | string | 공개 처리 단계 요약; 비공개 chain-of-thought가 아님 |
 | `answer` | string | 검증된 최종 답변 또는 명시적 답변 보류 |
 
-답변할 수 없으면 `retrieved_context`는 빈 문자열일 수 있고, `think_trace`는 `정보한계 판정`으로 끝난다.
+답변할 수 없으면 `retrieved_context`는 빈 문자열일 수 있고, `think_trace`는 `정보한계 판정`으로 끝난다. provider 왕복이 실패해 결정론 경로로 폴백한 응답의 `think_trace`는 `질의 구조화 -> 공시 검색 -> 정정·수치 검증 -> 근거 귀속`이다. 같은 공시의 여러 근거 셀을 인용해도 `retrieved_context`에는 그 공시가 한 행만 실린다.
 
 ## 2. 상세 평가·웹 API
 

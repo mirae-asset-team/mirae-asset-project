@@ -462,7 +462,9 @@ def create_app(
                 f"공시명={report_name or '공시'} | 공시일={filed_at or '일자 미상'} "
                 f"| 접수번호={filing_id or '접수번호 미상'}"
             )
-        return "\n".join(rows)[:6000]
+        # Several evidence cells of one filing (e.g. 부채총계 and 자본총계 of the
+        # same 사업보고서) are one retrieved disclosure, not repeated rows.
+        return "\n".join(dict.fromkeys(rows))[:6000]
 
     def official_answer(
         question_id: str = Query(min_length=1, max_length=200),

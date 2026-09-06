@@ -4,7 +4,7 @@
 
 처음 프로젝트를 보는 팀원은 [초보자용 프로젝트 구조·테스트·잔여 작업 안내](docs/README-project-guide.md)부터 읽어 주세요. 지금까지 구현한 흐름, 구조도, 테스트 방법, NCP 실행과 남은 embedding 평가·배포 작업을 한 문서에 정리했습니다.
 
-팀 저장소: [ksm12030-sudo/mirae-asset-project](https://github.com/ksm12030-sudo/mirae-asset-project)
+팀 저장소: [mirae-asset-team/mirae-asset-project](https://github.com/mirae-asset-team/mirae-asset-project) (주최측 Organization으로 이전됨)
 
 ## 평가용 API End-point
 
@@ -39,7 +39,7 @@ response = requests.get(
 print(response.json()["answer"])
 ```
 
-서버 상태는 `curl http://101.79.31.221:8000/health`로 확인합니다. 요청 제한은 IP당 분당 120건·동시 4건이며 초과 시 `429`, 서버 전체 동시 8건 초과 시 `503`을 반환합니다. 현재 서빙 중인 이미지는 이 저장소의 commit `8d238b4`에서 빌드한 `sha256:b6af20d65948c64f572e08b0d8dd603516e311d0aede81f0159bce587de390e1`이며, base·overlay·검색 인덱스는 read-only로 mount합니다. 자세한 요청·응답·오류 계약은 [평가용 API 서버 명세](docs/submission/api-server-spec.md), 운영 절차는 [contest-server 런북](docs/operations/contest-server.md)에 있습니다.
+서버 상태는 `curl http://101.79.31.221:8000/health`로 확인합니다. 요청 제한은 IP당 분당 120건·동시 4건이며 초과 시 `429`, 서버 전체 동시 8건 초과 시 `503`을 반환합니다. 현재 서빙 중인 이미지는 이 저장소의 commit `8d238b4`에서 빌드한 `sha256:b6af20d65948c64f572e08b0d8dd603516e311d0aede81f0159bce587de390e1`이며, base·overlay·검색 인덱스는 read-only로 mount합니다. 그 뒤 `main`에 들어간 답변 문장 정리(계정 라벨에 맞는 조사, 단일 기간 비율에 비교 문장 미삽입, 같은 공시의 근거는 `retrieved_context` 한 행)는 서빙 이미지를 다시 빌드해 승격하기 전까지 평가 서버에 반영되지 않습니다. 자세한 요청·응답·오류 계약은 [평가용 API 서버 명세](docs/submission/api-server-spec.md), 운영 절차는 [contest-server 런북](docs/operations/contest-server.md)에 있습니다.
 
 ## 환경 구성과 실행
 
@@ -69,7 +69,7 @@ docker compose down                        # 중지
 | live overlay | `a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55` |
 | live 검색 인덱스 | `e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793` |
 
-회귀 테스트는 `PYTHONPATH=src python -m pytest -q`로 실행하며 `944 passed, 2 skipped, 267 subtests`가 기준입니다. 롤백을 포함한 운영 절차는 [contest-server 런북](docs/operations/contest-server.md)에 있습니다.
+회귀 테스트는 `PYTHONPATH=src python -m pytest -q`로 실행하며 `946 passed, 2 skipped, 283 subtests`가 기준입니다. 롤백을 포함한 운영 절차는 [contest-server 런북](docs/operations/contest-server.md)에 있습니다.
 
 > 소스에 보이는 `.../v1/openai` 문자열은 **CLOVA Studio가 제공하는 OpenAI 호환 엔드포인트 경로**입니다. HyperCLOVA X 외의 LLM을 호출하는 코드 경로는 없습니다.
 

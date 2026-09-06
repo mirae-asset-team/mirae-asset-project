@@ -35,6 +35,7 @@ from .disclosure_tools import (
     parse_korean_krw_amounts,
 )
 from .evidence_sufficiency import EvidenceSufficiencyChecker
+from .financial_accounts import attach_particle
 from .hcx_prompts import (
     HCX_FINAL_ANSWER_SYSTEM_PROMPT,
     HCX_FUNCTION_PROMPT_VERSION,
@@ -933,7 +934,8 @@ class HcxFunctionCallingService:
             rows = [row for row in values if isinstance(row, Mapping)] if isinstance(values, list) else []
             if rows:
                 text = "\n".join(
-                    f"{row.get('period') or ''} {row.get('metric') or '재무 수치'}은 {row.get('display_value')}입니다.".strip()
+                    f"{attach_particle(' '.join(str(item) for item in (row.get('period'), row.get('metric') or '재무 수치') if item), '은')} "
+                    f"{row.get('display_value')}입니다."
                     for row in rows if row.get("display_value")
                 )
                 if text:
@@ -1669,7 +1671,15 @@ class HcxFunctionCallingService:
             winners = [str(requirement.get("company")) for requirement, _, value in selected if value == maximum]
             comparison["winner"] = winners[0] if len(winners) == 1 else None
             comparison["tie"] = len(winners) > 1
-        elif complete and len(metrics) == 1 and len(companies) == 1 and periods:
+        elif (
+            complete
+            and not derived_operation
+            and len(metrics) == 1
+            and len(companies) == 1
+            and len(periods) >= 2
+        ):
+            # A catalog ratio or identity fetches two accounts of one period; that
+            # is not a period comparison, so no ``largest_period`` is claimed.
             maximum = max(value for _, _, value in selected)
             largest = [str(requirement.get("period")) for requirement, _, value in selected if value == maximum]
             comparison["largest_period"] = largest[0] if len(largest) == 1 else None
@@ -2709,7 +2719,7 @@ class HcxFunctionCallingService:
             display_value = str(raw_fact.get("display_value") or "")
             if not display_value:
                 continue
-            sentences.append(f"{subject}은 {display_value}입니다.")
+            sentences.append(f"{attach_particle(subject, '은')} {display_value}입니다.")
         if not sentences:
             return None
         answer = sentences[0] if len(sentences) == 1 else "\n".join(f"- {item}" for item in sentences)
@@ -2763,11 +2773,11 @@ class HcxFunctionCallingService:
         scope = {"consolidated": "연결", "separate": "별도"}.get(str(fact.get("scope") or ""), "")
         subject = " ".join(item for item in (company, f"{period}년" if period else "", scope, account) if item)
         if claimed_amount_matches:
-            answer = f"네. 공시 수치 기준으로 {subject}은 {display_value}입니다."
+            answer = f"네. 공시 수치 기준으로 {attach_particle(subject, '은')} {display_value}입니다."
         else:
             answer = (
                 f"아니요. 질문에 제시된 금액은 공시 수치와 일치하지 않습니다. "
-                f"{subject}은 {display_value}입니다."
+                f"{attach_particle(subject, '은')} {display_value}입니다."
             )
         fact_evidence_ids = [
             str(item) for item in fact.get("evidence_ids", [])
@@ -2790,9 +2800,12 @@ class HcxFunctionCallingService:
         rows = [item for item in values if isinstance(item, Mapping)] if isinstance(values, list) else []
         if len(rows) < 2:
             return None
+        def row_subject(row: Mapping[str, object]) -> str:
+            metric_label = row.get("metric") or comparison.get("metric") or "재무 수치"
+            return f"{row.get('company')} {row.get('period')}년 {metric_label}"
+
         lines = [
-            f"{row.get('company')} {row.get('period')}년 "
-            f"{row.get('metric') or comparison.get('metric') or '재무 수치'}은 {row.get('display_value')}입니다."
+            f"{attach_particle(row_subject(row), '은')} {row.get('display_value')}입니다."
             for row in rows
             if row.get("company") and row.get("period") and row.get("display_value")
         ]
@@ -2801,12 +2814,19 @@ class HcxFunctionCallingService:
         largest_period = comparison.get("largest_period")
         winner = comparison.get("winner")
         metric = str(comparison.get("metric") or "재무 수치")
-        if largest_period:
-            lines.append(f"따라서 {largest_period}년 {metric}이 더 큽니다.")
-        elif winner:
-            lines.append(f"따라서 {winner}의 {metric}이 더 큽니다.")
         calculations = comparison.get("calculations")
         calculation_rows = [item for item in calculations if isinstance(item, Mapping)] if isinstance(calculations, list) else []
+        # "X이 더 큽니다" is only a statement about the compared rows when they
+        # actually differ on that axis. A two-account ratio (부채비율 = 부채총계 /
+        # 자본총계) shares one company and one period, so neither a period winner
+        # nor a company winner exists and the sentence would assert nothing true.
+        distinct_periods = {str(row.get("period")) for row in rows}
+        distinct_companies = {str(row.get("company")) for row in rows}
+        has_ratio = any(item.get("operation") == "percentage_ratio" for item in calculation_rows)
+        if largest_period and len(distinct_periods) >= 2 and not has_ratio:
+            lines.append(f"따라서 {largest_period}년 {attach_particle(metric, '이')} 더 큽니다.")
+        elif winner and len(distinct_companies) >= 2:
+            lines.append(f"따라서 {winner}의 {attach_particle(metric, '이')} 더 큽니다.")
         difference = next((item for item in calculation_rows if item.get("operation") == "difference"), None)
         growth = next((item for item in calculation_rows if item.get("operation") == "growth_rate"), None)
         if difference is not None and difference.get("value") is not None:
@@ -2832,7 +2852,7 @@ class HcxFunctionCallingService:
             else:
                 company = str(ratio.get("company") or "")
                 prefix = f"{company}의 " if company else ""
-                lines.append(f"{prefix}{metric}은 약 {ratio_value:.2f}%입니다.")
+                lines.append(f"{prefix}{attach_particle(metric, '은')} 약 {ratio_value:.2f}%입니다.")
         identity = comparison.get("accounting_identity")
         if isinstance(identity, Mapping):
             right_side = format_financial_value(
@@ -2842,7 +2862,7 @@ class HcxFunctionCallingService:
                 identity.get("difference"), 1, identity.get("unit") or "KRW",
             )
             if right_side and identity.get("status") == "matches":
-                lines.append(f"부채총계와 자본총계의 합은 {right_side}으로 자산총계와 일치합니다.")
+                lines.append(f"부채총계와 자본총계의 합은 {attach_particle(right_side, '으로')} 자산총계와 일치합니다.")
             elif right_side and difference_value:
                 lines.append(
                     f"부채총계와 자본총계의 합은 {right_side}이며, "
@@ -2901,8 +2921,8 @@ class HcxFunctionCallingService:
         subject = " ".join(item for item in (company, account) if item)
         answer = (
             f"질문의 {claimed_ko} 전제는 공시 수치와 일치하지 않습니다. "
-            f"{subject}은 {previous_period}년 {previous_display}에서 "
-            f"{current_period}년 {current_display}로 {actual_ko}했습니다. "
+            f"{attach_particle(subject, '은')} {previous_period}년 {previous_display}에서 "
+            f"{current_period}년 {attach_particle(current_display, '으로')} {actual_ko}했습니다. "
             f"따라서 {claimed_ko} 원인은 검색하지 않았습니다."
         )
         return HcxGeneratedAnswer(answer, tuple(available_evidence_ids[:5]))
