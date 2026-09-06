@@ -41,6 +41,38 @@ print(response.json()["answer"])
 
 서버 상태는 `curl http://101.79.31.221:8000/health`로 확인합니다. 요청 제한은 IP당 분당 120건·동시 4건이며 초과 시 `429`, 서버 전체 동시 8건 초과 시 `503`을 반환합니다. 현재 서빙 중인 이미지는 이 저장소의 commit `8d238b4`에서 빌드한 `sha256:b6af20d65948c64f572e08b0d8dd603516e311d0aede81f0159bce587de390e1`이며, base·overlay·검색 인덱스는 read-only로 mount합니다. 자세한 요청·응답·오류 계약은 [평가용 API 서버 명세](docs/submission/api-server-spec.md), 운영 절차는 [contest-server 런북](docs/operations/contest-server.md)에 있습니다.
 
+## 환경 구성과 실행
+
+Python 3.11 이상이 필요합니다. 답변에 쓰는 세 개의 데이터 파일(불변 base SQLite · overlay · 검색 인덱스)은 용량 때문에 Git에 넣지 않고 별도 링크로 전달하며, 아래 경로에 배치한 뒤 실행합니다.
+
+```bash
+# 1) 설치
+pip install -e ".[agent]"
+
+# 2) 환경 변수 — 실제 값은 커밋하지 않습니다
+cp .env.example .env      # DISCLOSURE_* 경로와 CLOVASTUDIO_API_KEY를 채웁니다
+
+# 3) 직접 실행
+PYTHONPATH=src disclosure-agent serve      # http://127.0.0.1:8000
+
+# 4) 또는 Docker Compose 실행 (운영과 동일한 read-only mount)
+docker compose up -d disclosure-agent
+docker compose logs --tail 200 disclosure-agent
+docker compose down                        # 중지
+```
+
+배치할 데이터와 검증값은 다음과 같습니다. 파일을 놓은 뒤 `GET /health`가 `ready=true`와 `base_attested`·`overlay_attested`·`search_index_ready`를 모두 `true`로 보고해야 질문을 받을 수 있습니다.
+
+| 파일 | 크기 · SHA-256 |
+|---|---|
+| 불변 base SQLite | `38,773,280,768` bytes · `b8fb3be8b90d0cb1d8bc2491bee575aee632d29cc9bade21070e7e7b51646563` |
+| live overlay | `a4491f2072766fcc11db65bad8c592c78696aea87132f3e7420857924938cb55` |
+| live 검색 인덱스 | `e223a19fcbefd4757a39b71e2b73eed7c81d01f2b54d74ca82e761dac10a8793` |
+
+회귀 테스트는 `PYTHONPATH=src python -m pytest -q`로 실행하며 `944 passed, 2 skipped, 267 subtests`가 기준입니다. 롤백을 포함한 운영 절차는 [contest-server 런북](docs/operations/contest-server.md)에 있습니다.
+
+> 소스에 보이는 `.../v1/openai` 문자열은 **CLOVA Studio가 제공하는 OpenAI 호환 엔드포인트 경로**입니다. HyperCLOVA X 외의 LLM을 호출하는 코드 경로는 없습니다.
+
 ## 현재 개발 상태와 인수인계
 
 > **Judge Stress V2 인수인계:** Task 1~8의 로컬 구현과 회귀가 완료되었습니다. Task 8은 원시 case 결과를 재검산하는 통합 release gate와 동일-image 8001→8000 배포/rollback 절차를 구현했지만, 현재 판정은 의도적으로 `BLOCKED_HARD_GATE`입니다. private holdout·실제 staging/provider·신뢰 앵커가 없고 Sparse Recall@20이 `0.487179... < 0.95`이므로 운영 승격은 실행하지 않았습니다. 다음 작업자는 [2026-09-02 Judge Stress V2 핸드오프](docs/handoffs/2026-09-02-judge-stress-v2-handoff.md)를 읽고 차단 항목을 해소한 뒤 같은 gate를 다시 실행하세요.
