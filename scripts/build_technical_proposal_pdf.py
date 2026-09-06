@@ -344,7 +344,7 @@ def cover_story(styles: dict[str, ParagraphStyle]) -> list[Flowable]:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
     ]))
     facts = Table([
-        ["38.8GB", "300/300", "0건", "944 tests"],
+        ["38.8GB", "300/300", "0건", "946 tests"],
         ["immutable corpus", "deterministic stress", "hard safety failures", "Python regression"],
     ], colWidths=[38.75 * mm] * 4)
     facts.setStyle(TableStyle([
@@ -424,7 +424,7 @@ def build_pdf(source: Path, output: Path) -> None:
         topMargin=20 * mm,
         bottomMargin=18 * mm,
         title="MIRA 근거 검증형 공시 AI Agent 기술제안서",
-        author="미래에셋 공시 Agent 팀",
+        author="신비복숭아 (김세민 · 조성찬 · 이정민)",
         subject="제10회 2026 미래에셋증권 AI Festival 공시 Agent",
     )
     story = cover_story(styles)

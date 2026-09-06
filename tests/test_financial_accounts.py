@@ -273,3 +273,37 @@ class FinancialAccountRoutingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KoreanParticleTests(unittest.TestCase):
+    def test_particle_follows_the_final_sound_of_account_labels(self) -> None:
+        from disclosure_db.financial_accounts import attach_particle
+
+        cases = {
+            ("자본총계", "은"): "자본총계는",
+            ("부채총계", "은"): "부채총계는",
+            ("매출액", "은"): "매출액은",
+            ("영업이익", "은"): "영업이익은",
+            ("부채비율", "이"): "부채비율이",
+            ("영업이익률", "이"): "영업이익률이",
+            ("삼성전자 2025년 연결 매출액 (주30)(연결)", "은"): "삼성전자 2025년 연결 매출액 (주30)(연결)은",
+            ("333조 6,059억 3,800만 원", "으로"): "333조 6,059억 3,800만 원으로",
+            ("2조 원", "으로"): "2조 원으로",
+            ("25%", "은"): "25%는",
+            ("ROE", "은"): "ROE는",
+            ("EBITDA", "은"): "EBITDA는",
+            ("2024", "은"): "2024는",
+            ("2025년 3분기", "은"): "2025년 3분기는",
+            ("2021", "으로"): "2021로",
+            ("Q3", "으로"): "Q3으로",
+        }
+        for (word, particle), expected in cases.items():
+            with self.subTest(word=word, particle=particle):
+                self.assertEqual(attach_particle(word, particle), expected)
+
+    def test_unreadable_ending_shows_both_forms_instead_of_guessing(self) -> None:
+        from disclosure_db.financial_accounts import attach_particle
+
+        self.assertEqual(attach_particle("…", "은"), "…은(는)")
+        with self.assertRaises(ValueError):
+            attach_particle("매출액", "에서")

@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 
 from .agent_contracts import AnswerDraft, EvidenceBundle, to_jsonable
+from .financial_accounts import attach_particle
 
 
 UNANSWERABLE_TEXT = "검증 가능한 근거가 충분하지 않아 답변할 수 없습니다."
@@ -128,7 +129,7 @@ class DeterministicGenerator:
                 for index, item in enumerate(companies, 1)
             )
             label = "순위" if aggregate_operation == "rank" else "기업 목록"
-            answer = f"검증된 전체 기업 기준 {label}은 {rows}입니다."
+            answer = f"검증된 전체 기업 기준 {attach_particle(label, '은')} {rows}입니다."
         elif bundle.calculation and bundle.calculation.value is not None:
             numeric_values = [str(bundle.calculation.value)]
             answer = f"계산 결과는 {bundle.calculation.value} {bundle.calculation.unit or ''}입니다.".strip()

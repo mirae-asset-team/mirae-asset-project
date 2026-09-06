@@ -404,7 +404,15 @@ class AgentRuntimeTests(unittest.TestCase):
                     "rcept_no": "20260310002820",
                     "report_name": "사업보고서 (2025.12)",
                     "filed_at": "2026-03-10",
-                }
+                },
+                # A second evidence cell of the same filing (two operands of a
+                # ratio) must not repeat the disclosure in retrieved_context.
+                {
+                    "evidence_id": "ev2",
+                    "rcept_no": "20260310002820",
+                    "report_name": "사업보고서 (2025.12)",
+                    "filed_at": "2026-03-10",
+                },
             ],
         )
         abstained = SimpleNamespace(
@@ -469,6 +477,7 @@ class AgentRuntimeTests(unittest.TestCase):
                 self.assertEqual(body["answer"], answered.answer)
                 self.assertIn("20260310002820", body["retrieved_context"])
                 self.assertIn("사업보고서 (2025.12)", body["retrieved_context"])
+                self.assertEqual(body["retrieved_context"].count("접수번호=20260310002820"), 1)
                 self.assertIn("검증된 근거로 답변 생성", body["think_trace"])
                 self.assertEqual(calls, [])
 

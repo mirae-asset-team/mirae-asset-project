@@ -392,7 +392,7 @@ class FinancialAccountCatalog:
             warning = f"{account.label_ko}의 범위 또는 세부 계정을 확인해야 합니다."
         elif account.support_level == "unsupported":
             status = "unsupported"
-            warning = f"{account.label_ko}은 현재 검증 데이터와 로직으로 지원하지 않습니다."
+            warning = f"{attach_particle(account.label_ko, '은')} 현재 검증 데이터와 로직으로 지원하지 않습니다."
         return FinancialAccountResolution(
             status=status,
             canonical_id=account.canonical_id,
@@ -463,3 +463,64 @@ def resolve_financial_account(
     catalog: FinancialAccountCatalog | None = None,
 ) -> FinancialAccountResolution:
     return (catalog or load_financial_account_catalog()).resolve(value)
+
+
+_PARTICLE_PAIRS: dict[str, tuple[str, str]] = {
+    # requested form -> (form after a final consonant, form after a vowel)
+    "은": ("은", "는"), "는": ("은", "는"),
+    "이": ("이", "가"), "가": ("이", "가"),
+    "을": ("을", "를"), "를": ("을", "를"),
+    "과": ("과", "와"), "와": ("과", "와"),
+    "으로": ("으로", "로"), "로": ("으로", "로"),
+}
+# Digits and Latin letters as they are read aloud in Korean: 1(일) 3(삼) 6(육)
+# 7(칠) 8(팔) 0(영) and L(엘) M(엠) N(엔) R(알) end in a consonant.
+_DIGIT_FINAL = {"0": "ㅇ", "1": "ㄹ", "3": "ㅁ", "6": "ㄱ", "7": "ㄹ", "8": "ㄹ"}
+_LATIN_FINAL = {"l": "ㄹ", "m": "ㅁ", "n": "ㄴ", "r": "ㄹ"}
+_TRAILING_IGNORED = " )]}\"'》」』%"
+
+
+def _final_consonant(word: str) -> str | None:
+    """Return the final consonant of the last pronounceable character.
+
+    ``""`` means the syllable ends in a vowel; ``None`` means unknown.
+    """
+    stripped = word.rstrip(_TRAILING_IGNORED)
+    if not stripped:
+        return None
+    last = stripped[-1]
+    code = ord(last)
+    if 0xAC00 <= code <= 0xD7A3:
+        index = (code - 0xAC00) % 28
+        if index == 0:
+            return ""
+        return "ㄹ" if index == 8 else "x"
+    if last.isdigit():
+        return _DIGIT_FINAL.get(last, "")
+    if last.isascii() and last.isalpha():
+        return _LATIN_FINAL.get(last.lower(), "")
+    return None
+
+
+def attach_particle(word: object, particle: str) -> str:
+    """Append a Korean particle (은/는, 이/가, 을/를, 과/와, 으로/로) to ``word``.
+
+    Account labels come from disclosure tables and are rendered into
+    deterministic answers, so the particle has to follow the label's final
+    sound (``자본총계는``, ``매출액은``) instead of a fixed template. When the
+    final sound cannot be read (symbols only), both forms are shown so no
+    wrong particle is asserted.
+    """
+    text = str(word)
+    pair = _PARTICLE_PAIRS.get(particle)
+    if pair is None:
+        raise ValueError(f"unsupported particle: {particle!r}")
+    consonant_form, vowel_form = pair
+    final = _final_consonant(text)
+    if final is None:
+        return f"{text}{consonant_form}({vowel_form})"
+    if final == "":
+        return f"{text}{vowel_form}"
+    if consonant_form == "으로" and final == "ㄹ":
+        return f"{text}{vowel_form}"
+    return f"{text}{consonant_form}"

@@ -407,6 +407,14 @@ class HcxFunctionCallingTests(unittest.TestCase):
         self.assertEqual(
             sorted(calculations[0]["evidence_ids"]), ["ev-부채총계", "ev-자본총계"],
         )
+        # One company and one period: there is no "larger period", and the
+        # particle follows the account label (자본총계는 / 부채총계는).
+        self.assertIsNone(result.tool_response["data"]["comparison"].get("largest_period"))
+        self.assertNotIn("더 큽니다", result.answer)
+        self.assertIn("자본총계는", result.answer)
+        self.assertIn("부채총계는", result.answer)
+        self.assertNotIn("총계은", result.answer)
+        self.assertIn("부채비율은 약 25.00%입니다", result.answer)
 
     def test_multi_company_ratio_calculates_each_company_without_provider(self) -> None:
         class MultiCompanyAccountRegistry(AccountFinancialRegistry):
@@ -1016,6 +1024,7 @@ class HcxFunctionCallingTests(unittest.TestCase):
         )
         self.assertEqual(result.tool_response["data"]["comparison"]["largest_period"], "2025")
         self.assertIn("2025년 매출이 더 큽니다", result.answer)
+        self.assertIn("2024년 매출은 ", result.answer)
         self.assertIn("50.00%", result.answer)
         self.assertNotIn("예상", result.answer)
         self.assertFalse(result.metadata["tool_selection_called"])
